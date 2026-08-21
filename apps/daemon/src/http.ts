@@ -5,7 +5,8 @@ import { DAEMON_VERSION, type DaemonConfig } from "./config";
 import {
   destroyServer,
   getLogs,
-  installServer,
+  startInstallServer,
+  getInstallStatus,
   liveResources,
   pingDocker,
   powerServer,
@@ -114,7 +115,11 @@ export function createDaemonApp(config: DaemonConfig) {
 
   app.post("/v1/servers/:uuid/install", async (c) => {
     const spec = asInstallSpec((await c.req.json().catch(() => ({}))) as Record<string, unknown>, c.req.param("uuid"));
-    const data = await installServer(config, spec);
+    const data = await startInstallServer(config, spec);
+    return c.json({ ok: true, data });
+  });
+  app.post("/v1/servers/:uuid/install-status", async (c) => {
+    const data = await getInstallStatus(config, c.req.param("uuid"));
     return c.json({ ok: true, data });
   });
 

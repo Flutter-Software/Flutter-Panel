@@ -67,11 +67,12 @@ async function daemonFetch(
   if (!isNodeOnline(node.lastHeartbeatAt) || !node.daemonListenUrl) {
     throw FlutterError.unavailable("Node daemon is offline");
   }
+  const timeoutMs = spec.timeoutMs ?? 60_000;
   const ticket = signDaemonRequest(env().DAEMON_REQUEST_SECRET, {
     nodeId: node._id.toString(),
     serverUuid: spec.uuid,
     op: spec.op,
-    ttlMs: spec.timeoutMs ?? 60_000,
+    ttlMs: Math.min(timeoutMs, 120_000),
   });
   const url = `${node.daemonListenUrl.replace(/\/+$/, "")}/v1/servers/${spec.uuid}/${spec.path}`;
   let response: Response;
@@ -84,7 +85,7 @@ async function daemonFetch(
         Accept: "application/json",
       },
       body: JSON.stringify(spec.body ?? {}),
-      signal: AbortSignal.timeout(spec.timeoutMs ?? 60_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     throw FlutterError.unavailable(
@@ -109,13 +110,28 @@ async function loadNode(nodeId: string) {
 
 export async function installOnNode(nodeId: string, spec: InstallSpec) {
   const node = await loadNode(nodeId);
-  return daemonFetch(node, {
+  await daemonFetch(node, {
     uuid: spec.uuid,
     op: "install",
     path: "install",
     body: spec,
-    timeoutMs: 600_000,
+    timeoutMs: 30_000,
   });
+  const deadline = Date.now() + 6 * 60 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const data = (await daemonFetch(node, {
+      uuid: spec.uuid,
+      op: "install",
+      path: "install-status",
+      timeoutMs: 15_000,
+    })) as { status?: string; error?: string } | undefined;
+    if (data?.status === "ok") return data;
+    if (data?.status === "failed") {
+      throw FlutterError.unavailable(data.error || "Install script failed");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  throw FlutterError.unavailable("Install timed out after 6 hours");
 }
 
 export async function powerOnNode(nodeId: string, spec: InstallSpec, action: PowerAction) {

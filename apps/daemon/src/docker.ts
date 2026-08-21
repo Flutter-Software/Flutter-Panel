@@ -339,6 +339,7 @@ async function runInstallScript(root: string, spec: InstallSpec) {
   const script = spec.installScript?.trim();
   if (!script) return;
   const image = spec.installImage?.trim() || "alpine:3.20";
+  notice(spec.uuid, `Pulling install image ${image}…`);
   await pullImage(image);
   const env = runtimeEnvironment(spec);
   const body = substitute(script, env);
@@ -355,12 +356,23 @@ async function runInstallScript(root: string, spec: InstallSpec) {
     HostConfig: {
       Binds: [`${bindPath(root)}:/mnt/server`],
       AutoRemove: false,
+      NetworkMode: "bridge",
     },
     Labels: { "flutter.server": spec.uuid, "flutter.role": "install" },
   });
+  let stopLogs: (() => void) | undefined;
   try {
+    notice(spec.uuid, "Running install script…");
     await container.start();
+    const stream = (await container.logs({
+      follow: true,
+      stdout: true,
+      stderr: true,
+    })) as NodeJS.ReadableStream & { destroy?: () => void };
+    stopLogs = pipeInstallLogs(stream, spec.uuid);
     const result = await container.wait();
+    stopLogs?.();
+    stopLogs = undefined;
     if (result.StatusCode !== 0) {
       let logs = "";
       try {
@@ -371,8 +383,66 @@ async function runInstallScript(root: string, spec: InstallSpec) {
       throw new Error(`Install script exited ${result.StatusCode}${logs ? `\n${logs}` : ""}`);
     }
   } finally {
+    stopLogs?.();
     await container.remove({ force: true }).catch(() => undefined);
   }
+}
+
+type InstallJobStatus = {
+  status: "installing" | "ok" | "failed";
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+};
+
+const installJobs = new Map<string, Promise<void>>();
+
+function installStatusPath(root: string) {
+  return join(flutterDir(root), "install-status.json");
+}
+
+async function writeInstallStatus(root: string, status: InstallJobStatus) {
+  await mkdir(flutterDir(root), { recursive: true });
+  await writeFile(installStatusPath(root), `${JSON.stringify(status, null, 2)}\n`, "utf8");
+}
+
+async function readInstallStatus(root: string): Promise<InstallJobStatus | null> {
+  try {
+    return JSON.parse(await readFile(installStatusPath(root), "utf8")) as InstallJobStatus;
+  } catch {
+    return null;
+  }
+}
+
+function pipeInstallLogs(stream: NodeJS.ReadableStream & { destroy?: () => void }, uuid: string) {
+  let leftover: Buffer = Buffer.alloc(0);
+  let text = "";
+  let lastAt = 0;
+  const emit = (line: string) => {
+    const message = stripAttachNoise(line).replace(/\s+/g, " ").trim();
+    if (!message) return;
+    const now = Date.now();
+    const progress = /\d+%|\d+(\.\d+)?\s*(MiB|GiB|KiB|MB|GB|kB)/i.test(message);
+    if (progress && now - lastAt < 400) return;
+    lastAt = now;
+    notice(uuid, message.slice(0, 500));
+  };
+  const onData = (chunk: Buffer | string) => {
+    const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const buf = leftover.length ? Buffer.concat([leftover, incoming]) : incoming;
+    const decoded = decodeDockerFrames(buf);
+    leftover = decoded.rest;
+    text += decoded.text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const parts = text.split("\n");
+    text = parts.pop() ?? "";
+    for (const line of parts) emit(line);
+  };
+  stream.on("data", onData);
+  return () => {
+    stream.off("data", onData);
+    stream.destroy?.();
+    if (text.trim()) emit(text);
+  };
 }
 
 export async function installServer(config: DaemonConfig, spec: InstallSpec) {
@@ -381,9 +451,59 @@ export async function installServer(config: DaemonConfig, spec: InstallSpec) {
   await mkdir(root, { recursive: true });
   const next = { ...spec, dockerImage: image };
   await writeEggFiles(root, next);
+  notice(spec.uuid, `Pulling ${image}…`);
   await pullImage(image);
   await runInstallScript(root, next);
   return { installed: true, uuid: spec.uuid };
+}
+
+export async function startInstallServer(config: DaemonConfig, spec: InstallSpec) {
+  const root = serverRoot(config, spec.uuid);
+  if (installJobs.has(spec.uuid)) {
+    return { started: true, uuid: spec.uuid };
+  }
+  const startedAt = new Date().toISOString();
+  await mkdir(root, { recursive: true });
+  await writeInstallStatus(root, { status: "installing", startedAt });
+  const job = installServer(config, spec)
+    .then(async () => {
+      await writeInstallStatus(root, {
+        status: "ok",
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+      notice(spec.uuid, "Install finished.");
+    })
+    .catch(async (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      await writeInstallStatus(root, {
+        status: "failed",
+        error: message,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+      });
+      notice(spec.uuid, `Install failed: ${message.slice(0, 400)}`);
+    })
+    .finally(() => {
+      installJobs.delete(spec.uuid);
+    });
+  installJobs.set(spec.uuid, job);
+  return { started: true, uuid: spec.uuid };
+}
+
+export async function getInstallStatus(config: DaemonConfig, uuid: string): Promise<InstallJobStatus> {
+  const root = serverRoot(config, uuid);
+  const status = await readInstallStatus(root);
+  if (!status) return { status: "failed", error: "Install has not started", startedAt: new Date().toISOString() };
+  if (status.status === "installing" && !installJobs.has(uuid)) {
+    return {
+      ...status,
+      status: "failed",
+      error: status.error || "Daemon restarted during install",
+      finishedAt: status.finishedAt || new Date().toISOString(),
+    };
+  }
+  return status;
 }
 
 export async function destroyServer(config: DaemonConfig, uuid: string) {
@@ -866,7 +986,7 @@ function decodeDockerLogs(buffer: Buffer) {
 }
 
 function createOutputParser(tty: boolean, onLine: (line: string) => void) {
-  let leftover = Buffer.alloc(0);
+  let leftover: Buffer = Buffer.alloc(0);
   let text = "";
   const flushLine = (line: string) => {
     const formatted = formatDockerLogLine(line);
