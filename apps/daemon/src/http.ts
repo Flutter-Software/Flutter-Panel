@@ -26,6 +26,10 @@ import {
 } from "./files";
 import { createBackup, deleteBackup, listBackups, restoreBackup } from "./backups";
 
+function unixNewlines(value: string) {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 function asInstallSpec(body: Record<string, unknown>, uuid: string): InstallSpec {
   const allocation = (body.allocation ?? {}) as { ip?: string; port?: number };
   const limits = (body.limits ?? {}) as {
@@ -47,7 +51,7 @@ function asInstallSpec(body: Record<string, unknown>, uuid: string): InstallSpec
     dockerImage: String(body.dockerImage ?? "busybox:1.36"),
     startup: String(body.startup ?? ""),
     stopCommand: String(body.stopCommand ?? "stop"),
-    installScript: String(body.installScript ?? ""),
+    installScript: unixNewlines(String(body.installScript ?? "")),
     installImage: String(body.installImage ?? "alpine:3.20"),
     environment,
     limits: {

@@ -12,6 +12,10 @@ function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
+function unixNewlines(value: string) {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 function assertObjectId(id: string, label: string) {
   if (!/^[a-fA-F0-9]{24}$/.test(id)) throw FlutterError.notFound(`${label} not found`);
 }
@@ -163,7 +167,10 @@ export async function createEgg(body: unknown) {
   }
   const nest = await Nest.findById(parsed.data.nestId);
   if (!nest) throw FlutterError.notFound("Nest not found");
-  const row = await Egg.create(parsed.data);
+  const row = await Egg.create({
+    ...parsed.data,
+    installScript: unixNewlines(parsed.data.installScript ?? ""),
+  });
   return publicEgg(row);
 }
 
@@ -185,7 +192,7 @@ export async function updateEgg(id: string, body: unknown) {
   if (parsed.data.dockerImage !== undefined) egg.dockerImage = parsed.data.dockerImage;
   if (parsed.data.startup !== undefined) egg.startup = parsed.data.startup;
   if (parsed.data.stopCommand !== undefined) egg.stopCommand = parsed.data.stopCommand;
-  if (parsed.data.installScript !== undefined) egg.installScript = parsed.data.installScript;
+  if (parsed.data.installScript !== undefined) egg.installScript = unixNewlines(parsed.data.installScript);
   if (parsed.data.installImage !== undefined) egg.installImage = parsed.data.installImage;
   if (parsed.data.variables !== undefined) {
     egg.variables = parsed.data.variables;
@@ -272,7 +279,7 @@ function pickInstall(raw: Record<string, unknown>): { script: string; image: str
   const scripts = (raw.scripts ?? {}) as Record<string, unknown>;
   const installation = (scripts.installation ?? {}) as Record<string, unknown>;
   return {
-    script: asString(installation.script),
+    script: unixNewlines(asString(installation.script)),
     image: asString(installation.container, "alpine:3.20") || "alpine:3.20",
   };
 }

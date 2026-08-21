@@ -335,18 +335,29 @@ async function writeEggFiles(root: string, spec: InstallSpec) {
   );
 }
 
+function unixNewlines(value: string) {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function installInterpreter(script: string, image: string) {
+  const name = image.toLowerCase();
+  if (/debian|ubuntu|installers/.test(name) || /^#!.*\bbash\b/m.test(script)) return "bash";
+  if (/alpine/.test(name)) return "ash";
+  return "sh";
+}
+
 async function runInstallScript(root: string, spec: InstallSpec) {
-  const script = spec.installScript?.trim();
+  const script = unixNewlines(spec.installScript ?? "").trim();
   if (!script) return;
   const image = spec.installImage?.trim() || "alpine:3.20";
   notice(spec.uuid, `Pulling install image ${image}…`);
   await pullImage(image);
   const env = runtimeEnvironment(spec);
-  const body = substitute(script, env);
+  const body = unixNewlines(substitute(script, env)).replace(/^\uFEFF/, "");
   const contents = body.startsWith("#!") ? `${body}\n` : `#!/bin/sh\nset -e\n${body}\n`;
   await mkdir(flutterDir(root), { recursive: true });
-  await writeFile(join(flutterDir(root), "install.sh"), contents, "utf8");
-  const shell = /^#!.*bash/m.test(contents) || /debian|ubuntu/.test(image) ? "bash" : "sh";
+  await writeFile(join(flutterDir(root), "install.sh"), contents, { encoding: "utf8" });
+  const shell = installInterpreter(contents, image);
 
   const container = await docker.createContainer({
     Image: image,
