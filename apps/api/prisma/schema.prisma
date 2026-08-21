@@ -146,6 +146,9 @@ model PanelSettings {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   key       String   @unique
   smtp      Json?
+  siteName  String    @default("Flutter")
+  logoMime  String?
+  logo      Bytes?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

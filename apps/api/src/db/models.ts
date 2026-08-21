@@ -134,6 +134,9 @@ const panelSettingsSchema = new Schema(
       fromEmail: { type: String, default: "" },
       fromName: { type: String, default: "Flutter" },
     },
+    siteName: { type: String, default: "Flutter" },
+    logoMime: { type: String, default: null },
+    logo: { type: Buffer, default: null },
   },
   { timestamps: true },
 );

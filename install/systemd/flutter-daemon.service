@@ -1,0 +1,24 @@
+[Unit]
+Description=Flutter node daemon
+After=network-online.target docker.service flutter-api.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=flutter
+Group=flutter
+SupplementaryGroups=docker
+WorkingDirectory=/opt/flutter
+EnvironmentFile=/opt/flutter/.env
+Environment=NODE_ENV=production
+Environment=DAEMON_CONFIG=/opt/flutter/apps/daemon/data/config.json
+Environment=DAEMON_DATA_DIR=/var/lib/flutter
+ExecStart=/usr/bin/npm run start -w @flutter-software/daemon
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+LimitNOFILE=65535
+SyslogIdentifier=flutter-daemon
+
+[Install]
+WantedBy=multi-user.target

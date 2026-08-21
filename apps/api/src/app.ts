@@ -370,6 +370,14 @@ export function createApp() {
     });
   });
 
+  app.get("/branding", async (c) => c.json({ data: await settings.getPublicBranding() }));
+  app.get("/branding/logo", async (c) => {
+    const file = await settings.getLogo();
+    if (!file) return c.body("", 404);
+    c.header("Content-Type", file.mime);
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+    return c.body(new Uint8Array(file.data));
+  });
   app.get("/admin/settings", async (c) => {
     await requireAdmin(c);
     return c.json({ data: await settings.getSettings() });
@@ -377,6 +385,10 @@ export function createApp() {
   app.patch("/admin/settings", async (c) => {
     await requireAdmin(c);
     return c.json({ data: await settings.updateSettings(await c.req.json()) });
+  });
+  app.patch("/admin/settings/branding", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await settings.updateBranding(await c.req.json()) });
   });
   app.post("/admin/settings/smtp/test", async (c) => {
     await requireAdmin(c);

@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@flutter-software/shared": "file:../../packages/shared",
-    "@mantine/core": "^9.5.1",
-    "@mantine/hooks": "^9.5.1",
+    "@mantine/core": "^8.3.18",
+    "@mantine/hooks": "^8.3.18",
     "@monaco-editor/react": "^4.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.525.0",

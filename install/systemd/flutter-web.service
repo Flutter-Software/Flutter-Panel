@@ -1,0 +1,21 @@
+[Unit]
+Description=Flutter panel web
+After=network-online.target flutter-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=flutter
+Group=flutter
+WorkingDirectory=/opt/flutter
+EnvironmentFile=/opt/flutter/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start -w @flutter-software/web
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+LimitNOFILE=65535
+SyslogIdentifier=flutter-web
+
+[Install]
+WantedBy=multi-user.target

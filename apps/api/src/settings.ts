@@ -1,9 +1,11 @@
-import { FlutterError, smtpSettingsSchema, smtpTestSchema, type SmtpEncryption } from "@flutter-software/shared";
+import { FlutterError, brandingUpdateSchema, smtpSettingsSchema, smtpTestSchema, type SmtpEncryption } from "@flutter-software/shared";
 import { PanelSettings } from "./db/models";
 import { env } from "./env";
 import { resolveSmtp, sendMail, verifySmtp, type SmtpConfig } from "./mail";
 
 const KEY = "panel";
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_SITE_NAME = "Flutter";
 
 type SmtpFields = {
   enabled: boolean;
@@ -66,16 +68,70 @@ function publicSmtp(smtp: SmtpFields, resolved: SmtpConfig | null) {
 async function loadRow() {
   let row = await PanelSettings.findOne({ key: KEY });
   if (!row) {
-    row = await PanelSettings.create({ key: KEY, smtp: emptySmtp() });
+    row = await PanelSettings.create({ key: KEY, smtp: emptySmtp(), siteName: DEFAULT_SITE_NAME });
   }
   return row;
+}
+
+function siteNameOf(row: { siteName?: string | null } | null | undefined) {
+  const name = row?.siteName?.trim();
+  return name || DEFAULT_SITE_NAME;
+}
+
+function decodeLogoData(raw: string) {
+  const comma = raw.indexOf(",");
+  const payload = comma >= 0 ? raw.slice(comma + 1) : raw;
+  const buffer = Buffer.from(payload, "base64");
+  if (!buffer.length) throw FlutterError.validation("Logo file is empty");
+  if (buffer.length > LOGO_MAX_BYTES) throw FlutterError.validation("Logo must be 2 MB or smaller");
+  return buffer;
+}
+
+function logoBuffer(value: unknown): Buffer | null {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return value.byteLength ? value : null;
+  if (value instanceof Uint8Array) return value.byteLength ? Buffer.from(value) : null;
+  return null;
+}
+
+function brandingDto(row: {
+  siteName?: string | null;
+  logo?: unknown;
+  logoMime?: string | null;
+  updatedAt?: Date;
+}) {
+  const logo = logoBuffer(row.logo);
+  const hasLogo = Boolean(logo && row.logoMime);
+  const version = row.updatedAt ? row.updatedAt.getTime() : Date.now();
+  return {
+    siteName: siteNameOf(row),
+    hasLogo,
+    logoUrl: hasLogo ? `/api/v1/branding/logo?v=${version}` : null,
+  };
+}
+
+export async function getSiteName() {
+  const row = await PanelSettings.findOne({ key: KEY });
+  return siteNameOf(row);
+}
+
+export async function getPublicBranding() {
+  const row = await PanelSettings.findOne({ key: KEY });
+  return brandingDto(row ?? { siteName: DEFAULT_SITE_NAME });
+}
+
+export async function getLogo() {
+  const row = await PanelSettings.findOne({ key: KEY });
+  const data = logoBuffer(row?.logo);
+  if (!data || !row?.logoMime) return null;
+  return { mime: String(row.logoMime), data };
 }
 
 export async function getSettings() {
   const row = await loadRow();
   const smtp = fromDoc(row.smtp as Record<string, unknown> | undefined);
   const resolved = await resolveSmtp();
-  return { smtp: publicSmtp(smtp, resolved) };
+  return { smtp: publicSmtp(smtp, resolved), branding: brandingDto(row) };
 }
 
 export async function updateSettings(body: unknown) {
@@ -97,7 +153,23 @@ export async function updateSettings(body: unknown) {
   row.markModified("smtp");
   await row.save();
   const resolved = await resolveSmtp();
-  return { smtp: publicSmtp(next, resolved) };
+  return { smtp: publicSmtp(next, resolved), branding: brandingDto(row) };
+}
+
+export async function updateBranding(body: unknown) {
+  const parsed = brandingUpdateSchema.safeParse(body);
+  if (!parsed.success) throw FlutterError.validation("Invalid branding", parsed.error.flatten());
+  const row = await loadRow();
+  row.siteName = parsed.data.siteName.trim() || DEFAULT_SITE_NAME;
+  if (parsed.data.logo === null) {
+    row.logo = null;
+    row.logoMime = null;
+  } else if (parsed.data.logo) {
+    row.logo = decodeLogoData(parsed.data.logo.data);
+    row.logoMime = parsed.data.logo.mime;
+  }
+  await row.save();
+  return { branding: brandingDto(row) };
 }
 
 export async function testSmtp(body: unknown) {
@@ -140,9 +212,9 @@ export async function testSmtp(body: unknown) {
     await sendMail(
       {
         to: parsed.data.to,
-        subject: "Flutter SMTP test",
-        text: "This is a test message from your Flutter panel. SMTP is working.",
-        html: "<p>This is a test message from your Flutter panel. SMTP is working.</p>",
+        subject: `${siteNameOf(row)} SMTP test`,
+        text: `This is a test message from ${siteNameOf(row)}. SMTP is working.`,
+        html: `<p>This is a test message from ${siteNameOf(row)}. SMTP is working.</p>`,
       },
       config,
     );

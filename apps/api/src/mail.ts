@@ -42,7 +42,7 @@ export async function resolveSmtp(): Promise<SmtpConfig | null> {
       password: smtp.password ?? "",
       encryption: asEncryption(smtp.encryption),
       fromEmail: (smtp.fromEmail || smtp.username || "").trim(),
-      fromName: smtp.fromName?.trim() || "Flutter",
+      fromName: smtp.fromName?.trim() || (typeof row?.siteName === "string" && row.siteName.trim()) || "Flutter",
       source: "database",
     };
   }
@@ -57,7 +57,7 @@ export async function resolveSmtp(): Promise<SmtpConfig | null> {
     password: cfg.SMTP_PASS ?? "",
     encryption: port === 465 ? "tls" : "starttls",
     fromEmail: cfg.SMTP_FROM || cfg.SMTP_USER || "noreply@localhost",
-    fromName: "Flutter",
+    fromName: (typeof row?.siteName === "string" && row.siteName.trim()) || "Flutter",
     source: "env",
   };
 }
@@ -114,7 +114,9 @@ export async function sendSubuserInvite(options: {
   inviterName: string;
   url: string;
 }) {
-  const subject = `You're invited to ${options.serverName} on Flutter`;
+  const settings = await PanelSettings.findOne({ key: "panel" });
+  const siteName = (typeof settings?.siteName === "string" && settings.siteName.trim()) || "Flutter";
+  const subject = `You're invited to ${options.serverName} on ${siteName}`;
   const text = [
     `${options.inviterName} added you as a subuser on ${options.serverName}.`,
     "",

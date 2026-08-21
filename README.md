@@ -4,7 +4,38 @@ Self-hosted game-server control panel. **Flutter is the product name** — this 
 
 Stack: Next.js 15 dashboard, Hono API, MongoDB (Mongoose + Prisma), Redis, TypeScript daemon talking to the Docker Engine API.
 
-## Quick start
+## Install on Ubuntu 24.04
+
+On a fresh server (root):
+
+```bash
+apt-get update && apt-get install -y git
+git clone https://github.com/Flutter-Software/Flutter-Panel.git /usr/local/src/flutter-panel
+sudo bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh
+```
+
+The installer asks for a public URL, then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`. Open the URL it prints and create the first admin account.
+
+Non-interactive example:
+
+```bash
+sudo FLUTTER_URL=https://panel.example.com FLUTTER_EMAIL=you@example.com \
+  FLUTTER_LETSENCRYPT=1 bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh --yes
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--yes` | Do not prompt; use flags and `FLUTTER_*` env vars |
+| `--url URL` | Public panel URL (`http://IP` or `https://hostname`) |
+| `--letsencrypt` | Issue a Let's Encrypt certificate (hostname required) |
+| `--email EMAIL` | Contact email for Let's Encrypt |
+| `--no-nginx` | Skip nginx; panel listens on port 3010 |
+| `--no-daemon` | Panel only (attach a node later) |
+| `--force` | Allow distros other than Ubuntu 24.04 |
+
+After install: `systemctl status flutter-api flutter-web flutter-daemon`
+
+## Development
 
 ```bash
 docker compose up -d          # Mongo replica set + Redis

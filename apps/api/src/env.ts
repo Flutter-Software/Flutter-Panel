@@ -14,6 +14,7 @@ function emptyToUndef(value: unknown) {
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
+  HOST: z.string().default("0.0.0.0"),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   APP_URL: z.string().url(),

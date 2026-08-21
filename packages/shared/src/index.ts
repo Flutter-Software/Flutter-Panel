@@ -38,6 +38,7 @@ export {
   smtpEncryptionSchema,
   smtpSettingsSchema,
   smtpTestSchema,
+  brandingUpdateSchema,
   locationCreateSchema,
   locationUpdateSchema,
   nodeCreateSchema,

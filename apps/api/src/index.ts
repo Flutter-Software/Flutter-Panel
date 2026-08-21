@@ -18,8 +18,8 @@ async function main() {
     });
   }
   const { app, injectWebSocket } = createApp();
-  const server = serve({ fetch: app.fetch, port: env().PORT, hostname: "0.0.0.0" }, (info) => {
-    log("info", "api listening", { port: info.port });
+  const server = serve({ fetch: app.fetch, port: env().PORT, hostname: env().HOST }, (info) => {
+    log("info", "api listening", { host: env().HOST, port: info.port });
   });
   injectWebSocket(server);
 }

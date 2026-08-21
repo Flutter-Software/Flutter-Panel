@@ -109,6 +109,17 @@ export const smtpTestSchema = z.object({
   fromName: z.string().max(120).optional(),
 });
 
+export const brandingUpdateSchema = z.object({
+  siteName: z.string().trim().min(1).max(48),
+  logo: z
+    .object({
+      mime: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+      data: z.string().min(1).max(3_000_000),
+    })
+    .nullable()
+    .optional(),
+});
+
 export const locationCreateSchema = z.object({
   shortCode: z.string().min(1).max(16),
   description: z.string().max(120).optional().default(""),

@@ -17,6 +17,7 @@ const contents = `NODE_ENV=development
 APP_URL=http://localhost:3010
 API_INTERNAL_URL=http://127.0.0.1:4000
 PORT=4000
+HOST=0.0.0.0
 DATABASE_URL=mongodb://127.0.0.1:27017/flutter?replicaSet=rs0
 REDIS_URL=redis://127.0.0.1:6379
 SESSION_SECRET=${secret()}

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ColorSchemeScript, mantineHtmlProps } from "@mantine/core";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/components/auth-provider";
+import { BrandingProvider } from "@/components/branding-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -38,7 +39,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="bg-background font-sans text-foreground">
         <ThemeProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <BrandingProvider>
+            <AuthProvider>{children}</AuthProvider>
+          </BrandingProvider>
         </ThemeProvider>
       </body>
     </html>
