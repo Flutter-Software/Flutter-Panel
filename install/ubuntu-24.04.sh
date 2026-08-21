@@ -198,13 +198,56 @@ if [[ "$INSTALL_NGINX" -eq 1 ]]; then
   fi
 fi
 
+install_docker_apt_repo() {
+  install -m 0755 -d /etc/apt/keyrings
+  if [[ ! -f /etc/apt/keyrings/docker.asc ]]; then
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+  fi
+  local codename
+  codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")"
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${codename} stable" \
+    > /etc/apt/sources.list.d/docker.list
+  apt-get update -y
+}
+
+install_compose_binary() {
+  local arch gharch dest
+  arch="$(dpkg --print-architecture)"
+  case "$arch" in
+    amd64) gharch=x86_64 ;;
+    arm64) gharch=aarch64 ;;
+    *) die "Unsupported CPU architecture: ${arch}" ;;
+  esac
+  dest=/usr/local/lib/docker/cli-plugins/docker-compose
+  log "Installing Docker Compose from GitHub (${gharch})"
+  mkdir -p "$(dirname "$dest")" /usr/libexec/docker/cli-plugins
+  curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${gharch}" -o "$dest"
+  chmod +x "$dest"
+  ln -sfn "$dest" /usr/libexec/docker/cli-plugins/docker-compose
+}
+
 if ! command -v docker >/dev/null 2>&1; then
   log "Installing Docker Engine"
-  curl -fsSL https://get.docker.com | sh
+  if ! curl -fsSL https://get.docker.com | sh; then
+    warn "get.docker.com failed; using the Docker apt repository"
+    install_docker_apt_repo
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  fi
 fi
+
 if ! docker compose version >/dev/null 2>&1; then
-  apt-get install -y --no-install-recommends docker-compose-plugin
+  log "Installing Docker Compose plugin"
+  set +e
+  install_docker_apt_repo
+  apt-get install -y docker-compose-plugin
+  set -e
+  if ! docker compose version >/dev/null 2>&1; then
+    warn "docker-compose-plugin is not in apt; downloading Compose v2"
+    install_compose_binary
+  fi
 fi
+docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is not available"
 systemctl enable --now docker
 
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -p 'process.versions.node.split(".")[0]')" -lt "$NODE_MAJOR" ]]; then
