@@ -1,0 +1,123 @@
+"use client";
+
+import { use, useCallback, useEffect, useState } from "react";
+import { Button, Card } from "@/components/ui";
+import { api } from "@/lib/api";
+
+type Backup = { id: string; name: string; size: number; createdAt: string };
+
+function formatSize(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export default function BackupsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  const load = useCallback(() => {
+    return api<{ data: { backups: Backup[] } }>(`/api/v1/client/servers/${id}/backups`, {
+      method: "POST",
+      body: JSON.stringify({ action: "list" }),
+    })
+      .then((result) => setBackups(result.data.backups ?? []))
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
+  }, [id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function run(action: string, backupId?: string) {
+    setError(null);
+    setPending(true);
+    try {
+      await api(`/api/v1/client/servers/${id}/backups`, {
+        method: "POST",
+        body: JSON.stringify({ action, id: backupId }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Backup action failed");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Backups</h2>
+          <p className="text-sm text-muted-foreground">Archives stored on the node next to this server.</p>
+        </div>
+        <Button type="button" size="sm" disabled={pending} onClick={() => void run("create")}>
+          {pending ? "Working…" : "Create backup"}
+        </Button>
+      </div>
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      <Card className="overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-4 py-2.5 font-medium">Backup</th>
+              <th className="px-4 py-2.5 font-medium">Size</th>
+              <th className="px-4 py-2.5 font-medium">Created</th>
+              <th className="px-4 py-2.5 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {backups.length === 0 ? (
+              <tr>
+                <td className="px-4 py-6 text-muted-foreground" colSpan={4}>
+                  No backups yet.
+                </td>
+              </tr>
+            ) : (
+              backups.map((backup) => (
+                <tr key={backup.id} className="border-t border-border">
+                  <td className="px-4 py-3 font-mono text-xs">{backup.name}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{formatSize(backup.size)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {new Date(backup.createdAt).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={pending}
+                        onClick={() => {
+                          if (!window.confirm("Restore this backup? The server will be stopped first.")) return;
+                          void run("restore", backup.id);
+                        }}
+                      >
+                        Restore
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={pending}
+                        className="text-destructive"
+                        onClick={() => {
+                          if (!window.confirm("Delete this backup?")) return;
+                          void run("delete", backup.id);
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}

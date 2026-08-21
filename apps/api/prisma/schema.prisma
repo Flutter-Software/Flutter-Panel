@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  username     String    @unique
+  email        String    @unique
+  passwordHash String
+  role         String    @default("user")
+  totpSecret   String?
+  totpEnabled  Boolean   @default(false)
+  sessions     Session[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  userAgent String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@map("sessions")
+}
+
+model Location {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  shortCode   String   @unique
+  description String   @default("")
+  nodes       Node[]
+  createdAt   DateTime @default(now())
+
+  @@map("locations")
+}
+
+model Node {
+  id              String       @id @default(auto()) @map("_id") @db.ObjectId
+  locationId      String       @db.ObjectId
+  location        Location     @relation(fields: [locationId], references: [id])
+  name            String
+  fqdn            String
+  memoryMb        Int
+  diskMb          Int
+  tokenHash       String?
+  daemonListenUrl String?
+  lastHeartbeatAt DateTime?
+  allocations     Allocation[]
+  createdAt       DateTime     @default(now())
+
+  @@map("nodes")
+}
+
+model Allocation {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  nodeId    String   @db.ObjectId
+  node      Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  ip        String
+  port      Int
+  serverId  String?  @db.ObjectId
+  createdAt DateTime @default(now())
+
+  @@unique([ip, port])
+  @@map("allocations")
+}
+
+model Nest {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  description String   @default("")
+  eggs        Egg[]
+  createdAt   DateTime @default(now())
+
+  @@map("nests")
+}
+
+model Egg {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  nestId        String   @db.ObjectId
+  nest          Nest     @relation(fields: [nestId], references: [id])
+  name          String
+  description   String   @default("")
+  dockerImage   String
+  startup       String   @default("")
+  stopCommand   String   @default("stop")
+  installScript String   @default("")
+  installImage  String   @default("alpine:3.20")
+  variables     Json?
+  servers       Server[]
+  createdAt     DateTime @default(now())
+
+  @@map("eggs")
+}
+
+model Server {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  uuid          String   @unique
+  name          String
+  description   String   @default("")
+  ownerId       String   @db.ObjectId
+  nodeId        String   @db.ObjectId
+  eggId         String   @db.ObjectId
+  egg           Egg      @relation(fields: [eggId], references: [id])
+  allocationId  String   @unique @db.ObjectId
+  memoryMb      Int
+  diskMb        Int
+  cpuPercent    Int      @default(100)
+  status        String   @default("offline")
+  environment   Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("servers")
+}
+
+model Subuser {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  serverId        String    @db.ObjectId
+  userId          String?   @db.ObjectId
+  email           String
+  permissions     String[]
+  invitedBy       String    @db.ObjectId
+  inviteTokenHash String?
+  inviteExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([serverId, email])
+  @@index([userId])
+  @@index([inviteTokenHash])
+  @@map("subusers")
+}
+
+model PanelSettings {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  key       String   @unique
+  smtp      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("panel_settings")
+}

@@ -72,6 +72,17 @@ web_modules/
 # Yarn Integrity file
 .yarn-integrity
 
+# Monorepo
+.turbo
+apps/*/.next
+apps/*/dist
+packages/*/dist
+apps/web/.env.local
+
+# Daemon runtime (tokens, server files)
+apps/daemon/data/
+
+
 # dotenv environment variable files
 .env
 .env.development.local

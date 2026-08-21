@@ -1,0 +1,127 @@
+@layer theme, base, mantine, components, utilities;
+@import "tailwindcss";
+@import "@mantine/core/styles.layer.css";
+
+@custom-variant dark (&:is(html:not(.light) *));
+@custom-variant light (&:is(html.light *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-success: var(--status-running);
+  --color-warning: var(--status-warn);
+  --color-status-running: var(--status-running);
+  --color-status-warn: var(--status-warn);
+  --color-status-offline: var(--status-offline);
+  --color-status-error: var(--status-error);
+  --color-status-info: var(--status-info);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+}
+
+:root {
+  color-scheme: dark;
+  --background: oklch(var(--_bg, 0.145 0.005 285));
+  --foreground: oklch(var(--_fg, 0.955 0.005 285));
+  --card: oklch(var(--_card, 0.19 0.006 285));
+  --card-foreground: oklch(var(--_fg, 0.955 0.005 285));
+  --muted: oklch(var(--_muted, 0.23 0.006 285));
+  --muted-foreground: oklch(var(--_muted-fg, 0.62 0.01 285));
+  --border: oklch(var(--_line, 0.27 0.008 285));
+  --input: oklch(var(--_line, 0.27 0.008 285));
+  --primary: oklch(var(--_primary, 0.746 0.16 232.66));
+  --primary-foreground: oklch(var(--_on-primary, 0.21 0.012 285));
+  --secondary: oklch(var(--_muted, 0.23 0.006 285));
+  --secondary-foreground: oklch(var(--_fg, 0.955 0.005 285));
+  --accent: oklch(var(--_accent, 0.26 0.04 232.66));
+  --accent-foreground: oklch(var(--_accent-fg, 0.86 0.06 232.66));
+  --destructive: oklch(var(--_danger, 0.68 0.2 25));
+  --destructive-foreground: oklch(var(--_danger-fg, 0.985 0.004 285));
+  --ring: oklch(var(--_primary, 0.746 0.16 232.66));
+  --sidebar: oklch(var(--_sidebar, 0.165 0.005 285));
+  --sidebar-foreground: oklch(var(--_fg, 0.955 0.005 285));
+  --sidebar-border: oklch(var(--_line, 0.27 0.008 285));
+  --status-running: oklch(var(--_ok, 0.74 0.16 155));
+  --status-warn: oklch(var(--_warn, 0.8 0.14 75));
+  --status-offline: oklch(var(--_muted-fg, 0.62 0.01 285));
+  --status-error: oklch(var(--_danger, 0.68 0.2 25));
+  --status-info: oklch(var(--_primary, 0.746 0.16 232.66));
+}
+
+html.light {
+  color-scheme: light;
+  --_bg: 0.994 0.003 285;
+  --_fg: 0.21 0.012 285;
+  --_card: 1 0 0;
+  --_muted: 0.965 0.006 285;
+  --_muted-fg: 0.552 0.014 285;
+  --_line: 0.92 0.008 285;
+  --_primary: 0.685 0.145 232.66;
+  --_on-primary: 0.21 0.012 285;
+  --_accent: 0.94 0.03 232.66;
+  --_accent-fg: 0.32 0.08 232.66;
+  --_danger: 0.6 0.2 25;
+  --_danger-fg: 0.985 0.004 285;
+  --_sidebar: 0.988 0.004 285;
+  --_ok: 0.55 0.16 155;
+  --_warn: 0.7 0.15 75;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body {
+    height: 100%;
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+  body {
+    @apply antialiased;
+    font-size: 13px;
+    margin: 0;
+  }
+  button,
+  a {
+    cursor: pointer;
+  }
+  code,
+  kbd,
+  pre,
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+.terminal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.terminal-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}

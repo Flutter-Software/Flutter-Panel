@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install
+      - run: npm run typecheck
+        env:
+          DATABASE_URL: mongodb://127.0.0.1:27017/flutter?replicaSet=rs0
+          NODE_OPTIONS: --max-old-space-size=4096
+      - run: npm run lint

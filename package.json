@@ -1,0 +1,30 @@
+{
+  "name": "flutter-panel",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Flutter — self-hosted game-server control panel (not Google Flutter).",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "postinstall": "node scripts/link-shared.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "npm run dev -w @flutter-software/web",
+    "dev:api": "npm run dev -w @flutter-software/api",
+    "dev:daemon": "npm run dev -w @flutter-software/daemon",
+    "build": "npm run prisma:generate -w @flutter-software/api && npm run build -w @flutter-software/web",
+    "start": "node scripts/start.mjs",
+    "lint": "npm run lint -w @flutter-software/web",
+    "typecheck": "npm run prisma:generate -w @flutter-software/api && npm run typecheck --workspaces --if-present",
+    "compose:up": "docker compose up -d",
+    "compose:down": "docker compose down",
+    "db:push": "npm run db:push -w @flutter-software/api",
+    "daemon:configure": "npm run configure -w @flutter-software/daemon --"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}
