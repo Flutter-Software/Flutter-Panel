@@ -17,6 +17,7 @@ import * as eggs from "./eggs";
 import * as servers from "./servers";
 import * as subusers from "./subusers";
 import * as settings from "./settings";
+import * as updater from "./update";
 import { Node } from "./db/models";
 import { isNodeOnline } from "./nodes";
 import { verifyConsoleTicket } from "./console-ticket";
@@ -389,6 +390,14 @@ export function createApp() {
   app.patch("/admin/settings/branding", async (c) => {
     await requireAdmin(c);
     return c.json({ data: await settings.updateBranding(await c.req.json()) });
+  });
+  app.get("/admin/settings/update", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await updater.getUpdateStatus() });
+  });
+  app.post("/admin/settings/update", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await updater.startUpdate() });
   });
   app.post("/admin/settings/smtp/test", async (c) => {
     await requireAdmin(c);

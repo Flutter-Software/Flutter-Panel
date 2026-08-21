@@ -13,7 +13,7 @@ function asString(value: unknown, fallback = "") {
 }
 
 function unixNewlines(value: string) {
-  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return value.replace(/\r/g, "");
 }
 
 function assertObjectId(id: string, label: string) {

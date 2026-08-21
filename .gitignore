@@ -82,6 +82,10 @@ apps/web/.env.local
 # Daemon runtime (tokens, server files)
 apps/daemon/data/
 
+# Panel self-updater
+.flutter-update.json
+.flutter-revision
+
 
 # dotenv environment variable files
 .env

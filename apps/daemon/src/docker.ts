@@ -274,7 +274,10 @@ export function runtimeEnvironment(spec: InstallSpec): Record<string, string> {
     P_SERVER_UUID: spec.uuid,
     P_SERVER_ALLOCATION_LIMIT: "0",
   };
-  merged.STARTUP = substitute(spec.startup || "", merged);
+  for (const [key, value] of Object.entries(merged)) {
+    merged[key] = value.replace(/\r/g, "");
+  }
+  merged.STARTUP = substitute(merged.STARTUP || "", merged);
   const layout = cpuLayout(spec.limits.cpuPercent, spec.uuid);
   return withCpuRuntimeEnv(merged, layout.cores);
 }
@@ -336,14 +339,7 @@ async function writeEggFiles(root: string, spec: InstallSpec) {
 }
 
 function unixNewlines(value: string) {
-  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-}
-
-function installInterpreter(script: string, image: string) {
-  const name = image.toLowerCase();
-  if (/debian|ubuntu|installers/.test(name) || /^#!.*\bbash\b/m.test(script)) return "bash";
-  if (/alpine/.test(name)) return "ash";
-  return "sh";
+  return value.replace(/\r/g, "");
 }
 
 async function runInstallScript(root: string, spec: InstallSpec) {
@@ -356,12 +352,17 @@ async function runInstallScript(root: string, spec: InstallSpec) {
   const body = unixNewlines(substitute(script, env)).replace(/^\uFEFF/, "");
   const contents = body.startsWith("#!") ? `${body}\n` : `#!/bin/sh\nset -e\n${body}\n`;
   await mkdir(flutterDir(root), { recursive: true });
-  await writeFile(join(flutterDir(root), "install.sh"), contents, { encoding: "utf8" });
-  const shell = installInterpreter(contents, image);
+  await writeFile(join(flutterDir(root), "install.sh"), contents.replace(/\r/g, ""), { encoding: "utf8" });
+  const runner = [
+    "tr -d '\\r' < /mnt/server/.flutter/install.sh > /tmp/flutter-install.sh",
+    "if command -v bash >/dev/null 2>&1; then exec bash /tmp/flutter-install.sh; fi",
+    "if command -v ash >/dev/null 2>&1; then exec ash /tmp/flutter-install.sh; fi",
+    "exec sh /tmp/flutter-install.sh",
+  ].join("; ");
 
   const container = await docker.createContainer({
     Image: image,
-    Cmd: [shell, "/mnt/server/.flutter/install.sh"],
+    Cmd: ["sh", "-c", runner],
     WorkingDir: "/mnt/server",
     Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
     HostConfig: {

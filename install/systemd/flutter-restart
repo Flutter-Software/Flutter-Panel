@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+systemctl restart flutter-api.service flutter-web.service
+if systemctl list-unit-files flutter-daemon.service >/dev/null 2>&1; then
+  systemctl restart flutter-daemon.service || true
+fi

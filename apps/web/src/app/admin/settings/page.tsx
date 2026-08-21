@@ -7,6 +7,7 @@ import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
 import { AdminSection } from "@/components/admin-create";
 import { useAuth } from "@/components/auth-provider";
 import { DEFAULT_LOGO_SRC, DEFAULT_SITE_NAME, useBranding } from "@/components/branding-provider";
+import { UpdatesSection } from "./updates-section";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
 import type { SmtpEncryption } from "@flutter-software/shared";
@@ -234,6 +235,8 @@ export default function AdminSettingsPage() {
           {notice ? (
             <p className="rounded-lg border border-border bg-card px-3 py-2 text-sm">{notice}</p>
           ) : null}
+
+          <UpdatesSection />
 
           <form onSubmit={(event) => void onSaveBranding(event)}>
             <AdminSection

@@ -27,7 +27,7 @@ import {
 import { createBackup, deleteBackup, listBackups, restoreBackup } from "./backups";
 
 function unixNewlines(value: string) {
-  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return value.replace(/\r/g, "");
 }
 
 function asInstallSpec(body: Record<string, unknown>, uuid: string): InstallSpec {

@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+ROOT=/opt/flutter
+USER_NAME=flutter
+UNIT="flutter-update"
+
+systemctl reset-failed "${UNIT}.service" 2>/dev/null || true
+if systemctl is-active --quiet "${UNIT}.service" 2>/dev/null; then
+  echo "An update is already running" >&2
+  exit 1
+fi
+
+exec systemd-run --collect --unit="$UNIT" \
+  --uid="$USER_NAME" --gid="$USER_NAME" \
+  --working-directory="$ROOT" \
+  --property="EnvironmentFile=$ROOT/.env" \
+  --setenv=NODE_ENV=production \
+  --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
+  --setenv=FLUTTER_UPDATE_ROOT="$ROOT" \
+  /usr/bin/node "$ROOT/scripts/self-update.mjs"

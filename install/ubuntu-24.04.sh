@@ -283,13 +283,13 @@ if [[ "$(readlink -f "$SOURCE")" == "$(readlink -f "$PREFIX")" ]]; then
 else
   rsync -a \
     --delete \
-    --exclude '.git/' \
     --exclude 'node_modules/' \
     --exclude '.next/' \
     --exclude 'apps/web/.next/' \
     --exclude 'apps/daemon/data/' \
     --exclude '.env' \
     --exclude 'apps/web/.env.local' \
+    --exclude '.flutter-update.json' \
     --exclude '*.zip' \
     "$SOURCE/" "$PREFIX/"
 fi
@@ -399,6 +399,14 @@ systemctl enable --now flutter-api.service flutter-web.service
 if [[ "$INSTALL_DAEMON" -eq 1 ]]; then
   systemctl enable --now flutter-daemon.service
 fi
+
+install -m 755 "$PREFIX/install/systemd/flutter-restart" /usr/local/sbin/flutter-restart
+install -m 755 "$PREFIX/install/systemd/flutter-update" /usr/local/sbin/flutter-update
+sed -i "s|/opt/flutter|${PREFIX}|g" /usr/local/sbin/flutter-update
+sed -i "s/^USER_NAME=.*/USER_NAME=${SERVICE_USER}/" /usr/local/sbin/flutter-update
+printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/flutter-restart, /usr/local/sbin/flutter-update\n' "$SERVICE_USER" > /etc/sudoers.d/flutter-panel
+chmod 440 /etc/sudoers.d/flutter-panel
+visudo -cf /etc/sudoers.d/flutter-panel >/dev/null
 
 if [[ "$INSTALL_NGINX" -eq 1 ]]; then
   log "Configuring nginx"
