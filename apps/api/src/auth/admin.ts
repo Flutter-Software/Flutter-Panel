@@ -6,10 +6,9 @@ import {
   nodeCreateSchema,
   parsePortSpec,
 } from "@flutter-software/shared";
-import { env } from "../env";
 import { Allocation, Location, Node, Server } from "../db/models";
 import { hashPassword, randomToken } from "./crypto";
-import { isNodeOnline } from "../nodes";
+import { isNodeOnline, panelApiUrl } from "../nodes";
 
 export function parsePortsOrThrow(raw: string): number[] {
   const parsed = parsePortSpec(raw);
@@ -188,7 +187,7 @@ export async function createNode(body: unknown) {
   });
 
   const nodeId = row._id.toString();
-  const panelUrl = env().API_INTERNAL_URL.replace(/\/+$/, "");
+  const panelUrl = panelApiUrl();
 
   return {
     node: {
@@ -202,6 +201,7 @@ export async function createNode(body: unknown) {
     },
     token,
     configure: `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${nodeId}`,
+    start: "npm run dev:daemon",
   };
 }
 

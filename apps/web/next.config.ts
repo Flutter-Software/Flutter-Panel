@@ -20,6 +20,23 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: repoRoot,
   },
+  async headers() {
+    return [
+      {
+        source: "/_next/static/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "private, no-cache, no-store, max-age=0, must-revalidate",
+          },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     const api = process.env.API_INTERNAL_URL ?? "http://127.0.0.1:4000";
     return [{ source: "/api/:path*", destination: `${api}/api/:path*` }];

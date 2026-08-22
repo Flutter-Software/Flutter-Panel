@@ -29,10 +29,13 @@ export default function CreateNodePage() {
   const locations = data?.data.locations ?? [];
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [created, setCreated] = useState<{ id: string; token: string; configure: string } | null>(
-    null,
-  );
-  const [copied, setCopied] = useState<"token" | "configure" | null>(null);
+  const [created, setCreated] = useState<{
+    id: string;
+    token: string;
+    configure: string;
+    start: string;
+  } | null>(null);
+  const [copied, setCopied] = useState<"token" | "configure" | "start" | null>(null);
 
   const [name, setName] = useState("");
   const [locationId, setLocationId] = useState("");
@@ -55,7 +58,7 @@ export default function CreateNodePage() {
     [locations, resolvedLocationId],
   );
 
-  async function copy(value: string, key: "token" | "configure") {
+  async function copy(value: string, key: "token" | "configure" | "start") {
     await navigator.clipboard.writeText(value);
     setCopied(key);
     window.setTimeout(() => setCopied(null), 1500);
@@ -66,7 +69,9 @@ export default function CreateNodePage() {
     setError(null);
     setPending(true);
     try {
-      const result = await api<{ data: { token: string; configure: string; node: { id: string } } }>(
+      const result = await api<{
+        data: { token: string; configure: string; start?: string; node: { id: string } };
+      }>(
         "/api/v1/admin/nodes",
         {
           method: "POST",
@@ -92,6 +97,7 @@ export default function CreateNodePage() {
         id: result.data.node.id,
         token: result.data.token,
         configure: result.data.configure,
+        start: result.data.start || "npm run dev:daemon",
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create failed");
@@ -106,7 +112,8 @@ export default function CreateNodePage() {
         <PageIntro title="Node created" />
         <Card className="space-y-4 border-primary/30 bg-primary/5 p-5 sm:p-6">
           <p className="text-sm text-muted-foreground">
-            Save the daemon token now. It will not be shown again.
+            Save the daemon token now. It will not be shown again. Configure writes the config file;
+            the node stays offline until you start the daemon.
           </p>
           <CopyRow
             label="Token"
@@ -119,6 +126,12 @@ export default function CreateNodePage() {
             value={created.configure}
             copied={copied === "configure"}
             onCopy={() => copy(created.configure, "configure")}
+          />
+          <CopyRow
+            label="Start daemon"
+            value={created.start}
+            copied={copied === "start"}
+            onCopy={() => copy(created.start, "start")}
           />
           <div className="flex flex-wrap gap-2 pt-2">
             <ButtonLink href={`/admin/nodes/${created.id}`}>View node</ButtonLink>

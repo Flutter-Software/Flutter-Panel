@@ -28,8 +28,13 @@ export async function configuration(c: Context) {
   const nodeId = c.req.query("nodeId") ?? "";
   if (!nodeId) throw FlutterError.validation("nodeId is required");
   const node = await authenticateNodeToken(token, nodeId);
+  const host = (c.req.header("x-forwarded-host") || c.req.header("host") || "").split(",")[0]?.trim();
+  const proto =
+    (c.req.header("x-forwarded-proto") || "").split(",")[0]?.trim() ||
+    (new URL(c.req.url).protocol || "http:").replace(":", "") ||
+    "http";
   return {
-    panelUrl: panelApiUrl(),
+    panelUrl: panelApiUrl(host ? `${proto}://${host}` : undefined),
     nodeId: node._id.toString(),
     listenHost: "0.0.0.0",
     listenPort: 8080,

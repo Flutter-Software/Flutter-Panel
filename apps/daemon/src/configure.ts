@@ -60,5 +60,7 @@ export async function runConfigure(argv: string[]) {
     configPath,
   );
   console.log(`[daemon] wrote ${written}`);
-  console.log("[daemon] start with: npm run dev:daemon");
+  console.log("[daemon] This only saved the config. Start the daemon next:");
+  console.log("  npm run dev:daemon");
+  console.log("  # production: sudo systemctl enable --now flutter-daemon");
 }

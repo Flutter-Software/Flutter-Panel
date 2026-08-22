@@ -26,7 +26,15 @@ export async function requireOnlineNode(nodeId: string) {
   return node;
 }
 
-export function panelApiUrl() {
-  const fromEnv = process.env.DAEMON_PANEL_URL || env().API_INTERNAL_URL;
-  return fromEnv.replace(/\/+$/, "");
+export function panelApiUrl(requestOrigin?: string) {
+  const origin = requestOrigin?.replace(/\/+$/, "") || "";
+  if (origin) return origin;
+  const app = env().APP_URL.replace(/\/+$/, "");
+  try {
+    const host = new URL(app).hostname;
+    if (host !== "localhost" && host !== "127.0.0.1" && host !== "::1") return app;
+  } catch {
+    /* ignore */
+  }
+  return env().API_INTERNAL_URL.replace(/\/+$/, "");
 }
