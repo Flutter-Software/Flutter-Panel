@@ -9,6 +9,8 @@ import { env } from "./env";
 import { log } from "./log";
 import { PanelSettings } from "./db/models";
 
+const FLUTTER_LOGO_URL = "https://cdn.phxservices.co/file/chrome_wPFwHuRJ8P.png";
+
 export type SmtpConfig = {
   host: string;
   port: number;
@@ -161,7 +163,7 @@ export async function sendSubuserInvite(options: SubuserInviteMail) {
     ...options,
     siteName,
     panelUrl: appUrl,
-    logoUrl: hasLogo ? `${appUrl}/api/v1/branding/logo` : "",
+    logoUrl: hasLogo ? `${appUrl}/api/v1/branding/logo` : FLUTTER_LOGO_URL,
   });
   try {
     return await sendMail({ to: options.to, subject, text, html });
@@ -192,14 +194,11 @@ function subuserInviteHtml(options: SubuserInviteMail & { siteName: string; pane
   const nodeName = escapeHtml(options.nodeName?.trim() || "");
   const address = escapeHtml(options.address?.trim() || "");
   const meta = [nodeName, address].filter(Boolean).join(" • ");
-  const mark = escapeHtml(options.siteName.trim().charAt(0).toUpperCase() || "F");
   const granted = options.permissions ?? [];
   const online = Boolean(options.online);
   const statusColor = online ? "#4ade80" : "#6b7280";
   const statusLabel = online ? "Online" : "Offline";
-  const logo = options.logoUrl
-    ? `<img src="${escapeHtml(options.logoUrl)}" alt="${siteName}" width="36" height="36" style="display:block;width:36px;height:36px;border-radius:8px;border:0;" />`
-    : `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="36" height="36" bgcolor="#3bb2f6" align="center" valign="middle" style="width:36px;height:36px;background:#3bb2f6;color:#ffffff;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;border-radius:8px;">${mark}</td></tr></table>`;
+  const logo = `<img src="${escapeHtml(options.logoUrl)}" alt="${siteName}" width="36" height="36" style="display:block;width:36px;height:36px;border-radius:8px;border:0;background:#0a0a0a;" />`;
 
   const permissionCells = INVITE_PERMISSIONS.map((row) => {
     const enabled = permissionGroupGranted(granted, row.group);
