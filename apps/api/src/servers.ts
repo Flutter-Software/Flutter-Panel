@@ -18,6 +18,7 @@ import {
   installOnNode,
   logsOnNode,
   powerOnNode,
+  statsOnNode,
   type InstallSpec,
 } from "./daemon";
 import { env, consoleWsUrl } from "./env";
@@ -249,7 +250,30 @@ export async function listClientServers(viewerId: string, admin: boolean) {
 }
 
 export async function getClientServer(serverId: string, viewerId: string, admin: boolean) {
-  return loadClient(serverId, viewerId, admin);
+  return withLiveUsage(await loadClient(serverId, viewerId, admin));
+}
+
+async function withLiveUsage(client: ReturnType<typeof toClientServer>) {
+  if (!client.nodeOnline) return client;
+  try {
+    const live = await statsOnNode(client.nodeId, client.uuid);
+    if (typeof live.diskBytes === "number" && live.diskBytes > 0) {
+      client.disk.usedMb = Math.round((live.diskBytes / 1024 / 1024) * 10) / 10;
+    }
+    const stats = live.stats;
+    if (stats) {
+      if (typeof stats.cpuPercent === "number") client.cpu.used = stats.cpuPercent;
+      if (typeof stats.memoryBytes === "number") {
+        client.memory.usedMb = Math.round((stats.memoryBytes / 1024 / 1024) * 10) / 10;
+      }
+    }
+    if (live.running && (client.status === "offline" || client.status === "starting")) {
+      client.status = "running";
+    }
+  } catch {
+    /* daemon unreachable — keep zeros */
+  }
+  return client;
 }
 
 export async function createServer(body: unknown, actorId: string) {
@@ -574,7 +598,12 @@ export async function serverNetwork(serverId: string, viewerId: string, admin: b
   }));
 }
 
-export async function consoleSocket(serverId: string, viewerId: string, admin: boolean) {
+export async function consoleSocket(
+  serverId: string,
+  viewerId: string,
+  admin: boolean,
+  requestOrigin?: string,
+) {
   const server = await requireServer(serverId, viewerId, admin, "control.console");
   const token = signConsoleTicket(env().SESSION_SECRET, {
     serverId: server._id.toString(),
@@ -582,5 +611,5 @@ export async function consoleSocket(serverId: string, viewerId: string, admin: b
     nodeId: server.nodeId.toString(),
     userId: viewerId,
   });
-  return { token, socket: consoleWsUrl() };
+  return { token, socket: consoleWsUrl(requestOrigin) };
 }

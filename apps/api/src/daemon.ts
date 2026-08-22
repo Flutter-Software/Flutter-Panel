@@ -166,11 +166,16 @@ export async function statsOnNode(nodeId: string, uuid: string) {
     uuid,
     op: "stats",
     path: "stats",
-    timeoutMs: 15_000,
+    timeoutMs: 4_000,
   }) as Promise<{
     running?: boolean;
     diskBytes?: number;
-    stats?: { cpuPercent?: number | null; memoryBytes?: number | null } | null;
+    stats?: {
+      cpuPercent?: number | null;
+      memoryBytes?: number | null;
+      rxBytes?: number | null;
+      txBytes?: number | null;
+    } | null;
   }>;
 }
 

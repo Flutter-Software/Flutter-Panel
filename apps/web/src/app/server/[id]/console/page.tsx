@@ -6,6 +6,7 @@ import { Button, Card } from "@/components/ui";
 import { StatGraph } from "@/components/status";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
+import { browserConsoleSocketUrl } from "@/lib/console-socket";
 import { peekQuery } from "@/lib/query";
 import { formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
 import { cn } from "@/lib/cn";
@@ -231,7 +232,7 @@ export default function ConsolePage({
         const result =
           cached ?? (await api<{ data: { token: string; socket: string } }>(socketPath));
         if (closed) return;
-        const url = `${result.data.socket}?token=${encodeURIComponent(result.data.token)}`;
+        const url = browserConsoleSocketUrl(result.data.token, result.data.socket);
         ws = new WebSocket(url);
         socketRef.current = ws;
         ws.onopen = () => {
@@ -285,6 +286,9 @@ export default function ConsolePage({
                 };
                 const started = parseStarted(stats.startedAt);
                 setStartedAt(started);
+                if (stats.memoryBytes || stats.cpuPercent || stats.startedAt) {
+                  liveGraphs.current = true;
+                }
                 if (!liveGraphs.current) return;
                 const now = Date.now();
                 let network = 0;

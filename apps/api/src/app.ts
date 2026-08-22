@@ -5,7 +5,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
 import { FlutterError, PANEL_VERSION } from "@flutter-software/shared";
 import { signDaemonRequest } from "@flutter-software/shared/ticket";
-import { env } from "./env";
+import { env, requestOrigin } from "./env";
 import { pingMongo } from "./db/mongoose";
 import { pingPrisma } from "./db/prisma";
 import { pingRedis } from "./redis";
@@ -240,11 +240,16 @@ export function createApp() {
   });
   app.get("/client/servers/:id/console/socket", async (c) => {
     const session = await requireUser(c);
+    const origin = requestOrigin({
+      host: c.req.header("x-forwarded-host") || c.req.header("host"),
+      proto: c.req.header("x-forwarded-proto"),
+    });
     return c.json({
       data: await servers.consoleSocket(
         c.req.param("id"),
         session.user.id,
         session.user.role === "admin",
+        origin,
       ),
     });
   });

@@ -807,24 +807,65 @@ const resourceCache = new Map<string, ResourceCache>();
 
 function asStatsJson(value: unknown): DockerStatsJson | null {
   if (!value) return null;
-  if (Buffer.isBuffer(value)) {
-    const text = value.toString("utf8").trim().split("\n").pop();
+  if (Buffer.isBuffer(value) || typeof value === "string") {
+    const text = (Buffer.isBuffer(value) ? value.toString("utf8") : value).trim();
     if (!text) return null;
     try {
-      return JSON.parse(text) as DockerStatsJson;
+      return JSON.parse(text.split("\n").filter(Boolean).at(-1) ?? text) as DockerStatsJson;
     } catch {
       return null;
     }
   }
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value) as DockerStatsJson;
-    } catch {
-      return null;
-    }
+  if (typeof value === "object" && !Array.isArray(value) && !isReadable(value)) {
+    return value as DockerStatsJson;
   }
-  if (typeof value === "object") return value as DockerStatsJson;
   return null;
+}
+
+function isReadable(value: unknown): value is NodeJS.ReadableStream & { destroy?: () => void } {
+  return Boolean(value && typeof value === "object" && typeof (value as NodeJS.ReadableStream).on === "function");
+}
+
+function createStatsParser(onStats: (stats: DockerStatsJson) => void) {
+  let buffer = "";
+  return (chunk: unknown) => {
+    const direct = asStatsJson(chunk);
+    if (direct?.cpu_stats || direct?.memory_stats || direct?.read) {
+      onStats(direct);
+      return;
+    }
+    const text = Buffer.isBuffer(chunk)
+      ? chunk.toString("utf8")
+      : typeof chunk === "string"
+        ? chunk
+        : "";
+    if (!text) return;
+    buffer += text.replace(/\r\n/g, "\n");
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line) {
+        try {
+          onStats(JSON.parse(line) as DockerStatsJson);
+        } catch {
+          buffer = `${line}\n${buffer}`;
+          break;
+        }
+      }
+      newline = buffer.indexOf("\n");
+    }
+    const trimmed = buffer.trim();
+    if (trimmed.startsWith("{")) {
+      try {
+        onStats(JSON.parse(trimmed) as DockerStatsJson);
+        buffer = "";
+      } catch {
+        /* incomplete JSON — wait for the next chunk */
+      }
+    }
+    if (buffer.length > 1_000_000) buffer = buffer.slice(-256_000);
+  };
 }
 
 function cpuPercentFrom(stats: DockerStatsJson) {
@@ -851,10 +892,10 @@ function cpuPercentFrom(stats: DockerStatsJson) {
 function memoryUsedFrom(stats: DockerStatsJson) {
   const windows = stats.memory_stats?.privateworkingset;
   if (typeof windows === "number" && windows > 0) return windows;
-  const usage = stats.memory_stats?.usage ?? 0;
   const extra = stats.memory_stats?.stats ?? {};
+  const usage = stats.memory_stats?.usage ?? extra.anon ?? 0;
   const cache = extra.inactive_file ?? extra.total_inactive_file ?? extra.cache ?? extra.total_cache ?? 0;
-  return Math.max(0, usage - cache);
+  return Math.max(0, usage - (typeof cache === "number" ? cache : 0));
 }
 
 function netBytesFrom(stats: DockerStatsJson) {
@@ -879,27 +920,30 @@ function parseContainerStats(stats: DockerStatsJson): ContainerStats {
   };
 }
 
-async function readDockerStats(uuid: string): Promise<ContainerStats | null> {
-  const info = await inspectContainer(uuid);
-  if (!info?.State.Running) return null;
-  const stream = (await docker.getContainer(info.Id).stats({ stream: true })) as NodeJS.ReadableStream & {
-    destroy?: () => void;
-  };
-  return new Promise((resolve, reject) => {
+function cacheStats(uuid: string, running: boolean, stats: ContainerStats | null) {
+  const current = resourceCache.get(uuid);
+  resourceCache.set(uuid, {
+    at: Date.now(),
+    running,
+    stats,
+    diskBytes: current?.diskBytes ?? 0,
+    diskAt: current?.diskAt ?? 0,
+  });
+}
+
+async function readFirstStatsJson(stream: NodeJS.ReadableStream & { destroy?: () => void }) {
+  return new Promise<DockerStatsJson | null>((resolve) => {
     let previous: DockerStatsJson | null = null;
     let settled = false;
-    const finish = (value: ContainerStats | null, error?: Error) => {
+    const finish = (value: DockerStatsJson | null) => {
       if (settled) return;
       settled = true;
       stream.removeAllListeners();
       stream.destroy?.();
-      if (error) reject(error);
-      else resolve(value);
+      resolve(value);
     };
-    const timer = setTimeout(() => finish(previous ? parseContainerStats(previous) : null), 2_000);
-    stream.on("data", (chunk) => {
-      const parsed = asStatsJson(chunk);
-      if (!parsed) return;
+    const timer = setTimeout(() => finish(previous), 2_500);
+    const onStats = createStatsParser((parsed) => {
       if (!previous) {
         previous = parsed;
         return;
@@ -909,13 +953,32 @@ async function readDockerStats(uuid: string): Promise<ContainerStats | null> {
         parsed.preread = previous.read;
       }
       clearTimeout(timer);
-      finish(parseContainerStats(parsed));
+      finish(parsed);
     });
-    stream.on("error", (error) => {
-      clearTimeout(timer);
-      finish(null, error instanceof Error ? error : new Error("Docker stats failed"));
-    });
+    stream.on("data", onStats);
+    stream.on("end", () => finish(previous));
+    stream.on("error", () => finish(previous));
   });
+}
+
+async function readDockerStats(uuid: string): Promise<ContainerStats | null> {
+  const info = await inspectContainer(uuid);
+  if (!info?.State.Running) return null;
+  const container = docker.getContainer(info.Id);
+  try {
+    const raw: unknown = await container.stats({ stream: false });
+    if (isReadable(raw)) {
+      const parsed = await readFirstStatsJson(raw);
+      return parsed ? parseContainerStats(parsed) : null;
+    }
+    const parsed = asStatsJson(raw);
+    if (parsed) return parseContainerStats(parsed);
+  } catch {
+    /* one-shot failed; try a short stream */
+  }
+  const stream = (await container.stats({ stream: true })) as NodeJS.ReadableStream & { destroy?: () => void };
+  const parsed = await readFirstStatsJson(stream);
+  return parsed ? parseContainerStats(parsed) : null;
 }
 
 export async function liveResources(config: DaemonConfig, uuid: string) {
@@ -925,8 +988,14 @@ export async function liveResources(config: DaemonConfig, uuid: string) {
   const running = Boolean(info?.State.Running);
   const startedAt = running && info?.State.StartedAt ? info.State.StartedAt : null;
 
-  if (running) void ensureStatsStream(uuid);
+  if (running) await ensureStatsStream(uuid).catch(() => undefined);
   else stopStatsStream(uuid);
+
+  let stats = resourceCache.get(uuid)?.stats ?? null;
+  if (running && !stats) {
+    stats = await readDockerStats(uuid).catch(() => null);
+    if (stats) cacheStats(uuid, true, stats);
+  }
 
   if (!cached || now - cached.diskAt > 8_000) {
     void diskUsageBytes(serverRoot(config, uuid))
@@ -935,7 +1004,7 @@ export async function liveResources(config: DaemonConfig, uuid: string) {
         resourceCache.set(uuid, {
           at: current?.at ?? Date.now(),
           running,
-          stats: current?.stats ?? null,
+          stats: current?.stats ?? stats,
           diskBytes,
           diskAt: Date.now(),
         });
@@ -945,8 +1014,8 @@ export async function liveResources(config: DaemonConfig, uuid: string) {
 
   return {
     running,
-    stats: cached?.stats ?? null,
-    diskBytes: cached?.diskBytes ?? 0,
+    stats,
+    diskBytes: resourceCache.get(uuid)?.diskBytes ?? cached?.diskBytes ?? 0,
     startedAt,
   };
 }
@@ -975,26 +1044,15 @@ export async function ensureStatsStream(uuid: string) {
     },
   };
   statsStreams.set(uuid, entry);
-  stream.on("data", (chunk) => {
-    const parsed = asStatsJson(chunk);
-    if (!parsed) return;
-    if (entry.previous) {
-      if (!parsed.precpu_stats?.cpu_usage?.total_usage && entry.previous.cpu_stats) {
-        parsed.precpu_stats = entry.previous.cpu_stats;
-        parsed.preread = entry.previous.read;
-      }
-      const stats = parseContainerStats(parsed);
-      const cached = resourceCache.get(uuid);
-      resourceCache.set(uuid, {
-        at: Date.now(),
-        running: true,
-        stats,
-        diskBytes: cached?.diskBytes ?? 0,
-        diskAt: cached?.diskAt ?? 0,
-      });
+  const onStats = createStatsParser((parsed) => {
+    if (entry.previous && !parsed.precpu_stats?.cpu_usage?.total_usage && entry.previous.cpu_stats) {
+      parsed.precpu_stats = entry.previous.cpu_stats;
+      parsed.preread = entry.previous.read;
     }
+    cacheStats(uuid, true, parseContainerStats(parsed));
     entry.previous = parsed;
   });
+  stream.on("data", onStats);
   const stop = () => stopStatsStream(uuid);
   stream.on("end", stop);
   stream.on("error", stop);
@@ -1002,7 +1060,7 @@ export async function ensureStatsStream(uuid: string) {
 
 export async function containerStats(uuid: string) {
   const cached = resourceCache.get(uuid);
-  if (cached && Date.now() - cached.at < 750) return cached.stats;
+  if (cached?.stats && Date.now() - cached.at < 750) return cached.stats;
   return readDockerStats(uuid).catch(() => null);
 }
 
