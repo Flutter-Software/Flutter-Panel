@@ -219,6 +219,7 @@ function specFingerprint(spec: InstallSpec) {
         restart: "no",
         cpuPolicy: 2,
         init: true,
+        userBind: 1,
         image: spec.dockerImage,
         startup: spec.startup,
         env: spec.environment,
@@ -340,6 +341,85 @@ async function writeEggFiles(root: string, spec: InstallSpec) {
 
 function unixNewlines(value: string) {
   return value.replace(/\r/g, "");
+}
+
+type ImageIdentity = { user: string; uid: number; gid: number };
+
+const imageIdentityCache = new Map<string, ImageIdentity>();
+
+async function resolveNamedUser(image: string, name: string): Promise<{ uid: number; gid: number }> {
+  const container = await docker.createContainer({
+    Image: image,
+    User: name,
+    Entrypoint: ["sh", "-c"],
+    Cmd: ["printf '%s' \"$(id -u):$(id -g)\""],
+    HostConfig: { NetworkMode: "none" },
+  });
+  try {
+    await container.start();
+    await container.wait();
+    const logs = decodeDockerLogs(
+      await asBuffer((await container.logs({ stdout: true, stderr: true })) as Buffer),
+    );
+    const match = logs.trim().match(/(\d+):(\d+)/);
+    if (!match) return { uid: 1000, gid: 1000 };
+    return { uid: Number(match[1]), gid: Number(match[2]) };
+  } catch {
+    return { uid: 1000, gid: 1000 };
+  } finally {
+    await container.remove({ force: true }).catch(() => undefined);
+  }
+}
+
+async function imageIdentity(image: string): Promise<ImageIdentity> {
+  const hit = imageIdentityCache.get(image);
+  if (hit) return hit;
+  const info = await docker.getImage(image).inspect();
+  const raw = String(info.Config?.User ?? "").trim();
+  let identity: ImageIdentity = { user: "0:0", uid: 0, gid: 0 };
+  if (raw) {
+    const numeric = raw.match(/^(\d+)(?::(\d+))?$/);
+    if (numeric) {
+      const uid = Number(numeric[1]);
+      const gid = numeric[2] ? Number(numeric[2]) : uid;
+      identity = { user: `${uid}:${gid}`, uid, gid };
+    } else {
+      const resolved = await resolveNamedUser(image, raw);
+      identity = { user: `${resolved.uid}:${resolved.gid}`, uid: resolved.uid, gid: resolved.gid };
+    }
+  }
+  imageIdentityCache.set(image, identity);
+  return identity;
+}
+
+async function chownServerFiles(root: string, uid: number, gid: number) {
+  if (uid === 0 && gid === 0) return;
+  await pullImage("alpine:3.20");
+  const container = await docker.createContainer({
+    Image: "alpine:3.20",
+    Cmd: ["chown", "-R", `${uid}:${gid}`, "/mnt/server"],
+    HostConfig: {
+      Binds: [`${bindPath(root)}:/mnt/server`],
+      NetworkMode: "none",
+    },
+  });
+  try {
+    await container.start();
+    const result = await container.wait();
+    if (result.StatusCode !== 0) {
+      throw new Error(`chown exited ${result.StatusCode}`);
+    }
+  } finally {
+    await container.remove({ force: true }).catch(() => undefined);
+  }
+}
+
+async function ensureServerOwnership(root: string, image: string, uuid?: string) {
+  const identity = await imageIdentity(image);
+  if (identity.uid === 0 && identity.gid === 0) return identity;
+  if (uuid) notice(uuid, `Setting file ownership to ${identity.user}…`);
+  await chownServerFiles(root, identity.uid, identity.gid);
+  return identity;
 }
 
 async function runInstallScript(root: string, spec: InstallSpec) {
@@ -466,6 +546,7 @@ export async function installServer(config: DaemonConfig, spec: InstallSpec) {
   notice(spec.uuid, `Pulling ${image}…`);
   await pullImage(image);
   await runInstallScript(root, next);
+  await ensureServerOwnership(root, image, spec.uuid);
   return { installed: true, uuid: spec.uuid };
 }
 
@@ -620,6 +701,11 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
     await mkdir(root, { recursive: true });
     const merged = mergeSpec(await loadSpec(root), spec);
     await saveSpec(root, merged);
+    const image = merged.dockerImage?.trim() || "busybox:1.36";
+    if (action === "start" || action === "restart") {
+      await pullImage(image);
+      await ensureServerOwnership(root, image, uuid);
+    }
     const fingerprint = specFingerprint(merged);
     const existing = await inspectContainer(uuid);
     const sameSpec = existing?.Config.Labels?.["flutter.spec"] === fingerprint;
@@ -661,8 +747,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
 
     if (existing) await removeContainer(uuid);
 
-    const image = merged.dockerImage?.trim() || "busybox:1.36";
-    await pullImage(image);
+    const identity = await imageIdentity(image);
     const env = runtimeEnvironment(merged);
     const startup = env.STARTUP?.trim() || merged.startup?.trim() || DEFAULT_STARTUP;
     const command = startup.startsWith("exec ") ? startup : `exec ${startup}`;
@@ -674,6 +759,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
     const container = await docker.createContainer({
       name,
       Image: image,
+      User: identity.user,
       ...(merged.startup?.trim() || env.STARTUP?.trim() ? { Cmd: ["sh", "-c", command] } : {}),
       Tty: true,
       OpenStdin: true,
