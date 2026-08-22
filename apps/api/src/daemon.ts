@@ -214,7 +214,12 @@ export async function filesOnNode(
   },
 ) {
   const node = await loadNode(nodeId);
-  const timeoutMs = body.action === "upload" || body.action === "extract" ? 180_000 : 30_000;
+  const timeoutMs =
+    body.action === "upload" || body.action === "extract"
+      ? 180_000
+      : body.action === "read" || body.action === "write"
+        ? 60_000
+        : 30_000;
   return daemonFetch(node, {
     uuid,
     op: "files",

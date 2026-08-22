@@ -5,7 +5,7 @@ import { gunzipSync } from "node:zlib";
 import type { DaemonConfig } from "./config";
 import { bindPath, ensureServerOwnership, runBackupContainer, serverRoot } from "./docker";
 
-const TEXT_LIMIT = 1_000_000;
+const TEXT_LIMIT = 16 * 1024 * 1024;
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
 
 export function safeJoin(root: string, rel: string) {
@@ -76,7 +76,7 @@ export async function readServerFile(config: DaemonConfig, uuid: string, relPath
   const target = safeJoin(root, relPath);
   const info = await stat(target);
   if (info.isDirectory()) throw new Error("Cannot read a directory");
-  if (info.size > TEXT_LIMIT) throw new Error("File is larger than 1 MB");
+  if (info.size > TEXT_LIMIT) throw new Error("File is larger than 16 MB");
   const buffer = await readFile(target);
   if (buffer.includes(0)) throw new Error("Binary files cannot be edited in the panel");
   return { path: displayPath(root, target), content: buffer.toString("utf8"), size: info.size };
@@ -91,6 +91,7 @@ export async function writeServerFile(
   const root = serverRoot(config, uuid);
   const target = safeJoin(root, relPath);
   return withWritable(config, uuid, async () => {
+    if (Buffer.byteLength(content) > TEXT_LIMIT) throw new Error("File is larger than 16 MB");
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, content, "utf8");
     return { path: displayPath(root, target), size: Buffer.byteLength(content) };
