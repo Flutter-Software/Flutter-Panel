@@ -8,6 +8,27 @@ import { FlutterError, PANEL_VERSION } from "@flutter-software/shared";
 const DEFAULT_REPO = "Flutter-Software/Flutter-Panel";
 const DEFAULT_REF = "main";
 const STALE_MS = 30 * 60 * 1000;
+const REMOTE_CACHE_MS = 10 * 60 * 1000;
+
+export type UpdateJob = {
+  state: "idle" | "running" | "ok" | "failed";
+  log: string[];
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string | null;
+  sha?: string;
+  version?: string;
+};
+
+type RemoteCommit = {
+  sha: string;
+  shortSha: string;
+  message: string;
+  date: string;
+  url: string;
+};
+
+let remoteCache: { at: number; value: RemoteCommit } | null = null;
 
 export type UpdateJob = {
   state: "idle" | "running" | "ok" | "failed";
@@ -110,33 +131,86 @@ async function localSha() {
   }
 }
 
-async function remoteCommit() {
+function parseLsRemote(output: string) {
+  for (const line of output.split("\n")) {
+    const sha = line.trim().split(/\s+/)[0] ?? "";
+    if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
+  }
+  return "";
+}
+
+function githubToken() {
+  return (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+}
+
+async function remoteShaViaGit() {
   const repo = githubRepo();
   const ref = githubRef();
+  const httpsRemote = `https://github.com/${repo}.git`;
+  const attempts: string[][] = [];
+  if (existsSync(join(repoRoot(), ".git"))) attempts.push(["ls-remote", "origin", ref]);
+  attempts.push(["ls-remote", httpsRemote, ref]);
+  for (const args of attempts) {
+    try {
+      const sha = parseLsRemote(await runGit(args));
+      if (sha) return sha;
+    } catch {
+      /* try the next remote */
+    }
+  }
+  throw new Error("Could not read the GitHub ref over git");
+}
+
+async function remoteCommitViaApi() {
+  const repo = githubRepo();
+  const ref = githubRef();
+  const token = githubToken();
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "Flutter-Panel",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`https://api.github.com/repos/${repo}/commits/${encodeURIComponent(ref)}`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "Flutter-Panel",
-    },
+    headers,
     signal: AbortSignal.timeout(15_000),
   });
-  if (!response.ok) {
-    throw FlutterError.unavailable(`Could not reach GitHub (${response.status})`);
+  if (response.status === 403) {
+    throw new Error(
+      token
+        ? "GitHub returned 403. Check GITHUB_TOKEN permissions for this repo."
+        : "GitHub rate-limited this panel (HTTP 403). Wait a few minutes or set GITHUB_TOKEN.",
+    );
   }
+  if (!response.ok) throw new Error(`Could not reach GitHub (${response.status})`);
   const json = (await response.json()) as {
     sha?: string;
     html_url?: string;
     commit?: { message?: string; committer?: { date?: string } };
   };
   const sha = json.sha || "";
-  const message = (json.commit?.message || "").split("\n")[0]?.trim() || "";
   return {
     sha,
     shortSha: sha.slice(0, 7),
-    message,
+    message: (json.commit?.message || "").split("\n")[0]?.trim() || "",
     date: json.commit?.committer?.date || "",
     url: json.html_url || `https://github.com/${repo}`,
-  };
+  } satisfies RemoteCommit;
+}
+
+async function remoteCommit() {
+  if (remoteCache && Date.now() - remoteCache.at < REMOTE_CACHE_MS) return remoteCache.value;
+  const repo = githubRepo();
+  const url = `https://github.com/${repo}`;
+  let value: RemoteCommit | null = null;
+  try {
+    const sha = await remoteShaViaGit();
+    value = { sha, shortSha: sha.slice(0, 7), message: `Latest ${githubRef()}`, date: "", url };
+  } catch {
+    value = await remoteCommitViaApi();
+  }
+  remoteCache = { at: Date.now(), value };
+  return value;
 }
 
 export async function getUpdateStatus() {

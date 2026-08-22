@@ -97,16 +97,37 @@ function hasGitRepo() {
 }
 
 async function latestSha() {
-  const response = await fetch(`https://api.github.com/repos/${repo}/commits/${encodeURIComponent(ref)}`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "Flutter-Panel",
-    },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!response.ok) throw new Error(`GitHub API ${response.status}`);
-  const json = await response.json();
-  return String(json.sha ?? "");
+  const httpsRemote = `https://github.com/${repo}.git`;
+  const attempts = [];
+  if (hasGitRepo()) attempts.push(["ls-remote", "origin", ref]);
+  attempts.push(["ls-remote", httpsRemote, ref]);
+  for (const args of attempts) {
+    try {
+      const out = await new Promise((resolveRun, reject) => {
+        const child = spawn("git", args, { cwd: root, windowsHide: true, shell: process.platform === "win32" });
+        let text = "";
+        child.stdout?.on("data", (chunk) => {
+          text += String(chunk);
+        });
+        child.stderr?.on("data", (chunk) => {
+          text += String(chunk);
+        });
+        child.on("error", reject);
+        child.on("exit", (code) => {
+          if (code === 0) resolveRun(text);
+          else reject(new Error(text.trim() || `git exited ${code}`));
+        });
+      });
+      const sha = String(out)
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/)[0] ?? "")
+        .find((value) => /^[0-9a-f]{40}$/i.test(value));
+      if (sha) return sha;
+    } catch {
+      /* try the next remote */
+    }
+  }
+  throw new Error("Could not read the GitHub ref over git");
 }
 
 function preserveLive(rel) {
