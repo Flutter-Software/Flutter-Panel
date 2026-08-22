@@ -11,6 +11,7 @@ SupplementaryGroups=docker
 WorkingDirectory=/opt/flutter
 EnvironmentFile=/opt/flutter/.env
 Environment=NODE_ENV=production
+Environment=PATH=/opt/flutter/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 ExecStart=/usr/bin/npm run start -w @flutter-software/api
 Restart=on-failure
 RestartSec=3

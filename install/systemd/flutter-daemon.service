@@ -11,6 +11,7 @@ SupplementaryGroups=docker
 WorkingDirectory=/opt/flutter
 EnvironmentFile=/opt/flutter/.env
 Environment=NODE_ENV=production
+Environment=PATH=/opt/flutter/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 Environment=DAEMON_CONFIG=/opt/flutter/apps/daemon/data/config.json
 Environment=DAEMON_DATA_DIR=/var/lib/flutter
 Environment=NO_PROXY=127.0.0.1,localhost,::1
