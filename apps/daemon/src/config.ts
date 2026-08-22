@@ -58,7 +58,15 @@ function parsePort(raw: string | undefined, fallback: number) {
 
 export async function loadConfig(): Promise<DaemonConfig> {
   const file = await readDaemonConfigFile();
-  const panelUrl = (env("PANEL_URL") || file?.panelUrl || "").replace(/\/+$/, "");
+  const fileUrl = (file?.panelUrl || "").replace(/\/+$/, "");
+  const appUrl = env("APP_URL").replace(/\/+$/, "");
+  const panelUrl = (
+    env("PANEL_URL") ||
+    fileUrl ||
+    appUrl ||
+    env("API_INTERNAL_URL") ||
+    "http://127.0.0.1:4000"
+  ).replace(/\/+$/, "");
   const nodeId = env("DAEMON_NODE_ID") || file?.nodeId || "";
   const daemonToken = env("DAEMON_TOKEN") || file?.token || "";
   const requestSecret = env("DAEMON_REQUEST_SECRET") || file?.requestSecret || "";

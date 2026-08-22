@@ -1,7 +1,3 @@
-import { Agent, setGlobalDispatcher } from "node:undici";
-
-const panelAgent = new Agent();
-
 let proxyBypassApplied = false;
 
 export function bypassHttpProxyForPanel() {
@@ -15,7 +11,11 @@ export function bypassHttpProxyForPanel() {
       .filter(Boolean);
     process.env[key] = [...new Set([...parts, ...extra])].join(",");
   }
-  setGlobalDispatcher(panelAgent);
+  // This process only talks to the local API / Docker. A system HTTP proxy
+  // (common on mail hosts) makes fetch to 127.0.0.1 hang until timeout.
+  for (const key of ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]) {
+    delete process.env[key];
+  }
 }
 
 export function describeFetchError(error: unknown, url: string) {
