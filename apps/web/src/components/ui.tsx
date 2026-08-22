@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
