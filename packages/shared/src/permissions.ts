@@ -54,7 +54,7 @@ export const PERMISSION_GROUPS: {
       { key: "file.read", label: "Read", description: "List directories and open files." },
       { key: "file.write", label: "Write", description: "Create, upload, rename, and save files." },
       { key: "file.delete", label: "Delete", description: "Delete files and folders." },
-      { key: "file.archive", label: "Archive", description: "Extract zip and tar archives." },
+      { key: "file.archive", label: "Archive", description: "Extract zip, tar, and rar archives." },
     ],
   },
   {

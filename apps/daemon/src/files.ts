@@ -2,6 +2,7 @@ import { FILE_OPEN_LIMIT_BYTES, FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } fro
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { unzipSync } from "fflate";
+import { createExtractorFromData, UnrarError } from "node-unrar-js";
 import { gunzipSync } from "node:zlib";
 import type { DaemonConfig } from "./config";
 import { bindPath, ensureServerOwnership, runBackupContainer, serverRoot } from "./docker";
@@ -172,6 +173,7 @@ export function archiveKind(name: string) {
   if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) return "tar.gz" as const;
   if (lower.endsWith(".tar")) return "tar" as const;
   if (lower.endsWith(".zip")) return "zip" as const;
+  if (lower.endsWith(".rar")) return "rar" as const;
   if (lower.endsWith(".gz")) return "gz" as const;
   return null;
 }
@@ -182,11 +184,13 @@ export async function extractArchive(config: DaemonConfig, uuid: string, relPath
   const info = await stat(archive);
   if (info.isDirectory()) throw new Error("Not an archive");
   const kind = archiveKind(archive);
-  if (!kind) throw new Error("Unsupported archive. Use zip, tar, tar.gz, or gz.");
+  if (!kind) throw new Error("Unsupported archive. Use zip, rar, tar, tar.gz, or gz.");
 
   const destDir = dirname(archive);
   if (kind === "zip") {
     await extractZip(root, archive, destDir);
+  } else if (kind === "rar") {
+    await extractRar(root, archive, destDir);
   } else if (kind === "gz") {
     const outName = archive.replace(/\.gz$/i, "");
     if (outName === archive) throw new Error("Cannot determine output name");
@@ -219,4 +223,51 @@ async function extractZip(root: string, archive: string, destDir: string) {
     count += 1;
   }
   if (!count) throw new Error("Archive did not contain any files");
+}
+
+async function extractRar(root: string, archive: string, destDir: string) {
+  const buf = await readFile(archive);
+  const data = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  let extractor;
+  try {
+    extractor = await createExtractorFromData({ data });
+  } catch (error) {
+    throw rarError(error);
+  }
+
+  let count = 0;
+  try {
+    for (const file of extractor.extract().files) {
+      const header = file.fileHeader;
+      if (header.flags.encrypted) {
+        throw new Error("Password-protected RAR archives are not supported");
+      }
+      if (header.flags.directory) continue;
+      const name = header.name.replace(/\\/g, "/");
+      if (!name || name.endsWith("/")) continue;
+      const destRel = [relative(root, destDir).replace(/\\/g, "/"), name].filter(Boolean).join("/");
+      const dest = safeJoin(root, destRel);
+      if (resolve(destDir) === resolve(root) && name.split("/")[0] === ".flutter") continue;
+      if (!file.extraction) continue;
+      await mkdir(dirname(dest), { recursive: true });
+      await writeFile(dest, Buffer.from(file.extraction));
+      count += 1;
+    }
+  } catch (error) {
+    throw rarError(error);
+  }
+  if (!count) throw new Error("Archive did not contain any files");
+}
+
+function rarError(error: unknown) {
+  if (error instanceof Error && !(error instanceof UnrarError)) return error;
+  const reason = error instanceof UnrarError ? error.reason : "";
+  if (reason === "ERAR_MISSING_PASSWORD" || reason === "ERAR_BAD_PASSWORD") {
+    return new Error("Password-protected RAR archives are not supported");
+  }
+  if (reason === "ERAR_BAD_ARCHIVE" || reason === "ERAR_UNKNOWN_FORMAT") {
+    return new Error("Not a valid RAR archive");
+  }
+  if (error instanceof Error && error.message) return new Error(error.message);
+  return new Error("Could not extract RAR archive");
 }

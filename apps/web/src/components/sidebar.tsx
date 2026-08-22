@@ -76,6 +76,7 @@ const ADMIN_PREFETCH: Record<string, string[]> = {
     "/api/v1/admin/users",
     "/api/v1/admin/locations",
     "/api/v1/admin/nodes",
+    "/api/v1/admin/nests",
     "/api/v1/health",
   ],
   "/admin/servers": ["/api/v1/admin/servers"],

@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useState } from "react";
+import { Plus } from "lucide-react";
 import { Button, Card } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
@@ -62,12 +63,13 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Backups</h2>
           <p className="text-sm text-muted-foreground">Archives stored on the node next to this server.</p>
         </div>
-        <Button type="button" size="sm" disabled={pending} onClick={() => void run("create")}>
+        <Button type="button" disabled={pending} onClick={() => void run("create")}>
+          <Plus className="size-4" />
           {pending ? "Working…" : "Create backup"}
         </Button>
       </div>

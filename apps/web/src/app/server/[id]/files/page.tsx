@@ -74,7 +74,7 @@ function formatSize(bytes: number) {
 }
 
 function isArchive(name: string) {
-  return /\.(zip|tar|tgz|gz)$/i.test(name);
+  return /\.(zip|tar|tgz|gz|rar)$/i.test(name);
 }
 
 function fileToBase64(file: File, onProgress?: (ratio: number) => void) {
