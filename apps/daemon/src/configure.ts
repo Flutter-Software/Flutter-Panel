@@ -1,4 +1,5 @@
 import { defaultConfigPath, writeDaemonConfig } from "./config";
+import { describeFetchError } from "./panel-fetch";
 
 function readFlag(argv: string[], name: string) {
   const index = argv.indexOf(name);
@@ -16,18 +17,30 @@ export async function runConfigure(argv: string[]) {
 
   if (!panelUrl || !token || !nodeId) {
     throw new Error(
-      "Usage: npm run daemon:configure -- --panel-url http://127.0.0.1:4000 --token flt_… --node <id>",
+      "Usage: npm run daemon:configure -- --panel-url https://panel.example.com --token <flt_token> --node <id>",
+    );
+  }
+
+  if (/[^\u0020-\u007E]/.test(token) || token.includes("...") || token === "flt_" || token.length < 20) {
+    throw new Error(
+      "That --token is not a real daemon token. Copy the full flt_ value from Admin → Nodes (clipboard button), not the docs placeholder.",
     );
   }
 
   const url = new URL("/api/v1/daemon/configuration", `${panelUrl}/`);
   url.searchParams.set("nodeId", nodeId);
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    throw new Error(describeFetchError(error, url.toString()));
+  }
   const json = (await response.json().catch(() => ({}))) as {
     data?: {
       panelUrl?: string;
@@ -48,7 +61,7 @@ export async function runConfigure(argv: string[]) {
   const port = Number.isInteger(listenPort) ? listenPort : json.data.listenPort || 8080;
   const written = await writeDaemonConfig(
     {
-      panelUrl: json.data.panelUrl || panelUrl,
+      panelUrl,
       nodeId: json.data.nodeId || nodeId,
       token,
       requestSecret: json.data.requestSecret,

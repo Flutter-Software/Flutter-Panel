@@ -6,7 +6,17 @@ Stack: Next.js 15 dashboard, Hono API, MongoDB (Mongoose + Prisma), Redis, TypeS
 
 ## Install on Ubuntu 24.04
 
-On a fresh server (root):
+Use a **fresh Ubuntu 24.04** server with a public IPv4 address. The installer needs **root**. A hostname pointed at the server is required for HTTPS (Let's Encrypt will not issue a certificate for a raw IP).
+
+Recommended: 2+ vCPU, 4+ GB RAM for the panel itself, plus whatever RAM and disk your game servers will use. Game containers share this host’s Docker Engine.
+
+### 1. Point DNS (HTTPS)
+
+Create an **A record** for your panel hostname (for example `panel.example.com`) to the server’s public IP, and wait until it resolves before requesting a certificate.
+
+Open these ports if a firewall is already enabled: **22** (SSH), **80** and **443** (panel). Game allocations (for example **25565**) are not opened automatically — add them as you create servers.
+
+### 2. Run the installer
 
 ```bash
 apt-get update && apt-get install -y git
@@ -14,28 +24,114 @@ git clone https://github.com/Flutter-Software/Flutter-Panel.git /usr/local/src/f
 sudo bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh
 ```
 
-The installer asks for a public URL, then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`. Open the URL it prints and create the first admin account.
+The script asks for the public panel URL, whether to issue a Let's Encrypt certificate, and whether to install the game-node daemon on this machine. It then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`.
 
-Non-interactive example:
+Non-interactive HTTPS example:
 
 ```bash
 sudo FLUTTER_URL=https://panel.example.com FLUTTER_EMAIL=you@example.com \
   FLUTTER_LETSENCRYPT=1 bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh --yes
 ```
 
+| Flag / env            | Meaning                                               |
+| --------------------- | ----------------------------------------------------- |
+| `--yes`               | Do not prompt; use flags and `FLUTTER_*` env vars     |
+| `--url URL` / `FLUTTER_URL` | Public panel URL (`http://IP` or `https://hostname`) |
+| `--letsencrypt` / `FLUTTER_LETSENCRYPT=1` | Issue a Let's Encrypt certificate (hostname required) |
+| `--email EMAIL` / `FLUTTER_EMAIL` | Contact email for Let's Encrypt                  |
+| `--no-nginx` / `FLUTTER_NO_NGINX=1` | Skip nginx; panel listens on port 3010         |
+| `--no-daemon` / `FLUTTER_NO_DAEMON=1` | Panel only (attach a node later)             |
+| `--prefix DIR` / `FLUTTER_PREFIX` | Install directory (default `/opt/flutter`)      |
+| `--force`             | Allow distros other than Ubuntu 24.04                 |
 
-| Flag            | Meaning                                               |
-| --------------- | ----------------------------------------------------- |
-| `--yes`         | Do not prompt; use flags and `FLUTTER_*` env vars     |
-| `--url URL`     | Public panel URL (`http://IP` or `https://hostname`)  |
-| `--letsencrypt` | Issue a Let's Encrypt certificate (hostname required) |
-| `--email EMAIL` | Contact email for Let's Encrypt                       |
-| `--no-nginx`    | Skip nginx; panel listens on port 3010                |
-| `--no-daemon`   | Panel only (attach a node later)                      |
-| `--force`       | Allow distros other than Ubuntu 24.04                 |
+Re-running the installer keeps an existing `/opt/flutter/.env` (secrets are not rotated) and refreshes `APP_URL` / `COOKIE_SECURE`.
 
+### 3. What gets installed
 
-After install: `systemctl status flutter-api flutter-web flutter-daemon`
+| Path / unit                         | Role                                      |
+| ----------------------------------- | ----------------------------------------- |
+| `/opt/flutter`                      | Application (user `flutter`)              |
+| `/opt/flutter/.env`                 | Secrets and URLs (mode `640`)             |
+| `/var/lib/flutter`                  | Daemon data and game server files         |
+| `flutter-api`                       | API on `127.0.0.1:4000`                   |
+| `flutter-web`                       | Panel on `127.0.0.1:3010`                 |
+| `flutter-daemon`                    | Node agent on `0.0.0.0:8080`              |
+| nginx `sites-enabled/flutter`       | Public HTTP(S) → web + `/api/`            |
+| Docker Compose (`mongo`, `redis`)   | Bound to localhost only                   |
+
+Open the URL the installer prints and create the **first account** — that user is the admin.
+
+```bash
+systemctl status flutter-api flutter-web flutter-daemon
+journalctl -u flutter-api -u flutter-web -u flutter-daemon -f
+cd /opt/flutter && docker compose ps
+```
+
+### 4. Attach a game node
+
+A node is **Online** only while the daemon is running and sending heartbeats (every 15s; offline after 120s). `daemon:configure` **only writes** `config.json` — it does not start the process.
+
+**Same machine as the panel** (default installer choice): the script already creates a **Local** node, writes `/opt/flutter/apps/daemon/data/config.json`, and starts `flutter-daemon`. Create a location/allocations in Admin if you need extra ports, then create servers.
+
+If the node is still **Offline**:
+
+```bash
+sudo systemctl enable --now flutter-daemon
+sudo journalctl -u flutter-daemon -f
+```
+
+You should see heartbeat success. Then refresh Admin → Nodes.
+
+**New node on this host** (or after `--no-daemon`): Admin → Locations → create a location, Admin → Nodes → create a node. Copy the full `flt_` token from the create screen or the Nodes clipboard button — do not paste the docs placeholder. Then:
+
+```bash
+cd /opt/flutter
+sudo -u flutter npm run daemon:configure -- \
+  --panel-url http://127.0.0.1:4000 \
+  --token <flt_token> \
+  --node <nodeId>
+sudo systemctl enable --now flutter-daemon
+# already running:
+sudo systemctl restart flutter-daemon
+```
+
+`--panel-url http://127.0.0.1:4000` is correct **only when the daemon runs on the same host as the API**. systemd already points at `/opt/flutter/apps/daemon/data/config.json` and `/var/lib/flutter`.
+
+**Remote node** (another Ubuntu host with Docker): install the daemon on that machine, use the **public** panel URL, and a `--listen-url` the panel can reach (not `127.0.0.1`):
+
+```bash
+cd /opt/flutter
+sudo -u flutter npm run daemon:configure -- \
+  --panel-url https://panel.example.com \
+  --token <flt_token> \
+  --node <nodeId> \
+  --listen-url http://<this-server-public-ip>:8080
+sudo systemctl enable --now flutter-daemon
+```
+
+Allow **8080/tcp** from the panel host, plus each game allocation port on the node.
+
+### 5. Updates and maintenance
+
+In production, use **Admin → Settings → Updates** (or `sudo /usr/local/sbin/flutter-update`). That pulls the latest git, runs `npm ci`, rebuilds the panel, and restarts services. `.env` and daemon data are preserved.
+
+Useful commands:
+
+```bash
+sudo /usr/local/sbin/flutter-restart
+cd /opt/flutter && docker compose ps
+```
+
+After a deploy, hard-refresh the browser if the login page fails to load JS chunks.
+
+### 6. Firewall and game ports
+
+If UFW was already active, the installer opens SSH, 80/443 (or 3010 without nginx), and 8080 when the local daemon is installed. Publish game ports as you add allocations:
+
+```bash
+sudo ufw allow 25565/tcp
+sudo ufw status
+```
 
 ## Development
 
@@ -57,12 +153,11 @@ Open [http://localhost:3010](http://localhost:3010). The first account is the ad
 4. Configure and start the daemon:
 
 ```bash
-npm run daemon:configure -- --panel-url http://127.0.0.1:4000 --token flt_… --node <nodeId>
+npm run daemon:configure -- --panel-url http://127.0.0.1:4000 --token <flt_token> --node <nodeId>
 npm run dev:daemon
 ```
 
 The node turns **Online** after a heartbeat (every 15s; offline after 120s). Admin → Servers can then create a server (seeded **Generic / Sleep** egg uses `busybox:1.36`). Start/Stop on the dashboard talks to Docker via the daemon — never from the browser.
-
 
 | Route            | What                                                       |
 | ---------------- | ---------------------------------------------------------- |
@@ -70,7 +165,6 @@ The node turns **Online** after a heartbeat (every 15s; offline after 120s). Adm
 | `/`              | Client dashboard (live servers)                            |
 | `/admin`         | Locations, nodes, allocations, nests, eggs, servers, users |
 | `/api/v1/health` | API health (Mongo + Prisma required; Redis reported)       |
-
 
 Mongoose is the runtime ODM. Prisma owns `apps/api/prisma/schema.prisma` (types, `db push`, Studio). Both talk to the same MongoDB.
 

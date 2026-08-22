@@ -201,7 +201,10 @@ export async function createNode(body: unknown) {
     },
     token,
     configure: `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${nodeId}`,
-    start: "npm run dev:daemon",
+    start:
+      process.env.NODE_ENV === "production"
+        ? "sudo systemctl restart flutter-daemon"
+        : "npm run dev:daemon",
   };
 }
 
@@ -267,7 +270,17 @@ export async function revealDaemonToken(id: string) {
   const node = await Node.findById(id);
   if (!node) throw FlutterError.notFound("Node not found");
   if (node.daemonToken) {
-    return { token: node.daemonToken as string, preview: String(node.daemonToken).slice(0, 12) };
+    const token = String(node.daemonToken);
+    const panelUrl = panelApiUrl();
+    return {
+      token,
+      preview: token.slice(0, 12),
+      configure: `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${id}`,
+      start:
+        process.env.NODE_ENV === "production"
+          ? "sudo systemctl restart flutter-daemon"
+          : "npm run dev:daemon",
+    };
   }
   throw FlutterError.conflict(
     "This node's token was shown at create and is not stored. Copy will work after the next successful heartbeat — do not reissue while the daemon is online.",

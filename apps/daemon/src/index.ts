@@ -4,8 +4,10 @@ import { loadConfig } from "./config";
 import { runConfigure } from "./configure";
 import { createDaemonApp } from "./http";
 import { sendHeartbeat } from "./heartbeat";
+import { bypassHttpProxyForPanel } from "./panel-fetch";
 
 async function main() {
+  bypassHttpProxyForPanel();
   const argv = process.argv.slice(2);
   if (argv[0] === "configure") {
     await runConfigure(argv.slice(1));
@@ -31,17 +33,35 @@ async function main() {
       );
     },
   );
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EADDRINUSE") {
+      console.error(
+        `[daemon] fatal: port ${config.listenPort} is already in use. Stop the other process, then start once:`,
+      );
+      console.error(`  sudo systemctl stop flutter-daemon`);
+      console.error(`  sudo fuser -k ${config.listenPort}/tcp`);
+      console.error(`  sudo systemctl start flutter-daemon`);
+    } else {
+      console.error("[daemon] fatal:", error.message);
+    }
+    process.exit(1);
+  });
   injectWebSocket(server);
 
   const beat = async () => {
     try {
       await sendHeartbeat(config);
       console.log("[daemon] heartbeat ok");
+      return true;
     } catch (error) {
       console.error("[daemon] heartbeat failed:", error instanceof Error ? error.message : error);
+      return false;
     }
   };
-  await beat();
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    if (await beat()) break;
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
+  }
   setInterval(() => {
     void beat();
   }, config.heartbeatMs);

@@ -76,7 +76,7 @@ export async function loadConfig(): Promise<DaemonConfig> {
     throw new Error(
       [
         "Daemon is not configured.",
-        "Run: npm run daemon:configure -- --panel-url http://127.0.0.1:4000 --token flt_… --node <id>",
+        "Run: npm run daemon:configure -- --panel-url https://panel.example.com --token <flt_token> --node <id>",
       ].join("\n"),
     );
   }

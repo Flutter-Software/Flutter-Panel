@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@flutter-software/shared";
 
@@ -35,6 +35,13 @@ let dummyHash: Promise<string> | null = null;
 export function dummyPasswordHash() {
   dummyHash ??= hash("flutter-invalid-password", HASH_OPTIONS);
   return dummyHash;
+}
+
+export function tokenEquals(left: string, right: string) {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 export function randomToken(bytes = 32) {

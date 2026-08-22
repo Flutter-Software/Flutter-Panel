@@ -1,6 +1,6 @@
 import { FlutterError, NODE_ONLINE_MS } from "@flutter-software/shared";
 import { Node } from "./db/models";
-import { dummyPasswordHash, verifyPassword } from "./auth/crypto";
+import { dummyPasswordHash, hashPassword, tokenEquals, verifyPassword } from "./auth/crypto";
 import { env } from "./env";
 
 export function isNodeOnline(lastHeartbeatAt: Date | null | undefined) {
@@ -9,9 +9,34 @@ export function isNodeOnline(lastHeartbeatAt: Date | null | undefined) {
 
 export async function authenticateNodeToken(token: string, nodeId: string) {
   const node = await Node.findById(nodeId);
-  const hash = node?.tokenHash ?? (await dummyPasswordHash());
-  const ok = await verifyPassword(hash, token);
-  if (!node || !ok) throw FlutterError.unauthorized("Invalid node token");
+  if (!node) {
+    await verifyPassword(await dummyPasswordHash(), token);
+    throw FlutterError.unauthorized(
+      "Unknown node id. Use the id from Admin → Nodes for this machine, not another panel.",
+    );
+  }
+
+  const stored = node.daemonToken ? String(node.daemonToken) : "";
+  if (stored && tokenEquals(stored, token)) {
+    if (!node.tokenHash) {
+      node.tokenHash = await hashPassword(token);
+      await node.save();
+    }
+    return node;
+  }
+
+  const hash = node.tokenHash ? String(node.tokenHash) : "";
+  const matchesHash = hash ? await verifyPassword(hash, token) : false;
+  if (!matchesHash) {
+    await verifyPassword(hash || (await dummyPasswordHash()), token);
+    throw FlutterError.unauthorized(
+      "Invalid node token. Copy the token from the same node row as --node (clipboard button).",
+    );
+  }
+
+  node.daemonToken = token;
+  node.tokenPrefix = token.slice(0, 12);
+  await node.save();
   return node;
 }
 
