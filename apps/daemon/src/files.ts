@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { unzipSync } from "fflate";
 import { gunzipSync } from "node:zlib";
 import type { DaemonConfig } from "./config";
-import { bindPath, runBackupContainer, serverRoot } from "./docker";
+import { bindPath, ensureServerOwnership, runBackupContainer, serverRoot } from "./docker";
 
 const TEXT_LIMIT = 1_000_000;
 const UPLOAD_LIMIT = 50 * 1024 * 1024;
@@ -24,6 +24,20 @@ export function safeJoin(root: string, rel: string) {
 function displayPath(root: string, target: string) {
   const rel = relative(root, target).replace(/\\/g, "/");
   return rel ? `/${rel}` : "/";
+}
+
+function isDenied(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && (error.code === "EACCES" || error.code === "EPERM"));
+}
+
+async function withWritable<T>(config: DaemonConfig, uuid: string, action: () => Promise<T>) {
+  try {
+    return await action();
+  } catch (error) {
+    if (!isDenied(error)) throw error;
+    await ensureServerOwnership(serverRoot(config, uuid), uuid);
+    return action();
+  }
 }
 
 export async function listFiles(config: DaemonConfig, uuid: string, relPath: string) {
@@ -76,24 +90,30 @@ export async function writeServerFile(
 ) {
   const root = serverRoot(config, uuid);
   const target = safeJoin(root, relPath);
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, content, "utf8");
-  return { path: displayPath(root, target), size: Buffer.byteLength(content) };
+  return withWritable(config, uuid, async () => {
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, content, "utf8");
+    return { path: displayPath(root, target), size: Buffer.byteLength(content) };
+  });
 }
 
 export async function mkdirServer(config: DaemonConfig, uuid: string, relPath: string) {
   const root = serverRoot(config, uuid);
   const target = safeJoin(root, relPath);
-  await mkdir(target, { recursive: true });
-  return { path: displayPath(root, target) };
+  return withWritable(config, uuid, async () => {
+    await mkdir(target, { recursive: true });
+    return { path: displayPath(root, target) };
+  });
 }
 
 export async function deleteServerPath(config: DaemonConfig, uuid: string, relPath: string) {
   const root = serverRoot(config, uuid);
   const target = safeJoin(root, relPath);
   if (target === resolve(root)) throw new Error("Cannot delete the server root");
-  await rm(target, { recursive: true, force: true });
-  return { path: displayPath(root, target) };
+  return withWritable(config, uuid, async () => {
+    await rm(target, { recursive: true, force: true });
+    return { path: displayPath(root, target) };
+  });
 }
 
 export async function renameServerPath(
@@ -105,9 +125,11 @@ export async function renameServerPath(
   const root = serverRoot(config, uuid);
   const source = safeJoin(root, from);
   const dest = safeJoin(root, to);
-  await mkdir(dirname(dest), { recursive: true });
-  await rename(source, dest);
-  return { from: displayPath(root, source), to: displayPath(root, dest) };
+  return withWritable(config, uuid, async () => {
+    await mkdir(dirname(dest), { recursive: true });
+    await rename(source, dest);
+    return { from: displayPath(root, source), to: displayPath(root, dest) };
+  });
 }
 
 export async function uploadServerFile(
@@ -137,9 +159,11 @@ export async function uploadServerFile(
   if (fileName.split("/")[0] === ".flutter") {
     throw new Error("Cannot write into .flutter");
   }
-  await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, buffer);
-  return { path: displayPath(root, target), size: buffer.length };
+  return withWritable(config, uuid, async () => {
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, buffer);
+    return { path: displayPath(root, target), size: buffer.length };
+  });
 }
 
 export function archiveKind(name: string) {
