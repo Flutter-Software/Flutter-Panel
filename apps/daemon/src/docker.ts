@@ -394,6 +394,7 @@ async function imageIdentity(image: string): Promise<ImageIdentity> {
 
 async function chownServerFiles(root: string, uid: number, gid: number) {
   if (uid === 0 && gid === 0) return;
+  if (process.platform === "win32") return;
   await pullImage("alpine:3.20");
   const container = await docker.createContainer({
     Image: "alpine:3.20",
@@ -417,8 +418,13 @@ async function chownServerFiles(root: string, uid: number, gid: number) {
 async function ensureServerOwnership(root: string, image: string, uuid?: string) {
   const identity = await imageIdentity(image);
   if (identity.uid === 0 && identity.gid === 0) return identity;
-  if (uuid) notice(uuid, `Setting file ownership to ${identity.user}…`);
-  await chownServerFiles(root, identity.uid, identity.gid);
+  try {
+    if (uuid) notice(uuid, `Setting file ownership to ${identity.user}…`);
+    await chownServerFiles(root, identity.uid, identity.gid);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "chown failed";
+    if (uuid) notice(uuid, `Could not chown server files (${message}); starting anyway.`);
+  }
   return identity;
 }
 

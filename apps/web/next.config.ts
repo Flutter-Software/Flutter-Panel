@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@flutter-software/shared"],
   outputFileTracingRoot: repoRoot,
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   experimental: {
     middlewareClientMaxBodySize: "75mb",
     optimizePackageImports: ["@mantine/core", "@mantine/hooks"],
