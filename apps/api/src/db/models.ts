@@ -40,6 +40,7 @@ const nodeSchema = new Schema({
   daemonBase: { type: String, default: "/var/lib/flutter/volumes" },
   memoryMb: { type: Number, required: true },
   diskMb: { type: Number, required: true },
+  cpuCores: { type: Number, default: 0 },
   memoryOverallocate: { type: Number, default: 0 },
   diskOverallocate: { type: Number, default: 0 },
   daemonPort: { type: Number, default: 8080 },

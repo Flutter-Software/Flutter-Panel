@@ -145,10 +145,17 @@ export const nodeCreateSchema = z.object({
   daemonBase: z.string().min(1).max(255).optional().default("/var/lib/flutter/volumes"),
   memoryMb: z.number().int().positive(),
   diskMb: z.number().int().positive(),
+  cpuCores: z.number().int().min(1).max(256).optional().default(8),
   memoryOverallocate: z.number().int().min(-1).max(1000).optional().default(0),
   diskOverallocate: z.number().int().min(-1).max(1000).optional().default(0),
   daemonPort: z.number().int().min(1).max(65535).optional().default(8080),
   sftpPort: z.number().int().min(1).max(65535).optional().default(2022),
+});
+
+export const nodeUpdateSchema = z.object({
+  memoryMb: z.number().int().positive().optional(),
+  diskMb: z.number().int().positive().optional(),
+  cpuCores: z.number().int().min(1).max(256).optional(),
 });
 
 export const allocationCreateSchema = z.object({

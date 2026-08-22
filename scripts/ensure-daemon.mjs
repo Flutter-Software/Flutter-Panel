@@ -57,6 +57,7 @@ async function main() {
       daemonBase: "/var/lib/flutter/volumes",
       memoryMb: 8192,
       diskMb: 32768,
+      cpuCores: 8,
       memoryOverallocate: 0,
       diskOverallocate: 0,
       daemonPort: listenPort,

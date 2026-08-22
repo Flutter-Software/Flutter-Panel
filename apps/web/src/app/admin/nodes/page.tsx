@@ -19,6 +19,7 @@ type Node = {
   location: string;
   memoryMb: number;
   memoryCommittedMb: number;
+  cpuCores?: number;
   tokenPrefix: string | null;
   online: boolean;
   allocations: Allocation[];
@@ -118,6 +119,7 @@ export default function AdminNodesPage() {
                       ) : null}
                     </div>
                     <p className="mt-1 font-mono text-xs text-muted-foreground">{node.fqdn}</p>
+                    <p className="mt-0.5 font-mono text-[11px] text-muted-foreground/80">{node.id}</p>
                     {node.description ? (
                       <p className="mt-1 text-sm text-muted-foreground">{node.description}</p>
                     ) : null}

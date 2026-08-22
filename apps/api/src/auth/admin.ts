@@ -4,6 +4,7 @@ import {
   locationCreateSchema,
   locationUpdateSchema,
   nodeCreateSchema,
+  nodeUpdateSchema,
   parsePortSpec,
 } from "@flutter-software/shared";
 import { Allocation, Location, Node, Server } from "../db/models";
@@ -139,6 +140,7 @@ export async function listNodes() {
       fqdn: node.fqdn,
       memoryMb: node.memoryMb,
       diskMb: node.diskMb,
+      cpuCores: Number(node.cpuCores) || 0,
       memoryCommittedMb: memoryByNode.get(id) ?? 0,
       tokenPrefix: node.daemonToken
         ? String(node.daemonToken).slice(0, 12)
@@ -177,6 +179,7 @@ export async function createNode(body: unknown) {
     daemonBase: parsed.data.daemonBase,
     memoryMb: parsed.data.memoryMb,
     diskMb: parsed.data.diskMb,
+    cpuCores: parsed.data.cpuCores,
     memoryOverallocate: parsed.data.memoryOverallocate,
     diskOverallocate: parsed.data.diskOverallocate,
     daemonPort: parsed.data.daemonPort,
@@ -206,6 +209,21 @@ export async function createNode(body: unknown) {
         ? "sudo systemctl restart flutter-daemon"
         : "npm run dev:daemon",
   };
+}
+
+export async function updateNode(id: string, body: unknown) {
+  const parsed = nodeUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Invalid node", parsed.error.flatten());
+  }
+  const node = await Node.findById(id);
+  if (!node) throw FlutterError.notFound("Node not found");
+  if (parsed.data.memoryMb) node.memoryMb = parsed.data.memoryMb;
+  if (parsed.data.diskMb) node.diskMb = parsed.data.diskMb;
+  if (parsed.data.cpuCores) node.cpuCores = parsed.data.cpuCores;
+  await node.save();
+  const [updated] = (await listNodes()).filter((row) => row.id === id);
+  return updated;
 }
 
 export async function listAllocations(nodeId: string) {
@@ -252,6 +270,18 @@ export async function createAllocations(nodeId: string, body: unknown) {
     port: row.port,
     assigned: Boolean(row.serverId),
   }));
+}
+
+export async function deleteAllocation(nodeId: string, allocationId: string) {
+  const node = await Node.findById(nodeId);
+  if (!node) throw FlutterError.notFound("Node not found");
+  const row = await Allocation.findOne({ _id: allocationId, nodeId });
+  if (!row) throw FlutterError.notFound("Allocation not found");
+  if (row.serverId) {
+    throw FlutterError.conflict("Unassign or delete the server using this allocation first");
+  }
+  await Allocation.deleteOne({ _id: allocationId });
+  return { deleted: true };
 }
 
 export async function deleteNode(id: string) {

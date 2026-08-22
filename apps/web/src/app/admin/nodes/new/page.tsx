@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Check,
   Copy,
+  Cpu,
   Folder,
   Globe,
   HardDrive,
@@ -46,6 +47,7 @@ export default function CreateNodePage() {
   const [behindProxy, setBehindProxy] = useState(false);
   const [daemonBase, setDaemonBase] = useState("/var/lib/flutter/volumes");
   const [memoryGiB, setMemoryGiB] = useState("64");
+  const [cpuCores, setCpuCores] = useState("8");
   const [memoryOverallocate, setMemoryOverallocate] = useState("0");
   const [diskGiB, setDiskGiB] = useState("1024");
   const [diskOverallocate, setDiskOverallocate] = useState("0");
@@ -86,6 +88,7 @@ export default function CreateNodePage() {
             daemonBase,
             memoryMb: Math.round(Number(memoryGiB) * 1024),
             diskMb: Math.round(Number(diskGiB) * 1024),
+            cpuCores: Number(cpuCores),
             memoryOverallocate: Number(memoryOverallocate),
             diskOverallocate: Number(diskOverallocate),
             daemonPort: Number(daemonPort),
@@ -269,6 +272,20 @@ export default function CreateNodePage() {
                 required
                 value={memoryOverallocate}
                 onChange={(event) => setMemoryOverallocate(event.target.value)}
+              />
+            </Field>
+          </ResourceBlock>
+
+          <ResourceBlock icon={<Cpu className="size-4" />} title="CPU">
+            <Field label="Cores">
+              <UnitInput
+                unit="cores"
+                type="number"
+                min={1}
+                max={256}
+                required
+                value={cpuCores}
+                onChange={(event) => setCpuCores(event.target.value)}
               />
             </Field>
           </ResourceBlock>

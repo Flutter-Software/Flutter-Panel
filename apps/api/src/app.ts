@@ -454,6 +454,10 @@ export function createApp() {
     await requireAdmin(c);
     return c.json({ data: await admin.createNode(await c.req.json()) }, 201);
   });
+  app.patch("/admin/nodes/:id", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: { node: await admin.updateNode(c.req.param("id"), await c.req.json()) } });
+  });
   app.get("/admin/nodes/:id/allocations", async (c) => {
     await requireAdmin(c);
     return c.json({ data: { allocations: await admin.listAllocations(c.req.param("id")) } });
@@ -464,6 +468,12 @@ export function createApp() {
       { data: { allocations: await admin.createAllocations(c.req.param("id"), await c.req.json()) } },
       201,
     );
+  });
+  app.delete("/admin/nodes/:id/allocations/:allocationId", async (c) => {
+    await requireAdmin(c);
+    return c.json({
+      data: await admin.deleteAllocation(c.req.param("id"), c.req.param("allocationId")),
+    });
   });
   app.delete("/admin/nodes/:id", async (c) => {
     await requireAdmin(c);

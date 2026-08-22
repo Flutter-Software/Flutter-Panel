@@ -53,6 +53,7 @@ model Node {
   fqdn            String
   memoryMb        Int
   diskMb          Int
+  cpuCores        Int          @default(0)
   tokenHash       String?
   daemonListenUrl String?
   lastHeartbeatAt DateTime?

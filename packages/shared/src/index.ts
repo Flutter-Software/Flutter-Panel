@@ -42,6 +42,7 @@ export {
   locationCreateSchema,
   locationUpdateSchema,
   nodeCreateSchema,
+  nodeUpdateSchema,
   allocationCreateSchema,
   nestCreateSchema,
   nestUpdateSchema,
