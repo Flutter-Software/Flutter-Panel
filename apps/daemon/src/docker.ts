@@ -14,7 +14,7 @@ export type InstallSpec = {
   installScript?: string;
   installImage?: string;
   environment: Record<string, string>;
-  limits: { memoryBytes: number; diskBytes: number; cpuPercent: number };
+  limits: { memoryBytes: number; diskBytes: number; cpuPercent: number; cpuPinning?: number };
   allocation: { ip: string; port: number };
 };
 
@@ -206,27 +206,28 @@ function hostCpuCount() {
   }
 }
 
-function cpuLayout(cpuPercent: number, salt = "") {
+function cpuLayout(cpuPercent: number, cpuPinning: number, salt = "") {
   const host = hostCpuCount();
-  if (!(cpuPercent > 0)) {
-    return {
-      cores: host,
-      nanoCpus: undefined as number | undefined,
-      cpuShares: Math.max(1024, host * 1024),
-      cpuset: Array.from({ length: host }, (_, index) => index).join(","),
-    };
+  const unlimited = !(cpuPercent > 0);
+  const pinCount = cpuPinning > 0 ? Math.min(host, Math.max(1, Math.floor(cpuPinning))) : 0;
+  const quotaCores = unlimited ? 0 : Math.min(host, Math.max(1, Math.ceil(cpuPercent / 100)));
+  const cores = pinCount || quotaCores || host;
+
+  let cpuset: string | undefined;
+  if (pinCount > 0) {
+    let start = 0;
+    for (let index = 0; index < salt.length; index += 1) {
+      start = (start + salt.charCodeAt(index)) % host;
+    }
+    const pinned = Array.from({ length: pinCount }, (_, index) => (start + index) % host).sort((a, b) => a - b);
+    cpuset = pinned.join(",");
   }
-  const cores = Math.min(host, Math.max(1, Math.ceil(cpuPercent / 100)));
-  let start = 0;
-  for (let index = 0; index < salt.length; index += 1) {
-    start = (start + salt.charCodeAt(index)) % host;
-  }
-  const pinned = Array.from({ length: cores }, (_, index) => (start + index) % host).sort((a, b) => a - b);
+
   return {
     cores,
-    nanoCpus: cores * 1e9,
-    cpuShares: cores * 1024,
-    cpuset: pinned.join(","),
+    nanoCpus: unlimited ? undefined : quotaCores * 1e9,
+    cpuShares: unlimited ? undefined : quotaCores * 1024,
+    cpuset,
   };
 }
 
@@ -260,7 +261,9 @@ function specFingerprint(spec: InstallSpec) {
         startup: spec.startup,
         env: spec.environment,
         memoryBytes: spec.limits.memoryBytes,
+        diskBytes: spec.limits.diskBytes,
         cpuPercent: spec.limits.cpuPercent,
+        cpuPinning: spec.limits.cpuPinning ?? 0,
         ip: spec.allocation.ip,
         port: spec.allocation.port,
       }),
@@ -269,20 +272,25 @@ function specFingerprint(spec: InstallSpec) {
     .slice(0, 16);
 }
 
-async function applyCompute(containerId: string, cpuPercent: number, uuid: string) {
-  const compute = cpuLayout(cpuPercent, uuid);
+async function applyCompute(containerId: string, spec: InstallSpec) {
+  const compute = cpuLayout(spec.limits.cpuPercent, spec.limits.cpuPinning ?? 0, spec.uuid);
   const container = docker.getContainer(containerId);
+  const memory = spec.limits.memoryBytes > 0 ? spec.limits.memoryBytes : 0;
   try {
     await container.update({
-      NanoCpus: compute.nanoCpus,
-      CpuShares: compute.cpuShares,
-      CpusetCpus: compute.cpuset,
+      Memory: memory,
+      NanoCpus: compute.nanoCpus ?? 0,
+      CpuShares: compute.cpuShares ?? 0,
+      CpusetCpus: compute.cpuset ?? "",
     });
   } catch {
-    await container.update({
-      NanoCpus: compute.nanoCpus,
-      CpuShares: compute.cpuShares,
-    }).catch(() => undefined);
+    await container
+      .update({
+        Memory: memory,
+        NanoCpus: compute.nanoCpus ?? 0,
+        CpuShares: compute.cpuShares ?? 0,
+      })
+      .catch(() => undefined);
   }
 }
 
@@ -315,7 +323,7 @@ export function runtimeEnvironment(spec: InstallSpec): Record<string, string> {
     merged[key] = value.replace(/\r/g, "");
   }
   merged.STARTUP = substitute(merged.STARTUP || "", merged);
-  const layout = cpuLayout(spec.limits.cpuPercent, spec.uuid);
+  const layout = cpuLayout(spec.limits.cpuPercent, spec.limits.cpuPinning ?? 0, spec.uuid);
   return withCpuRuntimeEnv(merged, layout.cores);
 }
 
@@ -345,9 +353,10 @@ export function mergeSpec(base: InstallSpec | null, incoming: InstallSpec): Inst
     installImage: incoming.installImage || base.installImage,
     environment: { ...base.environment, ...incoming.environment },
     limits: {
-      memoryBytes: incoming.limits.memoryBytes || base.limits.memoryBytes,
-      diskBytes: incoming.limits.diskBytes || base.limits.diskBytes,
-      cpuPercent: incoming.limits.cpuPercent || base.limits.cpuPercent,
+      memoryBytes: incoming.limits.memoryBytes ?? base.limits.memoryBytes,
+      diskBytes: incoming.limits.diskBytes ?? base.limits.diskBytes,
+      cpuPercent: incoming.limits.cpuPercent ?? base.limits.cpuPercent,
+      cpuPinning: incoming.limits.cpuPinning ?? base.limits.cpuPinning ?? 0,
     },
     allocation: {
       ip: incoming.allocation.ip || base.allocation.ip,
@@ -740,7 +749,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
     }
 
     if (sameSpec && existing) {
-      await applyCompute(existing.Id, merged.limits.cpuPercent, uuid);
+      await applyCompute(existing.Id, merged);
       if (action === "restart" && existing.State.Running) {
         await docker.getContainer(existing.Id).restart({ t: 2 });
         return done("running");
@@ -759,7 +768,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
     const port = merged.allocation.port;
     const ip = merged.allocation.ip?.trim() || "0.0.0.0";
     const hostIp = ip === "0.0.0.0" || ip === "*" || ip === "::" ? "" : ip;
-    const compute = cpuLayout(merged.limits.cpuPercent, uuid);
+    const compute = cpuLayout(merged.limits.cpuPercent, merged.limits.cpuPinning ?? 0, uuid);
 
     const container = await docker.createContainer({
       name,
@@ -777,10 +786,10 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       HostConfig: {
         Init: true,
         Binds: [`${bindPath(root)}:/home/container`],
-        Memory: merged.limits.memoryBytes > 0 ? merged.limits.memoryBytes : undefined,
-        NanoCpus: compute.nanoCpus,
-        CpuShares: compute.cpuShares,
-        CpusetCpus: compute.cpuset,
+        Memory: merged.limits.memoryBytes > 0 ? merged.limits.memoryBytes : 0,
+        ...(compute.nanoCpus ? { NanoCpus: compute.nanoCpus } : {}),
+        ...(compute.cpuShares ? { CpuShares: compute.cpuShares } : {}),
+        ...(compute.cpuset ? { CpusetCpus: compute.cpuset } : {}),
         PortBindings: {
           [`${port}/tcp`]: [{ HostIp: hostIp, HostPort: String(port) }],
         },

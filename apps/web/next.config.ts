@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   experimental: {
-    middlewareClientMaxBodySize: "75mb",
+    middlewareClientMaxBodySize: "400mb",
     optimizePackageImports: ["@mantine/core", "@mantine/hooks"],
   },
   turbopack: {

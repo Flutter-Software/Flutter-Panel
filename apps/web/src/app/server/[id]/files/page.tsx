@@ -30,14 +30,13 @@ import {
 } from "lucide-react";
 import { FileIdeModal } from "@/components/file-ide";
 import { Button, Card } from "@/components/ui";
-import { api } from "@/lib/api";
+import { api, apiUpload } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useServerRecord } from "@/components/server-frame";
 import { can } from "@/lib/access";
+import { FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } from "@flutter-software/shared";
 
 type Entry = { name: string; kind: "file" | "dir"; size: number; modifiedAt: string };
-
-const UPLOAD_LIMIT = 50 * 1024 * 1024;
 
 type Menu =
   | { x: number; y: number; kind: "entry"; entry: Entry }
@@ -78,10 +77,15 @@ function isArchive(name: string) {
   return /\.(zip|tar|tgz|gz)$/i.test(name);
 }
 
-function fileToBase64(file: File) {
+function fileToBase64(file: File, onProgress?: (ratio: number) => void) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
+    reader.onprogress = (event) => {
+      if (!onProgress || !event.lengthComputable || event.total <= 0) return;
+      onProgress(Math.min(1, event.loaded / event.total));
+    };
     reader.onload = () => {
+      onProgress?.(1);
       const result = String(reader.result ?? "");
       const comma = result.indexOf(",");
       resolve(comma >= 0 ? result.slice(comma + 1) : result);
@@ -89,6 +93,43 @@ function fileToBase64(file: File) {
     reader.onerror = () => reject(new Error("Could not read file"));
     reader.readAsDataURL(file);
   });
+}
+
+function ProgressRing({ percent }: { percent: number }) {
+  const size = 40;
+  const stroke = 3.5;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const value = Math.max(0, Math.min(100, Math.round(percent)));
+  const offset = circumference - (value / 100) * circumference;
+  return (
+    <div className="relative size-10 shrink-0" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
+      <svg className="size-10 -rotate-90" viewBox={`0 0 ${size} ${size}`} aria-hidden>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          className="stroke-muted"
+          strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          className="stroke-primary transition-[stroke-dashoffset] duration-150"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+        />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tabular-nums leading-none">
+        {value}%
+      </span>
+    </div>
+  );
 }
 
 type FsEntry = {
@@ -190,6 +231,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const search = useSearchParams();
   const path = normalizeDir(search.get("path"));
   const server = useServerRecord();
+  const uploadLimit = server?.uploadLimitBytes || FILE_UPLOAD_LIMIT_BYTES;
   const canWrite = can(server, "file.write");
   const canDelete = can(server, "file.delete");
   const canArchive = can(server, "file.archive");
@@ -200,7 +242,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const [editing, setEditing] = useState<{ path: string; content: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState<string | null>(null);
+  const [percent, setPercent] = useState<number | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const lastIndex = useRef<number | null>(null);
@@ -407,15 +449,21 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     if (!window.confirm(`Extract ${entry.name} into this folder?`)) return;
     setError(null);
     setPending(true);
-    setProgress(`Extracting ${entry.name}…`);
+    setPercent(1);
+    const timer = window.setInterval(() => {
+      setPercent((current) => Math.min(90, (current ?? 1) + 2));
+    }, 250);
     try {
       await files({ action: "extract", path: joinPath(path, entry.name) });
+      window.clearInterval(timer);
+      setPercent(100);
       await load(path);
     } catch (err) {
+      window.clearInterval(timer);
       setError(err instanceof Error ? err.message : "Extract failed");
     } finally {
       setPending(false);
-      setProgress(null);
+      window.setTimeout(() => setPercent(null), 400);
     }
   }
 
@@ -461,27 +509,42 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     if (!list.length) return;
     setError(null);
     setPending(true);
+    const total = list.reduce((sum, item) => sum + Math.max(item.file.size, 1), 0);
+    let finished = 0;
+    const report = (loaded: number) => {
+      setPercent(Math.min(100, ((finished + loaded) / total) * 100));
+    };
     try {
-      for (let index = 0; index < list.length; index += 1) {
-        const item = list[index];
-        if (item.file.size > UPLOAD_LIMIT) {
-          throw new Error(`${item.relative} is larger than 50 MB`);
+      setPercent(0);
+      for (const item of list) {
+        if (item.file.size > uploadLimit) {
+          throw new Error(`${item.relative} is larger than ${formatUploadLimit(uploadLimit)}`);
         }
-        setProgress(`Uploading ${index + 1}/${list.length}: ${item.relative}`);
-        const contentBase64 = await fileToBase64(item.file);
-        await files({
-          action: "upload",
-          path,
-          name: item.relative,
-          contentBase64,
+        const contentBase64 = await fileToBase64(item.file, (ratio) => {
+          report(item.file.size * ratio * 0.25);
         });
+        await apiUpload(
+          `/api/v1/client/servers/${id}/files`,
+          {
+            action: "upload",
+            path,
+            name: item.relative,
+            contentBase64,
+          },
+          (ratio) => {
+            report(item.file.size * (0.25 + ratio * 0.75));
+          },
+        );
+        finished += Math.max(item.file.size, 1);
+        report(0);
       }
+      setPercent(100);
       await load(path);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setPending(false);
-      setProgress(null);
+      window.setTimeout(() => setPercent(null), 400);
     }
   }
 
@@ -502,7 +565,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             {path === "/" ? "/home/container" : `/home/container${path}`}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {percent !== null ? <ProgressRing percent={percent} /> : null}
           <input
             ref={inputRef}
             type="file"
@@ -536,7 +600,6 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
         </div>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {progress ? <p className="text-sm text-muted-foreground">{progress}</p> : null}
       {selected.size > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2">
           <p className="text-sm">

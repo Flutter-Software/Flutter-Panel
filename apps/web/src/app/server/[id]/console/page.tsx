@@ -7,7 +7,7 @@ import { StatGraph } from "@/components/status";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { browserConsoleSocketUrl } from "@/lib/console-socket";
-import { formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
+import { formatLimitMb, formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/access";
 
@@ -583,23 +583,23 @@ export default function ConsolePage({
           <SideStat label="Uptime" value={formatUptime(startedAt, Boolean(running))} />
           <SideStat
             label="CPU load"
-            value={`${cpuUsed.toFixed(1)}/${cpuLimit}%`}
+            value={cpuLimit > 0 ? `${cpuUsed.toFixed(1)}/${cpuLimit}%` : `${cpuUsed.toFixed(1)}% / ∞`}
             barValue={cpuUsed}
-            barMax={Math.max(cpuLimit, 1)}
+            barMax={cpuLimit > 0 ? cpuLimit : 100}
           />
           <SideStat
             label="Memory"
-            value={`${memPct.toFixed(1)}/${100}%`}
-            detail={`${formatMb(memUsed)} / ${formatMb(memLimit)}`}
-            barValue={memUsed}
-            barMax={Math.max(memLimit, 1)}
+            value={memLimit > 0 ? `${memPct.toFixed(1)}/${100}%` : "∞"}
+            detail={memLimit > 0 ? `${formatMb(memUsed)} / ${formatLimitMb(memLimit)}` : undefined}
+            barValue={memLimit > 0 ? memUsed : undefined}
+            barMax={memLimit > 0 ? memLimit : undefined}
           />
           <SideStat
             label="Disk"
-            value={`${diskPct.toFixed(1)}/${100}%`}
-            detail={`${formatMb(diskUsed)} / ${formatMb(diskLimit)}`}
-            barValue={diskUsed}
-            barMax={Math.max(diskLimit, 1)}
+            value={diskLimit > 0 ? `${diskPct.toFixed(1)}/${100}%` : "∞"}
+            detail={diskLimit > 0 ? `${formatMb(diskUsed)} / ${formatLimitMb(diskLimit)}` : undefined}
+            barValue={diskLimit > 0 ? diskUsed : undefined}
+            barMax={diskLimit > 0 ? diskLimit : undefined}
           />
         </div>
       </div>
@@ -610,8 +610,8 @@ export default function ConsolePage({
             tall
             label="CPU"
             value={cpuUsed}
-            max={Math.max(cpuLimit, 1)}
-            display={`${cpuUsed.toFixed(1)}% / ${cpuLimit}%`}
+            max={cpuLimit > 0 ? cpuLimit : 100}
+            display={`${cpuUsed.toFixed(1)}% / ${cpuLimit > 0 ? `${cpuLimit}%` : "∞"}`}
             series={series.cpu}
             className="text-primary"
           />
@@ -621,10 +621,11 @@ export default function ConsolePage({
             tall
             label="Memory"
             value={memUsed}
-            max={Math.max(memLimit, 1)}
-            display={`${formatMb(memUsed)} / ${formatMb(memLimit)}`}
+            max={memLimit > 0 ? memLimit : Math.max(memUsed, 1)}
+            display={memLimit > 0 ? `${formatMb(memUsed)} / ${formatLimitMb(memLimit)}` : "∞"}
             series={series.memory}
             className="text-status-running"
+            warn={memLimit > 0}
           />
         </Card>
         <Card className="p-4">

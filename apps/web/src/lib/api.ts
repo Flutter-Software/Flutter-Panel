@@ -67,14 +67,66 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     writeQuery(path, json);
     seedListCache(path, json);
   } else if (typeof window !== "undefined" && method !== "GET") {
-    const clean = path.split("?")[0];
-    invalidateQuery(clean);
-    const parent = clean.replace(/\/[^/]+$/, "");
-    if (parent.startsWith("/api/")) invalidateQuery(parent);
+    invalidateMutating(path);
   }
 
   return json as T;
 }
 
+function invalidateMutating(path: string) {
+  const clean = path.split("?")[0];
+  invalidateQuery(clean);
+  const parent = clean.replace(/\/[^/]+$/, "");
+  if (parent.startsWith("/api/")) invalidateQuery(parent);
+  if (clean.includes("/admin/eggs")) invalidateQuery("/api/v1/admin/nests");
+}
+
+export function apiUpload<T>(
+  path: string,
+  body: unknown,
+  onProgress?: (ratio: number) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("content-type", "application/json");
+    const csrf = csrfToken();
+    if (csrf) xhr.setRequestHeader(CSRF_HEADER, csrf);
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress || !event.lengthComputable || event.total <= 0) return;
+      onProgress(Math.min(1, event.loaded / event.total));
+    };
+    xhr.onload = () => {
+      let json: T | ApiError | null = null;
+      try {
+        json = JSON.parse(xhr.responseText) as T | ApiError;
+      } catch {
+        json = null;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message =
+          json && typeof json === "object" && "error" in json
+            ? json.error.message
+            : `Request failed (${xhr.status})`;
+        reject(new Error(message));
+        return;
+      }
+      invalidateMutating(path);
+      resolve(json as T);
+    };
+    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.onabort = () => reject(new Error("Upload cancelled"));
+    xhr.send(JSON.stringify(body));
+  });
+}
+
 export type MeResponse = { data: { user: PublicUser | null } };
 export type SetupResponse = { data: { initialized: boolean; userCount: number } };
+export type AuthResponse = {
+  data: {
+    user: PublicUser | null;
+    needsVerification: boolean;
+    email?: string;
+  };
+};

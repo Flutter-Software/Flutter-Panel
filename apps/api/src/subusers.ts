@@ -296,6 +296,7 @@ export async function completeInvite(c: Context, body: unknown) {
     email,
     passwordHash: await hashPassword(parsed.data.password),
     role: "user",
+    emailVerified: true,
   });
   await attachPendingSubusers(created);
   await createSession(c, created._id.toString(), true);

@@ -8,30 +8,9 @@ import { AdminCreateFooter, AdminCreateHeader, AdminSection } from "@/components
 import { Field, Input, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
+import { parseEggJson } from "../../egg-json";
 
 type NestOption = { id: string; name: string };
-
-function previewFromJson(raw: unknown): { name: string; image: string; variables: number } | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const record = raw as Record<string, unknown>;
-  const egg =
-    record.egg && typeof record.egg === "object" && !Array.isArray(record.egg)
-      ? (record.egg as Record<string, unknown>)
-      : record;
-  const name = typeof egg.name === "string" ? egg.name : "";
-  let image = "";
-  if (typeof egg.docker_image === "string") image = egg.docker_image;
-  else if (typeof egg.image === "string") image = egg.image;
-  else if (egg.docker_images && typeof egg.docker_images === "object" && !Array.isArray(egg.docker_images)) {
-    const first = Object.values(egg.docker_images as Record<string, unknown>).find(
-      (value) => typeof value === "string" && value,
-    );
-    if (typeof first === "string") image = first;
-  }
-  const variables = Array.isArray(egg.variables) ? egg.variables.length : 0;
-  if (!name && !image) return null;
-  return { name: name || "Imported egg", image, variables };
-}
 
 function ImportEggInner() {
   const router = useRouter();
@@ -45,22 +24,7 @@ function ImportEggInner() {
   const [pending, setPending] = useState(false);
   const resolvedNestId = nestId || nests[0]?.id || "";
 
-  const parsed = useMemo(() => {
-    const trimmed = jsonText.trim();
-    if (!trimmed) return { egg: null as unknown, preview: null as ReturnType<typeof previewFromJson>, parseError: null as string | null };
-    try {
-      const value = JSON.parse(trimmed) as unknown;
-      if (Array.isArray(value)) {
-        return { egg: null, preview: null, parseError: "Paste a single egg JSON object, not an array." };
-      }
-      if (!value || typeof value !== "object") {
-        return { egg: null, preview: null, parseError: "Egg JSON must be an object." };
-      }
-      return { egg: value, preview: previewFromJson(value), parseError: null };
-    } catch {
-      return { egg: null, preview: null, parseError: "JSON is not valid yet." };
-    }
-  }, [jsonText]);
+  const parsed = useMemo(() => parseEggJson(jsonText), [jsonText]);
 
   const selectedNest = nests.find((nest) => nest.id === resolvedNestId);
 
@@ -158,7 +122,7 @@ function ImportEggInner() {
           title="Egg JSON"
           description="The exported egg object from Pterodactyl or Pelican."
         >
-          <Field label="JSON" required>
+          <Field label="JSON">
             <Textarea
               value={jsonText}
               onChange={(event) => setJsonText(event.target.value)}
@@ -174,7 +138,7 @@ function ImportEggInner() {
         submitLabel="Import egg"
         pendingLabel="Importing…"
         pending={pending}
-        disabled={!resolvedNestId || !parsed.egg || Boolean(parsed.parseError)}
+        disabled={pending}
         summary={
           <span className="inline-flex items-center gap-2">
             <Upload className="size-4 text-primary" />

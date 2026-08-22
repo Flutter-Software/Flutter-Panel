@@ -10,6 +10,8 @@ async function main() {
   await connectMongo();
   const { seedDefaults } = await import("./eggs");
   await seedDefaults();
+  const { startScheduleRunner } = await import("./schedules");
+  startScheduleRunner();
   try {
     await connectRedis();
   } catch (error) {

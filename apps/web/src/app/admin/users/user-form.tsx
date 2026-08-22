@@ -2,14 +2,13 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, KeyRound, Shield, UserRound } from "lucide-react";
+import { Eye, EyeOff, Shield, UserRound } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import {
   AdminCreateFooter,
   AdminCreateHeader,
   AdminSection,
   Segmented,
-  Switch,
 } from "@/components/admin-create";
 import { Button, Field, Input } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -31,10 +30,14 @@ export function UserForm({
   const [confirm, setConfirm] = useState("");
   const [role, setRole] = useState<"user" | "admin">(initial?.role ?? "user");
   const [showPassword, setShowPassword] = useState(false);
-  const [rootAdmin, setRootAdmin] = useState(initial?.role === "admin");
 
   const creating = mode === "create";
-  const effectiveRole = rootAdmin ? "admin" : role;
+  const dirty =
+    username !== (initial?.username ?? "") ||
+    email !== (initial?.email ?? "") ||
+    password !== "" ||
+    confirm !== "" ||
+    role !== (initial?.role ?? "user");
 
   function generatePassword() {
     const chars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
@@ -63,7 +66,7 @@ export function UserForm({
       const body = {
         username: username.trim(),
         email: email.trim(),
-        role: effectiveRole,
+        role: role,
         ...(password ? { password } : {}),
       };
       if (creating) {
@@ -188,52 +191,24 @@ export function UserForm({
           title="Permissions"
           description="What this account can access in the panel."
         >
-          <Field
-            label="Role"
-            hint="Users only see servers they own. Admins can manage the entire panel."
-          >
-            <Segmented
-              value={role}
-              onChange={(value) => {
-                setRole(value);
-                if (value === "user") setRootAdmin(false);
-              }}
-              options={[
-                { value: "user", label: "User", icon: <UserRound className="size-3.5" /> },
-                { value: "admin", label: "Admin", icon: <Shield className="size-3.5" /> },
-              ]}
-            />
-          </Field>
-          <div className="flex items-start justify-between gap-4 pt-1">
-            <div>
-              <p className="text-sm">Root administrator</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Grants the admin role. Use this for people who should manage nodes and other users.
-              </p>
-            </div>
-            <Switch
-              checked={rootAdmin || role === "admin"}
-              onChange={(value) => {
-                setRootAdmin(value);
-                setRole(value ? "admin" : "user");
-              }}
-            />
-          </div>
-          <div className="rounded-lg border border-border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-            <p className="inline-flex items-center gap-2 font-medium text-foreground">
-              <KeyRound className="size-4 text-primary" />
-              Access summary
-            </p>
-            <p className="mt-1 text-xs">
-              {effectiveRole === "admin"
-                ? "This account can create locations, nodes, eggs, servers, and other users."
-                : "This account can sign in and manage only the servers assigned to it."}
-            </p>
-          </div>
+          <Segmented
+            value={role}
+            onChange={setRole}
+            options={[
+              { value: "user", label: "User", icon: <UserRound className="size-3.5" /> },
+              { value: "admin", label: "Admin", icon: <Shield className="size-3.5" /> },
+            ]}
+          />
+          <p className="text-sm text-muted-foreground">
+            {role === "admin"
+              ? "Admins can create locations, nodes, eggs, servers, and other users. Full access to the panel."
+              : "Users can sign in and manage only the servers assigned to this account."}
+          </p>
         </AdminSection>
       </div>
 
       <AdminCreateFooter
+        visible={creating || dirty || pending}
         cancelHref="/admin/users"
         submitLabel={creating ? "Create user" : "Save changes"}
         pendingLabel={creating ? "Creating…" : "Saving…"}
@@ -241,9 +216,11 @@ export function UserForm({
         summary={
           <span className="inline-flex items-center gap-2">
             <UserRound className="size-4 text-primary" />
-            {creating ? "Creating" : "Saving"}{" "}
-            <span className="font-medium text-foreground">{username || "user"}</span> as{" "}
-            <span className="font-medium text-foreground">{effectiveRole}</span>.
+            <span>
+              {creating ? "Creating" : "Saving"}{" "}
+              <span className="font-medium text-foreground">{username || "user"}</span> as{" "}
+              <span className="font-medium text-foreground">{role}</span>.
+            </span>
           </span>
         }
       />

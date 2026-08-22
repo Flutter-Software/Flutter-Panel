@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@flutter-software/shared";
 
-const PUBLIC = new Set(["/login"]);
+const PUBLIC = new Set(["/login", "/register", "/verify"]);
 const PUBLIC_FILE = /\.(?:ico|png|jpe?g|gif|webp|svg|woff2?)$/i;
 
 function isLoopbackHost(host: string) {
@@ -69,7 +69,7 @@ export function middleware(request: NextRequest) {
   if (!session && !PUBLIC.has(pathname) && !invite) {
     return redirectTo(request, "/login", pathname);
   }
-  if (session && pathname === "/login") {
+  if (session && (pathname === "/login" || pathname === "/register" || pathname === "/verify")) {
     const next = request.nextUrl.searchParams.get("next");
     return redirectTo(request, next?.startsWith("/") ? next : "/");
   }

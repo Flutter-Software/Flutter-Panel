@@ -126,7 +126,7 @@ export default function AdminNodesPage() {
                   </Link>
                   <div className="flex shrink-0 items-center gap-2">
                     <ButtonLink
-                      href={`/admin/nodes/${node.id}/allocations/new`}
+                      href={`/admin/nodes/${node.id}/allocations`}
                       variant="secondary"
                       size="sm"
                     >

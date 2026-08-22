@@ -8,6 +8,9 @@ const userSchema = new Schema(
     role: { type: String, required: true, default: "user" },
     totpSecret: { type: String, default: null },
     totpEnabled: { type: Boolean, required: true, default: false },
+    emailVerified: { type: Boolean, required: true, default: true },
+    emailVerifyHash: { type: String, default: null },
+    emailVerifyExpiresAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
@@ -50,6 +53,15 @@ const nodeSchema = new Schema({
   daemonToken: { type: String, default: null },
   daemonListenUrl: { type: String, default: null },
   lastHeartbeatAt: { type: Date, default: null },
+  daemonVersion: { type: String, default: null },
+  systemHostname: { type: String, default: null },
+  systemPlatform: { type: String, default: null },
+  systemRelease: { type: String, default: null },
+  systemArch: { type: String, default: null },
+  systemCpuThreads: { type: Number, default: 0 },
+  systemTotalMemoryMb: { type: Number, default: 0 },
+  uploadLimitMb: { type: Number, default: 250 },
+  maintenanceMode: { type: Boolean, default: false },
   createdAt: { type: Date, required: true, default: Date.now },
 });
 
@@ -101,6 +113,9 @@ const serverSchema = new Schema(
     memoryMb: { type: Number, required: true },
     diskMb: { type: Number, required: true },
     cpuPercent: { type: Number, required: true, default: 100 },
+    cpuPinning: { type: Number, required: true, default: 0 },
+    databaseLimit: { type: Number, required: true, default: 0 },
+    backupsEnabled: { type: Boolean, required: true, default: true },
     status: { type: String, required: true, default: "offline" },
     environment: { type: Schema.Types.Mixed, default: {} },
   },
@@ -121,6 +136,39 @@ const subuserSchema = new Schema(
 );
 
 subuserSchema.index({ serverId: 1, email: 1 }, { unique: true });
+
+const scheduleTaskSchema = new Schema(
+  {
+    action: { type: String, required: true, enum: ["power", "command", "backup"] },
+    payload: { type: String, default: "" },
+    timeOffset: { type: Number, required: true, default: 0 },
+    continueOnFailure: { type: Boolean, required: true, default: false },
+  },
+  { _id: true },
+);
+
+const scheduleSchema = new Schema(
+  {
+    serverId: { type: Schema.Types.ObjectId, ref: "Server", required: true, index: true },
+    name: { type: String, required: true },
+    enabled: { type: Boolean, required: true, default: true },
+    onlyWhenOnline: { type: Boolean, required: true, default: false },
+    cron: {
+      minute: { type: String, required: true, default: "*" },
+      hour: { type: String, required: true, default: "*" },
+      dayOfMonth: { type: String, required: true, default: "*" },
+      month: { type: String, required: true, default: "*" },
+      dayOfWeek: { type: String, required: true, default: "*" },
+    },
+    tasks: { type: [scheduleTaskSchema], default: [] },
+    lastRunAt: { type: Date, default: null },
+    lastStatus: { type: String, default: null },
+    lastError: { type: String, default: null },
+    nextRunAt: { type: Date, default: null, index: true },
+    runningAt: { type: Date, default: null },
+  },
+  { timestamps: true },
+);
 
 const panelSettingsSchema = new Schema(
   {
@@ -156,4 +204,5 @@ export const Nest = modelOf("Nest", nestSchema);
 export const Egg = modelOf("Egg", eggSchema);
 export const Server = modelOf("Server", serverSchema);
 export const Subuser = modelOf("Subuser", subuserSchema);
+export const Schedule = modelOf("Schedule", scheduleSchema);
 export const PanelSettings = modelOf("PanelSettings", panelSettingsSchema);

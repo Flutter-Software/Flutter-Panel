@@ -9,7 +9,7 @@ import { statusMeta } from "@/components/status";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
-import { formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
+import { formatCpuLimit, formatLimitMb, type ServerRecord, type ServerStatus } from "@/lib/types";
 
 const STATUS_PILL: Record<ServerStatus, string> = {
   running: "bg-status-running/15 text-status-running",
@@ -120,7 +120,7 @@ export default function AdminServersPage() {
                   <Meta label="Owner" value={server.ownerName ?? "—"} />
                   <Meta
                     label="Limits"
-                    value={`${formatMb(server.memory.limitMb)} · ${formatMb(server.disk.limitMb)} · ${server.cpu.limit}% CPU`}
+                    value={`${formatLimitMb(server.memory.limitMb)} · ${formatLimitMb(server.disk.limitMb)} · ${formatCpuLimit(server.cpu.limit)} CPU`}
                   />
                 </div>
               </Card>

@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthBrand } from "@/components/brand";
 import { Button, Input } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
-import { api, type SetupResponse } from "@/lib/api";
-import { PANEL_VERSION, type PublicUser } from "@flutter-software/shared";
+import { api, type AuthResponse, type SetupResponse } from "@/lib/api";
+import { PANEL_VERSION } from "@flutter-software/shared";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -54,10 +55,21 @@ export default function LoginPage() {
                       password: String(form.get("password")),
                       remember: true,
                     };
-                const result = await api<{ data: { user: PublicUser } }>(path, {
+                const result = await api<AuthResponse>(path, {
                   method: "POST",
                   body: JSON.stringify(body),
                 });
+                if (result.data.needsVerification && result.data.email) {
+                  const next = new URLSearchParams(window.location.search).get("next");
+                  const verify = `/verify?email=${encodeURIComponent(result.data.email)}`;
+                  router.push(
+                    next?.startsWith("/") ? `${verify}&next=${encodeURIComponent(next)}` : verify,
+                  );
+                  return;
+                }
+                if (!result.data.user) {
+                  throw new Error("Sign in failed");
+                }
                 setUser(result.data.user);
                 const next = new URLSearchParams(window.location.search).get("next");
                 router.push(next?.startsWith("/") ? next : "/");
@@ -115,7 +127,9 @@ export default function LoginPage() {
           ) : (
             <p className="mt-5 text-center text-sm text-muted-foreground">
               Don&apos;t have an account?{" "}
-              <span className="font-medium text-primary">Create an account</span>
+              <Link href="/register" className="font-medium text-primary">
+                Create an account
+              </Link>
             </p>
           )}
         </div>

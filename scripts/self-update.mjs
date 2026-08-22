@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 
 const root = resolve(process.env.FLUTTER_UPDATE_ROOT || join(dirname(fileURLToPath(import.meta.url)), ".."));
 const statusPath = join(root, ".flutter-update.json");
 const revisionPath = join(root, ".flutter-revision");
+const staging = join(root, ".update-work");
 const repo = (process.env.FLUTTER_UPDATE_REPO || "Flutter-Software/Flutter-Panel").trim();
 const ref = (process.env.FLUTTER_UPDATE_REF || "main").trim();
 
@@ -105,50 +105,82 @@ async function latestSha() {
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`GitHub API ${response.status}`);
-  const json = (await response.json());
+  const json = await response.json();
   return String(json.sha ?? "");
 }
 
-function skipCopy(from, srcRoot) {
-  const rel = relative(srcRoot, from).split(sep).join("/");
-  if (!rel || rel === ".") return true;
-  if (rel === ".env" || rel === "apps/web/.env.local" || rel === ".flutter-update.json" || rel === ".flutter-revision") return false;
-  if (rel === "node_modules" || rel.startsWith("node_modules/")) return false;
-  if (rel.includes("/node_modules/")) return false;
-  if (rel === ".next" || rel.startsWith(".next/") || rel.includes("/.next/")) return false;
-  if (rel.startsWith("apps/web/.next")) return false;
-  if (rel.startsWith("apps/daemon/data")) return false;
-  return true;
+function preserveLive(rel) {
+  if (!rel || rel === ".") return false;
+  if (rel === ".env" || rel === "apps/web/.env.local") return true;
+  if (rel === ".flutter-update.json" || rel === ".flutter-revision") return true;
+  if (rel === ".update-work" || rel.startsWith(".update-work/")) return true;
+  if (rel.startsWith("apps/daemon/data")) return true;
+  return false;
 }
 
-async function copyFrom(src) {
-  log(`Copying files from ${src}`);
-  await cp(src, root, {
+async function copyIfExists(from, to) {
+  if (!existsSync(from)) return;
+  await mkdir(dirname(to), { recursive: true });
+  await copyFile(from, to);
+}
+
+async function copyDirReplace(src, dest) {
+  if (!existsSync(src)) return;
+  await rm(dest, { recursive: true, force: true });
+  await mkdir(dirname(dest), { recursive: true });
+  await cp(src, dest, { recursive: true, force: true });
+}
+
+async function seedStagingEnv() {
+  await copyIfExists(join(root, ".env"), join(staging, ".env"));
+  await copyIfExists(join(root, "apps/web/.env.local"), join(staging, "apps/web/.env.local"));
+}
+
+async function prepareStaging() {
+  log("Preparing a staging copy. The live panel stays on the current version until this build succeeds.");
+  await rm(staging, { recursive: true, force: true });
+  await run("git", [
+    "clone",
+    "--depth",
+    "1",
+    "--branch",
+    ref,
+    `https://github.com/${repo}.git`,
+    staging,
+  ]);
+  await seedStagingEnv();
+}
+
+async function buildStaging() {
+  log("Installing packages in staging");
+  await run("npm", ["ci", "--include=dev"], staging);
+  log("Applying database schema");
+  await run("npm", ["run", "db:push"], staging);
+  log("Building panel in staging");
+  await run("npm", ["run", "build", "-w", "@flutter-software/web"], staging);
+}
+
+async function promoteStaging(sha) {
+  log("Staging build succeeded. Switching the live install over.");
+  if (hasGitRepo()) {
+    try {
+      await run("git", ["remote", "get-url", "origin"]);
+    } catch {
+      await run("git", ["remote", "add", "origin", `https://github.com/${repo}.git`]);
+    }
+    await run("git", ["fetch", "--tags", "origin", ref]);
+    log("Syncing compiled assets");
+    await copyDirReplace(join(staging, "node_modules"), join(root, "node_modules"));
+    await copyDirReplace(join(staging, "apps/web/.next"), join(root, "apps/web/.next"));
+    await run("git", ["reset", "--hard", sha || "FETCH_HEAD"]);
+    await run("git", ["submodule", "update", "--init", "--recursive"]).catch(() => undefined);
+    return;
+  }
+  await cp(staging, root, {
     recursive: true,
     force: true,
-    filter: (from) => skipCopy(from, src),
+    filter: (from) => !preserveLive(relative(staging, from).split(sep).join("/")),
   });
-}
-
-async function applyGit() {
-  log("Updating via git");
-  try {
-    await run("git", ["remote", "get-url", "origin"]);
-  } catch {
-    await run("git", ["remote", "add", "origin", `https://github.com/${repo}.git`]);
-  }
-  await run("git", ["fetch", "--tags", "origin", ref]);
-  await run("git", ["reset", "--hard", "FETCH_HEAD"]);
-  await run("git", ["submodule", "update", "--init", "--recursive"]).catch(() => undefined);
-}
-
-async function applyClone() {
-  const tmp = join(tmpdir(), `flutter-update-${process.pid}`);
-  await rm(tmp, { recursive: true, force: true });
-  log("Cloning latest source");
-  await run("git", ["clone", "--depth", "1", "--branch", ref, `https://github.com/${repo}.git`, tmp]);
-  await copyFrom(tmp);
-  await rm(tmp, { recursive: true, force: true });
 }
 
 async function restartPanel() {
@@ -170,27 +202,28 @@ async function restartPanel() {
   }
 }
 
+async function cleanupStaging() {
+  await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+}
+
 async function main() {
   await mkdir(root, { recursive: true });
   log(`Flutter updater`);
   log(`Install: ${root}`);
   log(`Source: github.com/${repo} (${ref})`);
 
+  if (!(await gitAvailable())) throw new Error("git is required to update the panel");
+
   const sha = await latestSha();
-  if (hasGitRepo()) await applyGit();
-  else if (await gitAvailable()) await applyClone();
-  else throw new Error("git is required to update the panel");
+  await prepareStaging();
+  await buildStaging();
+  await promoteStaging(sha);
+  promoted = true;
+  await cleanupStaging();
 
   if (sha) await writeFile(revisionPath, `${sha}\n`, "utf8");
 
-  log("Installing packages");
-  await run("npm", ["ci", "--include=dev"]);
-  log("Applying database schema");
-  await run("npm", ["run", "db:push"]);
-  log("Building panel");
-  await run("npm", ["run", "build", "-w", "@flutter-software/web"]);
-
-  log("Update files are in place.");
+  log("Update is in place.");
   await restartPanel();
   if (statusTimer) {
     clearTimeout(statusTimer);
@@ -199,9 +232,17 @@ async function main() {
   await writeStatus({ state: "ok", finishedAt: now(), error: null, sha });
 }
 
+let promoted = false;
+
 main().catch(async (error) => {
   const message = error instanceof Error ? error.message : String(error);
   log(`Update failed: ${message}`);
+  if (promoted) {
+    log("The live install may have been partially switched. Review the log before restarting services.");
+  } else {
+    log("Live panel files were not replaced. The current site is still the last working install.");
+  }
+  await cleanupStaging();
   if (statusTimer) {
     clearTimeout(statusTimer);
     statusTimer = null;

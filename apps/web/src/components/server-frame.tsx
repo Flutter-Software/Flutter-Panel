@@ -2,8 +2,10 @@
 
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import Link from "next/link";
+import { Wrench } from "lucide-react";
 import { ServerSidebar } from "@/components/sidebar";
 import { StatusDot } from "@/components/status";
+import { useAuth } from "@/components/auth-provider";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import type { ServerRecord } from "@/lib/types";
 
@@ -22,9 +24,12 @@ export function ServerFrame({
   serverId: string;
   children: ReactNode;
 }) {
+  const { user } = useAuth();
   const path = `/api/v1/client/servers/${serverId}`;
   const { data, error, reload } = useQuery<ServerPayload>(path);
   const server = data?.data.server ?? null;
+  const maintenance = Boolean(server?.nodeMaintenance);
+  const admin = user?.role === "admin";
 
   useEffect(() => {
     prefetchQuery(`/api/v1/client/servers/${serverId}/console/socket`);
@@ -57,7 +62,30 @@ export function ServerFrame({
               </p>
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">{children}</div>
+          {maintenance && admin ? (
+            <div className="shrink-0 border-b border-status-warn/30 bg-status-warn/10 px-4 py-2 text-sm text-status-warn sm:px-6">
+              This node is in maintenance mode. Users cannot open their servers.
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+            {maintenance && !admin && server ? (
+              <div className="mx-auto flex min-h-[60%] max-w-md flex-col items-center justify-center py-16 text-center">
+                <span className="flex size-12 items-center justify-center rounded-xl bg-status-warn/15 text-status-warn">
+                  <Wrench className="size-6" />
+                </span>
+                <h2 className="mt-4 text-xl font-semibold">Maintenance mode</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {server.node} is temporarily unavailable. Your server is still listed on the
+                  dashboard — check back after maintenance is complete.
+                </p>
+                <Link href="/" className="mt-6 text-sm text-primary hover:underline">
+                  Back to server list
+                </Link>
+              </div>
+            ) : (
+              children
+            )}
+          </div>
         </div>
       </div>
     </ServerRecordContext.Provider>

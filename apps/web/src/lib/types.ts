@@ -26,12 +26,17 @@ export type ServerRecord = {
   cpu: { used: number; limit: number };
   memory: { usedMb: number; limitMb: number };
   disk: { usedMb: number; limitMb: number };
+  cpuPinning?: number;
+  databaseLimit?: number;
+  backupsEnabled?: boolean;
   dockerImage?: string;
   startup?: string;
   stopCommand?: string;
   environment?: Record<string, string>;
   eggVariables?: { key: string; default: string; description: string }[];
   nodeOnline?: boolean;
+  nodeMaintenance?: boolean;
+  uploadLimitBytes?: number;
   sftpHost?: string;
   sftpPort?: number;
   permissions?: string[];
@@ -50,6 +55,14 @@ export function formatMb(value: number) {
   }
   if (value > 0 && value < 10) return `${value.toFixed(1)} MB`;
   return `${Number.isInteger(value) ? value : value.toFixed(1)} MB`;
+}
+
+export function formatLimitMb(value: number) {
+  return value > 0 ? formatMb(value) : "∞";
+}
+
+export function formatCpuLimit(value: number) {
+  return value > 0 ? `${value}%` : "∞";
 }
 
 export function formatGiB(mb: number) {

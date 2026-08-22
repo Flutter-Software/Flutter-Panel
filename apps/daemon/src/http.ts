@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { verifyDaemonRequest, readBearerToken } from "@flutter-software/shared/ticket";
-import { DAEMON_VERSION, type DaemonConfig } from "./config";
+import { DAEMON_VERSION, defaultConfigPath, readDaemonConfigFile, writeDaemonConfig, type DaemonConfig, type DaemonFileConfig } from "./config";
 import {
   destroyServer,
   getLogs,
@@ -36,6 +36,7 @@ function asInstallSpec(body: Record<string, unknown>, uuid: string): InstallSpec
     memoryBytes?: number;
     diskBytes?: number;
     cpuPercent?: number;
+    cpuPinning?: number;
   };
   const environment =
     body.environment && typeof body.environment === "object"
@@ -58,6 +59,7 @@ function asInstallSpec(body: Record<string, unknown>, uuid: string): InstallSpec
       memoryBytes: Number(limits.memoryBytes ?? 0),
       diskBytes: Number(limits.diskBytes ?? 0),
       cpuPercent: Number(limits.cpuPercent ?? 0),
+      cpuPinning: Number(limits.cpuPinning ?? 0),
     },
     allocation: {
       ip: String(allocation.ip ?? "0.0.0.0"),
@@ -89,6 +91,92 @@ export function createDaemonApp(config: DaemonConfig) {
       version: DAEMON_VERSION,
       nodeId: config.nodeId,
       docker,
+    });
+  });
+
+  app.use("/v1/node/*", async (c, next) => {
+    const token = readBearerToken(c.req.header("authorization")) || "";
+    const claims = verifyDaemonRequest(config.requestSecret, token);
+    if (!claims.ok) {
+      return c.json({ ok: false, error: claims.error }, 401);
+    }
+    if (claims.data.nodeId !== config.nodeId || claims.data.op !== "config" || claims.data.serverUuid !== "node") {
+      return c.json(
+        { ok: false, error: { code: "DAEMON_TICKET_INVALID", message: "Ticket does not allow node config access." } },
+        401,
+      );
+    }
+    await next();
+  });
+
+  app.get("/v1/node/config", async (c) => {
+    const file = await readDaemonConfigFile();
+    const content = JSON.stringify(
+      file ?? {
+        panelUrl: config.panelUrl,
+        nodeId: config.nodeId,
+        token: config.daemonToken,
+        requestSecret: config.requestSecret,
+        listenHost: config.listenHost,
+        listenPort: config.listenPort,
+        listenUrl: config.listenUrl,
+        dataDir: config.dataDir,
+      },
+      null,
+      2,
+    );
+    return c.json({ ok: true, data: { path: defaultConfigPath(), content: `${content}\n` } });
+  });
+
+  app.put("/v1/node/config", async (c) => {
+    const body = ((await c.req.json().catch(() => ({}))) as { content?: string }) ?? {};
+    let parsed: DaemonFileConfig;
+    try {
+      parsed = JSON.parse(String(body.content ?? "")) as DaemonFileConfig;
+    } catch {
+      return c.json(
+        { ok: false, error: { code: "INVALID_INPUT", message: "Config must be valid JSON." } },
+        400,
+      );
+    }
+    const required: (keyof DaemonFileConfig)[] = [
+      "panelUrl",
+      "nodeId",
+      "token",
+      "requestSecret",
+      "listenHost",
+      "listenPort",
+      "listenUrl",
+      "dataDir",
+    ];
+    for (const key of required) {
+      if (parsed[key] === undefined || parsed[key] === null || parsed[key] === "") {
+        return c.json(
+          { ok: false, error: { code: "INVALID_INPUT", message: `Missing ${key} in daemon config.` } },
+          400,
+        );
+      }
+    }
+    const listenPort = Number(parsed.listenPort);
+    if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
+      return c.json(
+        { ok: false, error: { code: "INVALID_INPUT", message: "listenPort must be between 1 and 65535." } },
+        400,
+      );
+    }
+    const path = await writeDaemonConfig({
+      panelUrl: String(parsed.panelUrl).replace(/\/+$/, ""),
+      nodeId: String(parsed.nodeId),
+      token: String(parsed.token),
+      requestSecret: String(parsed.requestSecret),
+      listenHost: String(parsed.listenHost),
+      listenPort,
+      listenUrl: String(parsed.listenUrl).replace(/\/+$/, ""),
+      dataDir: String(parsed.dataDir),
+    });
+    return c.json({
+      ok: true,
+      data: { path, restartRequired: true },
     });
   });
 
@@ -213,6 +301,7 @@ export function createDaemonApp(config: DaemonConfig) {
           path,
           String(body.name ?? ""),
           String(body.contentBase64 ?? ""),
+          Number(body.maxBytes ?? 0) || undefined,
         ),
       });
     }

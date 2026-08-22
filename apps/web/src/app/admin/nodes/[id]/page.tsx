@@ -1,232 +1,160 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
-import { AdminError, ListSkeleton } from "@/components/admin-table";
-import { Button, ButtonLink, Card, Field, Input } from "@/components/ui";
-import { cn } from "@/lib/cn";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { PANEL_VERSION } from "@flutter-software/shared";
+import { Cpu, HardDrive, MemoryStick, Server, Trash2 } from "lucide-react";
+import { AdminError } from "@/components/admin-table";
+import { useAdminNode } from "@/components/node-frame";
+import { Button, Card } from "@/components/ui";
 import { api } from "@/lib/api";
-import { useQuery } from "@/lib/query";
+import { formatGiB } from "@/lib/types";
 
-type Allocation = { id: string; ip: string; port: number; assigned: boolean };
-type Node = {
-  id: string;
-  name: string;
-  fqdn: string;
-  memoryMb: number;
-  diskMb: number;
-  cpuCores: number;
-  online: boolean;
-  location: string;
-  allocations: Allocation[];
-};
-
-function mbToGiB(mb: number) {
-  const gib = mb / 1024;
-  return Number.isInteger(gib) ? String(gib) : String(Math.round(gib * 10) / 10);
+function Bar({ used, total, label }: { used: number; total: number; label: string }) {
+  const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="tabular-nums text-foreground/80">
+          {formatGiB(used)} / {formatGiB(total)}
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
 }
 
-export default function NodeDetailPage() {
-  const params = useParams<{ id: string }>();
-  const { data, error, reload } = useQuery<{ data: { nodes: Node[] } }>("/api/v1/admin/nodes");
-  const node = data?.data.nodes.find((row) => row.id === params.id) ?? null;
-
-  const [memoryGiB, setMemoryGiB] = useState("");
-  const [diskGiB, setDiskGiB] = useState("");
-  const [cpuCores, setCpuCores] = useState("");
-  const [saveError, setSaveError] = useState<string | null>(null);
+export default function NodeAboutPage() {
+  const router = useRouter();
+  const { node, reload } = useAdminNode();
+  const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
+  if (!node) return null;
 
-  useEffect(() => {
-    if (!node) return;
-    setMemoryGiB(mbToGiB(node.memoryMb));
-    setDiskGiB(mbToGiB(node.diskMb));
-    setCpuCores(node.cpuCores > 0 ? String(node.cpuCores) : "");
-  }, [node?.id, node?.memoryMb, node?.diskMb, node?.cpuCores]);
+  const nodeId = node.id;
+  const nodeName = node.name;
 
-  const allocations = node?.allocations ?? [];
-  const usedCount = allocations.filter((row) => row.assigned).length;
+  const version = node.daemonVersion ? `v${node.daemonVersion.replace(/^v/, "")}` : "—";
+  const latest = `v${PANEL_VERSION.replace(/^v/, "")}`;
+  const threads = node.system.cpuThreads || node.cpuCores || 0;
 
-  async function onSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!node) return;
-    setSaveError(null);
+  async function onDelete() {
+    if (!window.confirm(`Delete node ${nodeName}? This cannot be undone.`)) return;
+    setError(null);
     setPending(true);
     try {
-      await api(`/api/v1/admin/nodes/${node.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          memoryMb: Math.round(Number(memoryGiB) * 1024),
-          diskMb: Math.round(Number(diskGiB) * 1024),
-          cpuCores: Number(cpuCores),
-        }),
-      });
-      await reload();
+      await api(`/api/v1/admin/nodes/${nodeId}`, { method: "DELETE" });
+      router.push("/admin/nodes");
+      router.refresh();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Save failed");
-    } finally {
+      setError(err instanceof Error ? err.message : "Delete failed");
       setPending(false);
-    }
-  }
-
-  async function onRemoveAllocation(row: Allocation) {
-    if (!node) return;
-    if (row.assigned) return;
-    if (!window.confirm(`Remove allocation ${row.ip}:${row.port}?`)) return;
-    setSaveError(null);
-    setRemovingId(row.id);
-    try {
-      await api(`/api/v1/admin/nodes/${node.id}/allocations/${row.id}`, { method: "DELETE" });
       await reload();
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Could not remove allocation");
-    } finally {
-      setRemovingId(null);
     }
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
-      <div>
-        <Link
-          href="/admin/nodes"
-          className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" />
-          Nodes
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{node?.name ?? "Node"}</h1>
-        <p className="mt-1 font-mono text-sm text-muted-foreground">{node?.fqdn ?? "\u00a0"}</p>
-        {node ? <p className="mt-1 font-mono text-xs text-muted-foreground">id {node.id}</p> : null}
+    <div className="grid items-start gap-4 xl:grid-cols-[1.4fr_1fr]">
+      <div className="space-y-4">
+        <Card className="p-5 sm:p-6">
+          <h2 className="text-sm font-semibold">Information</h2>
+          <dl className="mt-4 space-y-3 text-sm">
+            <div className="flex items-start justify-between gap-4">
+              <dt className="text-muted-foreground">Daemon version</dt>
+              <dd className="font-mono text-right">
+                {version}{" "}
+                <span className="text-muted-foreground">(latest: {latest})</span>
+              </dd>
+            </div>
+            <div className="border-t border-border pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                System information
+              </p>
+              <div className="mt-3 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-muted-foreground">Total CPU threads</span>
+                  <span className="tabular-nums">{threads || "—"}</span>
+                </div>
+                {node.system.hostname ? (
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Hostname</span>
+                    <span className="font-mono text-xs">{node.system.hostname}</span>
+                  </div>
+                ) : null}
+                {node.system.platform ? (
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Operating system</span>
+                    <span className="font-mono text-xs">
+                      {node.system.platform}
+                      {node.system.release ? ` ${node.system.release}` : ""}
+                      {node.system.arch ? ` · ${node.system.arch}` : ""}
+                    </span>
+                  </div>
+                ) : null}
+                {node.system.totalMemoryMb ? (
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Host memory</span>
+                    <span className="tabular-nums">{formatGiB(node.system.totalMemoryMb)}</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </dl>
+        </Card>
+
+        <Card className="p-5 sm:p-6">
+          <h2 className="text-sm font-semibold text-destructive">Delete node</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Removes this machine from the panel. Servers on it must be deleted first.
+          </p>
+          <AdminError message={error} />
+          <Button
+            type="button"
+            variant="danger"
+            className="mt-4"
+            disabled={pending || node.serverCount > 0}
+            onClick={() => void onDelete()}
+          >
+            <Trash2 className="size-4" />
+            {pending ? "Deleting…" : "Delete node"}
+          </Button>
+        </Card>
       </div>
 
-      <AdminError message={saveError ?? error} />
-
-      {node ? (
-        <>
-          <form onSubmit={onSave}>
-            <Card className="p-5 sm:p-6">
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold">Resources</h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Limits advertised for this machine. {node.location ? `${node.location} · ` : ""}
-                    {node.online ? "Online" : "Offline"}
-                  </p>
-                </div>
-                <Button type="submit" size="sm" disabled={pending}>
-                  {pending ? "Saving…" : "Save"}
-                </Button>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Field label="Memory" required>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      min={1}
-                      step="0.5"
-                      required
-                      className="pr-12"
-                      value={memoryGiB}
-                      onChange={(event) => setMemoryGiB(event.target.value)}
-                    />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                      GiB
-                    </span>
-                  </div>
-                </Field>
-                <Field label="CPU cores" required>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={256}
-                      required
-                      className="pr-14"
-                      value={cpuCores}
-                      onChange={(event) => setCpuCores(event.target.value)}
-                    />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                      cores
-                    </span>
-                  </div>
-                </Field>
-                <Field label="Disk" required>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      min={1}
-                      step="0.5"
-                      required
-                      className="pr-12"
-                      value={diskGiB}
-                      onChange={(event) => setDiskGiB(event.target.value)}
-                    />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                      GiB
-                    </span>
-                  </div>
-                </Field>
-              </div>
-            </Card>
-          </form>
-
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold">
-              Allocations
-              <span className="ml-2 font-normal text-muted-foreground">
-                {usedCount} used / {allocations.length} total
-              </span>
-            </h2>
-            <ButtonLink href={`/admin/nodes/${node.id}/allocations/new`} size="sm">
-              <Plus className="size-3.5" />
-              Add allocations
-            </ButtonLink>
-          </div>
-
-          {allocations.length ? (
-            <div className="flex flex-wrap gap-2">
-              {allocations.map((row) => (
-                <span
-                  key={row.id}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-mono text-xs",
-                    row.assigned ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
-                  )}
-                >
-                  {row.ip}:{row.port}
-                  {row.assigned ? (
-                    <span className="font-sans text-[10px] font-semibold uppercase tracking-wide">
-                      used
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-destructive"
-                      aria-label={`Remove ${row.ip}:${row.port}`}
-                      disabled={removingId === row.id}
-                      onClick={() => onRemoveAllocation(row)}
-                    >
-                      <Trash2 className="size-3" />
-                    </button>
-                  )}
-                </span>
-              ))}
+      <Card className="p-5 sm:p-6">
+        <h2 className="text-sm font-semibold">At-a-glance</h2>
+        <div className="mt-5 space-y-5">
+          <div className="flex items-start gap-3">
+            <HardDrive className="mt-0.5 size-4 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <Bar used={node.diskCommittedMb} total={node.diskMb} label="Disk space allocation" />
             </div>
-          ) : (
-            <Card className="px-4 py-10 text-center text-sm text-muted-foreground">
-              No allocations yet. Add an IP and port range to place servers on this node.
-            </Card>
-          )}
-        </>
-      ) : data && !error ? (
-        <AdminError message="Node not found" />
-      ) : !error ? (
-        <ListSkeleton rows={2} />
-      ) : null}
+          </div>
+          <div className="flex items-start gap-3">
+            <MemoryStick className="mt-0.5 size-4 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <Bar used={node.memoryCommittedMb} total={node.memoryMb} label="Memory allocation" />
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-4 text-sm">
+            <span className="inline-flex items-center gap-2 text-muted-foreground">
+              <Server className="size-4" />
+              Total servers
+            </span>
+            <span className="tabular-nums font-medium">{node.serverCount}</span>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="inline-flex items-center gap-2 text-muted-foreground">
+              <Cpu className="size-4" />
+              Advertised cores
+            </span>
+            <span className="tabular-nums font-medium">{node.cpuCores || "—"}</span>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

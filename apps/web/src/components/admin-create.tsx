@@ -149,6 +149,7 @@ export function AdminCreateFooter({
   pending,
   pendingLabel,
   disabled,
+  visible = true,
 }: {
   summary: ReactNode;
   cancelHref: string;
@@ -156,18 +157,25 @@ export function AdminCreateFooter({
   pending?: boolean;
   pendingLabel?: string;
   disabled?: boolean;
+  visible?: boolean;
 }) {
+  if (!visible) return null;
   return (
-    <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t border-border bg-background/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-      <div className="text-sm text-muted-foreground">{summary}</div>
-      <div className="flex items-center gap-2">
-        <ButtonLink href={cancelHref} variant="ghost">
-          Cancel
-        </ButtonLink>
-        <Button type="submit" disabled={pending || disabled}>
-          {pending ? pendingLabel ?? "Creating…" : submitLabel}
-        </Button>
+    <>
+      <div className="h-16 shrink-0" aria-hidden />
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background/90 px-4 py-3 backdrop-blur md:left-20 sm:px-6">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted-foreground">{summary}</div>
+          <div className="flex items-center gap-2">
+            <ButtonLink href={cancelHref} variant="ghost">
+              Cancel
+            </ButtonLink>
+            <Button type="submit" disabled={pending || disabled}>
+              {pending ? pendingLabel ?? "Creating…" : submitLabel}
+            </Button>
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

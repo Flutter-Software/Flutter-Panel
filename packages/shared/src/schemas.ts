@@ -52,6 +52,15 @@ export const loginSchema = z.object({
   remember: z.boolean().optional(),
 });
 
+export const verifyEmailSchema = z.object({
+  email: z.string().email(),
+  code: z.string().regex(/^\d{6}$/, "Enter the 6-digit code"),
+});
+
+export const resendVerifySchema = z.object({
+  email: z.string().email(),
+});
+
 export const inviteCompleteSchema = z.object({
   token: z.string().min(16).max(200),
   username: registerSchema.shape.username,
@@ -161,12 +170,37 @@ export const nodeCreateSchema = z.object({
   diskOverallocate: z.number().int().min(-1).max(1000).optional().default(0),
   daemonPort: z.number().int().min(1).max(65535).optional().default(8080),
   sftpPort: z.number().int().min(1).max(65535).optional().default(2022),
+  uploadLimitMb: z.number().int().min(1).max(2048).optional().default(250),
+  maintenanceMode: z.boolean().optional().default(false),
 });
 
 export const nodeUpdateSchema = z.object({
+  locationId: objectIdSchema.optional(),
+  name: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "1–100 chars: a–z, 0–9, dashes")
+    .optional(),
+  description: z.string().max(240).optional(),
+  public: z.boolean().optional(),
+  fqdn: z.string().min(1).max(255).optional(),
+  scheme: z.enum(["https", "http"]).optional(),
+  behindProxy: z.boolean().optional(),
+  daemonBase: z.string().min(1).max(255).optional(),
   memoryMb: z.number().int().positive().optional(),
   diskMb: z.number().int().positive().optional(),
   cpuCores: z.number().int().min(1).max(256).optional(),
+  memoryOverallocate: z.number().int().min(-1).max(1000).optional(),
+  diskOverallocate: z.number().int().min(-1).max(1000).optional(),
+  daemonPort: z.number().int().min(1).max(65535).optional(),
+  sftpPort: z.number().int().min(1).max(65535).optional(),
+  uploadLimitMb: z.number().int().min(1).max(2048).optional(),
+  maintenanceMode: z.boolean().optional(),
+});
+
+export const daemonConfigSaveSchema = z.object({
+  content: z.string().min(2).max(100_000),
 });
 
 export const allocationCreateSchema = z.object({
@@ -208,7 +242,7 @@ export const eggUpdateSchema = eggCreateSchema.partial();
 
 export const eggImportSchema = z.object({
   nestId: objectIdSchema,
-  egg: z.record(z.unknown()),
+  egg: z.any(),
 });
 
 export const serverCreateSchema = z.object({
@@ -218,9 +252,12 @@ export const serverCreateSchema = z.object({
   nodeId: objectIdSchema,
   allocationId: objectIdSchema,
   ownerId: objectIdSchema.optional(),
-  memoryMb: z.number().int().positive(),
-  diskMb: z.number().int().positive(),
-  cpuPercent: z.number().int().positive().max(800).optional().default(100),
+  memoryMb: z.number().int().min(0).max(16_777_216),
+  diskMb: z.number().int().min(0).max(16_777_216),
+  cpuPercent: z.number().int().min(0).max(800).optional().default(100),
+  cpuPinning: z.number().int().min(0).max(256).optional().default(0),
+  databaseLimit: z.number().int().min(0).max(50).optional().default(0),
+  backupsEnabled: z.boolean().optional().default(true),
   environment: z.record(z.string()).optional().default({}),
 });
 
@@ -229,19 +266,83 @@ export const serverUpdateSchema = z.object({
   description: z.string().max(240).optional(),
   ownerId: objectIdSchema.optional(),
   allocationId: objectIdSchema.optional(),
-  memoryMb: z.number().int().positive().optional(),
-  diskMb: z.number().int().positive().optional(),
-  cpuPercent: z.number().int().positive().max(800).optional(),
+  memoryMb: z.number().int().min(0).max(16_777_216).optional(),
+  diskMb: z.number().int().min(0).max(16_777_216).optional(),
+  cpuPercent: z.number().int().min(0).max(800).optional(),
+  cpuPinning: z.number().int().min(0).max(256).optional(),
+  databaseLimit: z.number().int().min(0).max(50).optional(),
+  backupsEnabled: z.boolean().optional(),
   environment: z.record(z.string()).optional(),
 });
 
 export const powerActionSchema = z.enum(["start", "stop", "restart", "kill"]);
 export type PowerAction = z.infer<typeof powerActionSchema>;
 
+const cronFieldSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[\d*,/\-A-Za-z]+$/, "Invalid cron field");
+
+export const scheduleCronSchema = z.object({
+  minute: cronFieldSchema.default("*"),
+  hour: cronFieldSchema.default("*"),
+  dayOfMonth: cronFieldSchema.default("*"),
+  month: cronFieldSchema.default("*"),
+  dayOfWeek: cronFieldSchema.default("*"),
+});
+
+export const scheduleTaskActionSchema = z.enum(["power", "command", "backup"]);
+export type ScheduleTaskAction = z.infer<typeof scheduleTaskActionSchema>;
+
+export const scheduleTaskSchema = z
+  .object({
+    id: z.string().optional(),
+    action: scheduleTaskActionSchema,
+    payload: z.string().max(500).default(""),
+    timeOffset: z.number().int().min(0).max(900).default(0),
+    continueOnFailure: z.boolean().default(false),
+  })
+  .superRefine((data, ctx) => {
+    if (data.action === "power" && !powerActionSchema.safeParse(data.payload).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Choose start, stop, restart, or kill",
+        path: ["payload"],
+      });
+    }
+    if (data.action === "command" && !data.payload.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Command is required",
+        path: ["payload"],
+      });
+    }
+  });
+
+export const scheduleUpsertSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  enabled: z.boolean().optional().default(true),
+  onlyWhenOnline: z.boolean().optional().default(false),
+  cron: scheduleCronSchema,
+  tasks: z.array(scheduleTaskSchema).min(1).max(10),
+});
+
 export const heartbeatSchema = z.object({
   nodeId: objectIdSchema,
   listenUrl: z.string().url(),
   version: z.string().min(1).max(32).optional(),
+  system: z
+    .object({
+      hostname: z.string().max(255).optional(),
+      platform: z.string().max(64).optional(),
+      release: z.string().max(64).optional(),
+      arch: z.string().max(32).optional(),
+      cpuThreads: z.number().int().min(1).max(8192).optional(),
+      totalMemoryMb: z.number().int().min(0).optional(),
+    })
+    .optional(),
 });
 
 export const serverStatusSchema = z.enum([

@@ -32,6 +32,8 @@ export function serverHomeHref(server: ServerRecord) {
       if (canOpenSettings(server)) return `/server/${server.id}/settings`;
       continue;
     }
+    if (key === "databases" && !(server.databaseLimit && server.databaseLimit > 0)) continue;
+    if (key === "backups" && server.backupsEnabled === false) continue;
     const perm = NAV_PERMISSION[key];
     if (perm && can(server, perm)) return `/server/${server.id}/${key}`;
   }

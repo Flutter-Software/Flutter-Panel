@@ -22,6 +22,9 @@ export const SERVER_PERMISSIONS = [
   "user.delete",
   "database.read",
   "schedule.read",
+  "schedule.create",
+  "schedule.update",
+  "schedule.delete",
 ] as const;
 
 export type ServerPermission = (typeof SERVER_PERMISSIONS)[number];
@@ -98,6 +101,17 @@ export const PERMISSION_GROUPS: {
       { key: "user.create", label: "Create", description: "Add subusers and send invites." },
       { key: "user.update", label: "Update", description: "Change subuser permissions." },
       { key: "user.delete", label: "Delete", description: "Remove subusers." },
+    ],
+  },
+  {
+    key: "schedules",
+    label: "Schedules",
+    description: "Timed power, command, and backup jobs.",
+    permissions: [
+      { key: "schedule.read", label: "Read", description: "View schedules and their tasks." },
+      { key: "schedule.create", label: "Create", description: "Create new schedules." },
+      { key: "schedule.update", label: "Update", description: "Edit schedules and run them now." },
+      { key: "schedule.delete", label: "Delete", description: "Delete schedules." },
     ],
   },
 ];

@@ -215,12 +215,24 @@ export async function deleteEgg(id: string) {
   return { ok: true };
 }
 
-function unwrapImportedEgg(raw: Record<string, unknown>): Record<string, unknown> {
-  const nested = raw.egg;
-  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-    const egg = nested as Record<string, unknown>;
-    if ("name" in egg || "docker_images" in egg || "docker_image" in egg || "startup" in egg) {
-      return egg;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function unwrapImportedEgg(raw: unknown): Record<string, unknown> {
+  if (!isRecord(raw)) return {};
+  const nested = [raw.egg, raw.attributes, isRecord(raw.data) ? raw.data : null, isRecord(raw.data) ? raw.data.attributes : null, isRecord(raw.data) ? raw.data.egg : null];
+  for (const candidate of nested) {
+    if (!isRecord(candidate)) continue;
+    if (
+      "name" in candidate ||
+      "docker_images" in candidate ||
+      "docker_image" in candidate ||
+      "image" in candidate ||
+      "startup" in candidate ||
+      "scripts" in candidate
+    ) {
+      return candidate;
     }
   }
   return raw;
@@ -234,11 +246,17 @@ function pickDockerImage(raw: Record<string, unknown>): string {
     return raw.image.trim();
   }
   const images = raw.docker_images;
-  if (images && typeof images === "object" && !Array.isArray(images)) {
-    const values = Object.values(images as Record<string, unknown>).filter(
-      (value): value is string => typeof value === "string" && value.trim().length > 0,
-    );
-    if (values[0]) return values[0].trim();
+  if (Array.isArray(images)) {
+    const first = images.find((value): value is string => typeof value === "string" && value.trim().length > 0);
+    if (first) return first.trim();
+  }
+  if (isRecord(images)) {
+    const values = Object.values(images).flatMap((value) => {
+      if (typeof value === "string" && value.trim()) return [value.trim()];
+      if (isRecord(value) && typeof value.image === "string" && value.image.trim()) return [value.image.trim()];
+      return [];
+    });
+    if (values[0]) return values[0];
   }
   return "";
 }
@@ -276,11 +294,12 @@ function pickStopCommand(raw: Record<string, unknown>): string {
 }
 
 function pickInstall(raw: Record<string, unknown>): { script: string; image: string } {
-  const scripts = (raw.scripts ?? {}) as Record<string, unknown>;
-  const installation = (scripts.installation ?? {}) as Record<string, unknown>;
+  const scripts = isRecord(raw.scripts) ? raw.scripts : {};
+  const installation = isRecord(scripts.installation) ? scripts.installation : {};
+  const scriptBlock = isRecord(raw.script) ? raw.script : {};
   return {
-    script: unixNewlines(asString(installation.script)),
-    image: asString(installation.container, "alpine:3.20") || "alpine:3.20",
+    script: unixNewlines(asString(installation.script || scriptBlock.install)),
+    image: asString(installation.container || scriptBlock.container, "alpine:3.20") || "alpine:3.20",
   };
 }
 
@@ -316,10 +335,11 @@ export async function importEgg(body: unknown) {
   }
 
   const install = pickInstall(raw);
+  const name = (asString(raw.name, "Imported egg") || "Imported egg").slice(0, 64);
   const row = await Egg.create({
     nestId: parsed.data.nestId,
-    name: asString(raw.name, "Imported egg") || "Imported egg",
-    description: asString(raw.description),
+    name,
+    description: asString(raw.description).slice(0, 2000),
     dockerImage,
     startup: asString(raw.startup),
     stopCommand: pickStopCommand(raw) || "stop",

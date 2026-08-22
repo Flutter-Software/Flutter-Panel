@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Box, Cpu, HardDrive, MemoryStick, Network, Server, Trash2, UserRound } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { AdminCreateFooter, AdminCreateHeader, AdminSection } from "@/components/admin-create";
+import { AdminCreateFooter, AdminCreateHeader, AdminSection, Switch } from "@/components/admin-create";
 import { Button, Field, Input, Select, Textarea } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { api } from "@/lib/api";
@@ -46,6 +46,9 @@ export function ServerForm({
   const [memoryMb, setMemoryMb] = useState(String(initial?.memory.limitMb ?? 1024));
   const [diskMb, setDiskMb] = useState(String(initial?.disk.limitMb ?? 4096));
   const [cpuPercent, setCpuPercent] = useState(String(initial?.cpu.limit ?? 100));
+  const [cpuPinning, setCpuPinning] = useState(String(initial?.cpuPinning ?? 0));
+  const [databaseLimit, setDatabaseLimit] = useState(String(initial?.databaseLimit ?? 0));
+  const [backupsEnabled, setBackupsEnabled] = useState(initial?.backupsEnabled !== false);
 
   const eggs = useMemo(
     () => nests.flatMap((nest) => nest.eggs.map((egg) => ({ ...egg, nest: nest.name }))),
@@ -84,6 +87,9 @@ export function ServerForm({
       memoryMb: Number(memoryMb),
       diskMb: Number(diskMb),
       cpuPercent: Number(cpuPercent),
+      cpuPinning: Number(cpuPinning),
+      databaseLimit: Number(databaseLimit),
+      backupsEnabled,
       ...(creating ? { eggId, nodeId } : {}),
     };
     try {
@@ -127,9 +133,16 @@ export function ServerForm({
     eggId &&
     nodeId &&
     allocationId &&
-    Number(memoryMb) > 0 &&
-    Number(diskMb) > 0 &&
-    Number(cpuPercent) > 0;
+    Number.isFinite(Number(memoryMb)) &&
+    Number(memoryMb) >= 0 &&
+    Number.isFinite(Number(diskMb)) &&
+    Number(diskMb) >= 0 &&
+    Number.isFinite(Number(cpuPercent)) &&
+    Number(cpuPercent) >= 0 &&
+    Number.isFinite(Number(cpuPinning)) &&
+    Number(cpuPinning) >= 0 &&
+    Number.isFinite(Number(databaseLimit)) &&
+    Number(databaseLimit) >= 0;
 
   return (
     <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-6">
@@ -209,7 +222,7 @@ export function ServerForm({
         <AdminSection
           icon={<Network className="size-4" />}
           title="Placement & limits"
-          description="Where it listens and how much of the node it may use."
+          description="Where it listens, how much of the node it may use, and which features are enabled. 0 for memory, disk, or CPU means unlimited."
         >
           <Field
             label="Node"
@@ -260,28 +273,28 @@ export function ServerForm({
             </Select>
           </Field>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Memory (MB)" required>
+            <Field label="Memory (MB)" required hint="0 = unlimited">
               <Input
                 type="number"
-                min={128}
+                min={0}
                 required
                 value={memoryMb}
                 onChange={(event) => setMemoryMb(event.target.value)}
               />
             </Field>
-            <Field label="Disk (MB)" required>
+            <Field label="Disk (MB)" required hint="0 = unlimited">
               <Input
                 type="number"
-                min={128}
+                min={0}
                 required
                 value={diskMb}
                 onChange={(event) => setDiskMb(event.target.value)}
               />
             </Field>
-            <Field label="CPU (%)" required hint="100 = one core. The container always gets at least 1 full core.">
+            <Field label="CPU (%)" required hint="0 = unlimited. 100 = one core.">
               <Input
                 type="number"
-                min={10}
+                min={0}
                 max={800}
                 required
                 value={cpuPercent}
@@ -289,6 +302,38 @@ export function ServerForm({
               />
             </Field>
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="CPU pinning"
+              hint="Number of cores to pin. 0 disables pinning and the process may run on any core."
+            >
+              <Input
+                type="number"
+                min={0}
+                max={256}
+                value={cpuPinning}
+                onChange={(event) => setCpuPinning(event.target.value)}
+              />
+            </Field>
+            <Field label="Databases" hint="How many databases this server may have. 0 means none.">
+              <Input
+                type="number"
+                min={0}
+                max={50}
+                value={databaseLimit}
+                onChange={(event) => setDatabaseLimit(event.target.value)}
+              />
+            </Field>
+          </div>
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span>
+              <span className="block text-sm font-medium">Backups</span>
+              <span className="text-xs text-muted-foreground">
+                Allow this server to create and restore backups
+              </span>
+            </span>
+            <Switch checked={backupsEnabled} onChange={setBackupsEnabled} />
+          </label>
           <div className="rounded-lg border border-border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
             <p className="inline-flex items-center gap-2 font-medium text-foreground">
               <Cpu className="size-4 text-primary" />
@@ -347,9 +392,11 @@ export function ServerForm({
             ) : null}
             <span className="hidden items-center gap-1 sm:inline-flex">
               <MemoryStick className="size-3.5" />
-              {memoryMb} MB
+              {Number(memoryMb) === 0 ? "∞" : `${memoryMb} MB`}
               <HardDrive className="size-3.5" />
-              {diskMb} MB
+              {Number(diskMb) === 0 ? "∞" : `${diskMb} MB`}
+              <Cpu className="size-3.5" />
+              {Number(cpuPercent) === 0 ? "∞" : `${cpuPercent}%`}
             </span>
             <span className="hidden items-center gap-1 sm:inline-flex">
               <UserRound className="size-3.5" />

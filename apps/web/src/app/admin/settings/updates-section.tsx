@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { RefreshCw, Terminal, X } from "lucide-react";
 import { Button } from "@mantine/core";
 import { AdminSection } from "@/components/admin-create";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/cn";
 
 type UpdateJob = {
   state: "idle" | "running" | "ok" | "failed";
@@ -41,6 +42,7 @@ export function UpdatesSection() {
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [showLog, setShowLog] = useState(false);
 
   async function load() {
     const result = await api<{ data: UpdateStatus }>("/api/v1/admin/settings/update");
@@ -78,7 +80,7 @@ export function UpdatesSection() {
   async function onUpdate() {
     if (
       !window.confirm(
-        "Update the panel from GitHub? Tracked files are replaced with the latest main branch. .env and server data are kept.",
+        "Build the latest GitHub release in a staging folder first. The live panel is only replaced if install and compile succeed.",
       )
     ) {
       return;
@@ -108,13 +110,29 @@ export function UpdatesSection() {
         <p className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-destructive">{error}</p>
       ) : null}
 
-      <div className="grid gap-3 text-sm sm:grid-cols-2">
-        <div className="rounded-lg border border-border px-3 py-3">
+      <div className="grid gap-3 overflow-visible text-sm sm:grid-cols-2">
+        <div className="relative overflow-visible rounded-lg border border-border px-3 py-3">
           <p className="text-xs text-muted-foreground">This install</p>
           <p className="mt-1 font-medium">v{status?.version ?? "…"}</p>
           <p className="mt-0.5 font-mono text-xs text-muted-foreground">
             {status?.currentShortSha || "unknown revision"}
           </p>
+          <button
+            type="button"
+            className={cn(
+              "absolute -bottom-3 -right-3 z-10 flex size-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-md hover:bg-muted hover:text-foreground",
+              showLog && "border-primary/50 text-foreground",
+            )}
+            aria-label="Open updater console"
+            onClick={() => setShowLog(true)}
+          >
+            <Terminal className="size-4" />
+            {running ? (
+              <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
+            ) : status?.job.state === "failed" ? (
+              <span className="absolute right-1 top-1 size-1.5 rounded-full bg-destructive" />
+            ) : null}
+          </button>
         </div>
         <div className="rounded-lg border border-border px-3 py-3">
           <p className="text-xs text-muted-foreground">GitHub {status?.ref ?? "main"}</p>
@@ -139,12 +157,6 @@ export function UpdatesSection() {
         </Button>
       </div>
 
-      {!status?.canUpdate && status ? (
-        <p className="text-xs text-muted-foreground">
-          {status.blockedReason || "In-place updates are disabled for this install."}
-        </p>
-      ) : null}
-
       {status?.job.state === "ok" ? (
         <p className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
           Update finished. Reload this page after the panel comes back. If services did not restart
@@ -157,11 +169,81 @@ export function UpdatesSection() {
         </p>
       ) : null}
 
-      {status?.job.log.length ? (
-        <pre className="max-h-64 overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-[11px] leading-5 text-muted-foreground">
-          {status.job.log.join("\n")}
-        </pre>
-      ) : null}
+      <UpdateConsoleModal
+        open={showLog}
+        onClose={() => setShowLog(false)}
+        running={running}
+        job={status?.job ?? { state: "idle", log: [] }}
+      />
     </AdminSection>
+  );
+}
+
+function UpdateConsoleModal({
+  open,
+  onClose,
+  running,
+  job,
+}: {
+  open: boolean;
+  onClose: () => void;
+  running: boolean;
+  job: UpdateJob;
+}) {
+  const scroller = useRef<HTMLPreElement>(null);
+  const log = job.log.join("\n");
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [open, onClose]);
+
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [log, open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+      <button
+        type="button"
+        className="no-press absolute inset-0 bg-background/80 backdrop-blur-sm"
+        aria-label="Close updater console"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Updater console"
+        className="relative flex h-[min(88vh,48rem)] w-full max-w-5xl flex-col overflow-visible rounded-xl border border-border bg-black shadow-2xl"
+      >
+        <button
+          type="button"
+          className="absolute -right-3 -top-3 z-10 flex size-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-md hover:bg-muted hover:text-foreground"
+          aria-label="Close"
+          onClick={onClose}
+        >
+          <X className="size-4" />
+        </button>
+        <pre
+          ref={scroller}
+          className="min-h-0 flex-1 overflow-auto rounded-xl p-4 font-mono text-[12px] leading-5 text-zinc-300"
+        >
+          {job.log.length ? log : "No updater output yet. Start an update to stream logs here."}
+          {running ? <span className="ml-0.5 inline-block animate-pulse text-primary">▋</span> : null}
+        </pre>
+      </div>
+    </div>
   );
 }

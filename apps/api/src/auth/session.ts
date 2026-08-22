@@ -85,7 +85,7 @@ export async function getSessionUser(c: Context) {
   });
   if (!session) return null;
   const user = await User.findById(session.userId);
-  if (!user) return null;
+  if (!user || user.emailVerified === false) return null;
   return { user: publicUser(user), sessionId: session._id.toString() };
 }
 

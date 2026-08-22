@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Box, Plus, Terminal, Trash2, Variable } from "lucide-react";
+import { Box, FileJson, Plus, Terminal, Trash2, Upload, Variable } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { AdminCreateFooter, AdminCreateHeader, AdminSection } from "@/components/admin-create";
+import { AdminCreateFooter, AdminCreateHeader, AdminSection, Segmented } from "@/components/admin-create";
 import { Button, Field, Input, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
+import { parseEggJson } from "./egg-json";
 
 export type EggVariable = {
   key: string;
@@ -63,10 +64,17 @@ export function EggForm({
   const [variables, setVariables] = useState<EggVariable[]>(
     initial?.variables?.length ? initial.variables : [],
   );
+  const [source, setSource] = useState<"manual" | "import">("manual");
+  const [jsonText, setJsonText] = useState("");
+  const [fileName, setFileName] = useState<string | null>(null);
 
   const selectedNest = nests.find((nest) => nest.id === (nestId || nests[0]?.id));
   const resolvedNestId = nestId || nests[0]?.id || "";
-  const ready = Boolean(resolvedNestId && name.trim() && dockerImage.trim());
+  const importing = creating && source === "import";
+  const parsed = useMemo(() => parseEggJson(jsonText), [jsonText]);
+  const ready = importing
+    ? Boolean(resolvedNestId && parsed.egg && !parsed.parseError)
+    : Boolean(resolvedNestId && name.trim() && dockerImage.trim());
   const serverCount = initial?.serverCount ?? 0;
 
   function setVariable(index: number, patch: Partial<EggVariable>) {
@@ -83,9 +91,34 @@ export function EggForm({
       .filter((row) => row.key);
   }
 
+  async function onFile(file: File | undefined) {
+    if (!file) return;
+    setFileName(file.name);
+    setJsonText(await file.text());
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    if (importing) {
+      if (parsed.parseError || !parsed.egg) {
+        setError(parsed.parseError || "Paste or upload a Pterodactyl / Pelican egg JSON file.");
+        return;
+      }
+      setPending(true);
+      try {
+        await api("/api/v1/admin/eggs/import", {
+          method: "POST",
+          body: JSON.stringify({ nestId: resolvedNestId, egg: parsed.egg }),
+        });
+        router.push("/admin/nests");
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Import failed");
+        setPending(false);
+      }
+      return;
+    }
     setPending(true);
     const nextVariables = parsedVariables();
     const invalid = nextVariables.find((row) => !/^[A-Z][A-Z0-9_]*$/.test(row.key));
@@ -153,11 +186,89 @@ export function EggForm({
           { label: creating ? "New egg" : initial?.name ?? "Edit egg" },
         ]}
         icon={<Box className="size-4" />}
-        title={creating ? "New egg" : `Edit ${initial?.name ?? "egg"}`}
-        description="An egg defines the Docker image, install script, startup, and environment for a server type."
+        title={creating ? (importing ? "Import egg" : "New egg") : `Edit ${initial?.name ?? "egg"}`}
+        description={
+          creating && importing
+            ? "Paste or upload a Pterodactyl (PTDL) or Pelican egg JSON. Docker image, startup, install script, and variables are mapped automatically."
+            : "An egg defines the Docker image, install script, startup, and environment for a server type."
+        }
       />
+      {creating ? (
+        <Segmented
+          value={source}
+          onChange={setSource}
+          options={[
+            { value: "manual", label: "Create", icon: <Box className="size-3.5" /> },
+            { value: "import", label: "Import", icon: <Upload className="size-3.5" /> },
+          ]}
+        />
+      ) : null}
       <AdminError message={error ?? nestError} />
 
+      {importing ? (
+        <div className="grid items-start gap-4 xl:grid-cols-2">
+          <AdminSection
+            icon={<Upload className="size-4" />}
+            title="Destination"
+            description="Imported eggs are added to a nest. You can edit them afterwards."
+          >
+            <Field label="Nest" required>
+              <Select value={resolvedNestId} onChange={(event) => setNestId(event.target.value)} required>
+                <option value="">Select nest</option>
+                {nests.map((nest) => (
+                  <option key={nest.id} value={nest.id}>
+                    {nest.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field
+              label="Egg JSON file"
+              hint="Optional. Choose a .json export, or paste the contents on the right."
+            >
+              <Input
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => void onFile(event.target.files?.[0])}
+              />
+            </Field>
+            {fileName ? <p className="text-xs text-muted-foreground">Loaded {fileName}</p> : null}
+            {parsed.preview ? (
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-3 text-sm">
+                <p className="font-medium">{parsed.preview.name}</p>
+                <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                  {parsed.preview.image || "No docker image detected"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {parsed.preview.variables} variable{parsed.preview.variables === 1 ? "" : "s"}
+                </p>
+              </div>
+            ) : parsed.parseError && jsonText.trim() ? (
+              <p className="text-sm text-destructive">{parsed.parseError}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Supports PTDL_v1, PTDL_v2, and Pelican egg exports.
+              </p>
+            )}
+          </AdminSection>
+
+          <AdminSection
+            icon={<FileJson className="size-4" />}
+            title="Egg JSON"
+            description="The exported egg object from Pterodactyl or Pelican."
+          >
+            <Field label="JSON">
+              <Textarea
+                value={jsonText}
+                onChange={(event) => setJsonText(event.target.value)}
+                placeholder='{ "meta": { "version": "PTDL_v2" }, "name": "Vanilla Minecraft", ... }'
+                className="min-h-[320px] font-mono text-xs"
+              />
+            </Field>
+          </AdminSection>
+        </div>
+      ) : (
+        <>
       <div className="grid items-start gap-4 xl:grid-cols-2">
         <AdminSection
           icon={<Box className="size-4" />}
@@ -315,6 +426,8 @@ export function EggForm({
           Add variable
         </Button>
       </AdminSection>
+        </>
+      )}
 
       {creating ? null : (
         <AdminSection
@@ -337,21 +450,26 @@ export function EggForm({
 
       <AdminCreateFooter
         cancelHref="/admin/nests"
-        submitLabel={creating ? "Create egg" : "Save changes"}
-        pendingLabel={creating ? "Creating…" : "Saving…"}
+        submitLabel={importing ? "Import egg" : creating ? "Create egg" : "Save changes"}
+        pendingLabel={importing ? "Importing…" : creating ? "Creating…" : "Saving…"}
         pending={pending}
-        disabled={!ready}
+        disabled={importing ? pending : !ready}
         summary={
           <span className="inline-flex items-center gap-2">
-            <Box className="size-4 text-primary" />
-            {creating ? "Creating" : "Saving"}{" "}
-            <span className="font-medium text-foreground">{name.trim() || "egg"}</span>
-            {selectedNest ? (
-              <>
-                {" "}
-                in <span className="font-medium text-foreground">{selectedNest.name}</span>
-              </>
-            ) : null}
+            {importing ? <Upload className="size-4 text-primary" /> : <Box className="size-4 text-primary" />}
+            <span>
+              {importing ? "Importing" : creating ? "Creating" : "Saving"}{" "}
+              <span className="font-medium text-foreground">
+                {importing ? parsed.preview?.name ?? "egg" : name.trim() || "egg"}
+              </span>
+              {selectedNest ? (
+                <>
+                  {" "}
+                  {importing ? "into" : "in"}{" "}
+                  <span className="font-medium text-foreground">{selectedNest.name}</span>
+                </>
+              ) : null}
+            </span>
           </span>
         }
       />

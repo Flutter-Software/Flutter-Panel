@@ -1,5 +1,6 @@
 import { DAEMON_VERSION, type DaemonConfig, readDaemonConfigFile, writeDaemonConfig } from "./config";
 import { describeFetchError } from "./panel-fetch";
+import os from "node:os";
 
 function trimUrl(value: string) {
   return value.replace(/\/+$/, "");
@@ -54,6 +55,14 @@ async function postHeartbeat(config: DaemonConfig, panelUrl: string, timeoutMs: 
         nodeId: config.nodeId,
         listenUrl: config.listenUrl,
         version: DAEMON_VERSION,
+        system: {
+          hostname: os.hostname(),
+          platform: os.platform(),
+          release: os.release(),
+          arch: os.arch(),
+          cpuThreads: os.cpus().length,
+          totalMemoryMb: Math.round(os.totalmem() / 1024 / 1024),
+        },
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });

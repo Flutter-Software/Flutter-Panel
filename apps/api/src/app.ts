@@ -16,6 +16,7 @@ import * as daemon from "./daemon";
 import * as eggs from "./eggs";
 import * as servers from "./servers";
 import * as subusers from "./subusers";
+import * as schedules from "./schedules";
 import * as settings from "./settings";
 import * as updater from "./update";
 import { Node } from "./db/models";
@@ -51,6 +52,8 @@ export function createApp() {
       path.includes("/ws/console") ||
       path.endsWith("/auth/login") ||
       path.endsWith("/auth/register") ||
+      path.endsWith("/auth/verify") ||
+      path.endsWith("/auth/verify/resend") ||
       path.includes("/auth/invite");
     if (!skipCsrf) {
       assertCsrf(c);
@@ -147,12 +150,19 @@ export function createApp() {
   app.get("/auth/setup", async (c) => c.json({ data: await auth.setupStatus() }));
   app.get("/auth/me", async (c) => c.json({ data: { user: await auth.me(c) } }));
   app.post("/auth/register", async (c) => {
-    const user = await auth.register(c, await c.req.json());
-    return c.json({ data: { user } }, 201);
+    const result = await auth.register(c, await c.req.json());
+    return c.json({ data: result }, 201);
   });
   app.post("/auth/login", async (c) => {
-    const user = await auth.login(c, await c.req.json());
-    return c.json({ data: { user } });
+    const result = await auth.login(c, await c.req.json());
+    return c.json({ data: result });
+  });
+  app.post("/auth/verify", async (c) => {
+    const result = await auth.verifyEmail(c, await c.req.json());
+    return c.json({ data: result });
+  });
+  app.post("/auth/verify/resend", async (c) => {
+    return c.json({ data: await auth.resendVerification(c, await c.req.json()) });
   });
   app.post("/auth/logout", async (c) => {
     await auth.logout(c);
@@ -379,6 +389,64 @@ export function createApp() {
       ),
     });
   });
+  app.get("/client/servers/:id/schedules", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: await schedules.listSchedules(
+        c.req.param("id"),
+        session.user.id,
+        session.user.role === "admin",
+      ),
+    });
+  });
+  app.post("/client/servers/:id/schedules", async (c) => {
+    const session = await requireUser(c);
+    return c.json(
+      {
+        data: await schedules.createSchedule(
+          c.req.param("id"),
+          session.user.id,
+          session.user.role === "admin",
+          await c.req.json(),
+        ),
+      },
+      201,
+    );
+  });
+  app.patch("/client/servers/:id/schedules/:scheduleId", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: await schedules.updateSchedule(
+        c.req.param("id"),
+        c.req.param("scheduleId"),
+        session.user.id,
+        session.user.role === "admin",
+        await c.req.json(),
+      ),
+    });
+  });
+  app.post("/client/servers/:id/schedules/:scheduleId/run", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: await schedules.runScheduleNow(
+        c.req.param("id"),
+        c.req.param("scheduleId"),
+        session.user.id,
+        session.user.role === "admin",
+      ),
+    });
+  });
+  app.delete("/client/servers/:id/schedules/:scheduleId", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: await schedules.deleteSchedule(
+        c.req.param("id"),
+        c.req.param("scheduleId"),
+        session.user.id,
+        session.user.role === "admin",
+      ),
+    });
+  });
 
   app.get("/branding", async (c) => c.json({ data: await settings.getPublicBranding() }));
   app.get("/branding/logo", async (c) => {
@@ -458,9 +526,21 @@ export function createApp() {
     await requireAdmin(c);
     return c.json({ data: await admin.createNode(await c.req.json()) }, 201);
   });
+  app.get("/admin/nodes/:id", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: { node: await admin.getNode(c.req.param("id")) } });
+  });
   app.patch("/admin/nodes/:id", async (c) => {
     await requireAdmin(c);
     return c.json({ data: { node: await admin.updateNode(c.req.param("id"), await c.req.json()) } });
+  });
+  app.get("/admin/nodes/:id/config", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await daemon.getNodeDaemonConfig(c.req.param("id")) });
+  });
+  app.put("/admin/nodes/:id/config", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await daemon.saveNodeDaemonConfig(c.req.param("id"), await c.req.json()) });
   });
   app.get("/admin/nodes/:id/allocations", async (c) => {
     await requireAdmin(c);

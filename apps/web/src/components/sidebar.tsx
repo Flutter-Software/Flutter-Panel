@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
@@ -11,6 +12,7 @@ import {
   Database,
   Folder,
   LayoutDashboard,
+  LogOut,
   MapPin,
   Network,
   Server,
@@ -137,17 +139,58 @@ export function SidebarNav({
   );
 }
 
+const ADMIN_NAV_EXPANDED_KEY = "flutter-admin-nav-expanded";
+const ADMIN_NAV_HANDLE_KEY = "flutter-admin-nav-handle";
+const HANDLE_SIZE_REM = 2.25;
+const DRAG_THRESHOLD_PX = 4;
+
 export function AdminSidebar() {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [handleTop, setHandleTop] = useState(0.82);
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef({ active: false, moved: false, originY: 0 });
   const main = ADMIN_NAV.filter((group) => group.group !== "Management").flatMap((group) => group.items);
   const footer = ADMIN_NAV.find((group) => group.group === "Management")?.items ?? [];
+
+  useEffect(() => {
+    setExpanded(window.localStorage.getItem(ADMIN_NAV_EXPANDED_KEY) === "1");
+    const saved = Number(window.localStorage.getItem(ADMIN_NAV_HANDLE_KEY));
+    if (Number.isFinite(saved)) setHandleTop(Math.min(1, Math.max(0, saved)));
+  }, []);
 
   function isActive(href: string) {
     return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
   }
 
+  function toggleExpanded() {
+    setExpanded((prev) => {
+      const next = !prev;
+      window.localStorage.setItem(ADMIN_NAV_EXPANDED_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
+
+  function ratioFromClientY(clientY: number) {
+    const nav = navRef.current;
+    if (!nav) return handleTop;
+    const rect = nav.getBoundingClientRect();
+    const size = 36;
+    const usable = Math.max(1, rect.height - size);
+    return Math.min(1, Math.max(0, (clientY - rect.top - size / 2) / usable));
+  }
+
+  function persistHandle(ratio: number) {
+    window.localStorage.setItem(ADMIN_NAV_HANDLE_KEY, String(ratio));
+  }
+
   return (
-    <nav className={cn(classes.navbar, "sticky top-16 hidden h-[calc(100dvh-4rem)] shrink-0 bg-sidebar md:flex")}>
+    <nav
+      ref={navRef}
+      className={cn(classes.navbar, "sticky top-16 z-20 hidden h-[calc(100dvh-4rem)] shrink-0 bg-sidebar md:flex")}
+      data-expanded={expanded || undefined}
+    >
       <div className={classes.navbarMain}>
         <Stack justify="center" gap={0}>
           {main.map((item) => (
@@ -155,6 +198,7 @@ export function AdminSidebar() {
               key={item.href}
               item={item}
               active={isActive(item.href)}
+              expanded={expanded}
               onPrefetch={() => prefetchAdmin(item.href)}
             />
           ))}
@@ -166,10 +210,62 @@ export function AdminSidebar() {
             key={item.href}
             item={item}
             active={isActive(item.href)}
+            expanded={expanded}
             onPrefetch={() => prefetchAdmin(item.href)}
           />
         ))}
       </Stack>
+      <Tooltip
+        label={expanded ? "Collapse" : "Expand"}
+        position="right"
+        disabled={dragging}
+        transitionProps={{ duration: 0 }}
+      >
+        <button
+          type="button"
+          aria-label={expanded ? "Collapse sidebar" : "Expand sidebar"}
+          aria-expanded={expanded}
+          aria-grabbed={dragging}
+          style={{ top: `calc(${handleTop} * (100% - ${HANDLE_SIZE_REM}rem))` }}
+          className={cn(
+            "absolute right-0 z-20 flex size-9 translate-x-1/2 cursor-grab touch-none items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-md hover:bg-muted hover:text-foreground",
+            dragging && "cursor-grabbing",
+          )}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            drag.current = { active: true, moved: false, originY: event.clientY };
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setDragging(true);
+          }}
+          onPointerMove={(event) => {
+            if (!drag.current.active) return;
+            if (Math.abs(event.clientY - drag.current.originY) > DRAG_THRESHOLD_PX) {
+              drag.current.moved = true;
+            }
+            if (!drag.current.moved) return;
+            setHandleTop(ratioFromClientY(event.clientY));
+          }}
+          onPointerUp={(event) => {
+            if (!drag.current.active) return;
+            drag.current.active = false;
+            setDragging(false);
+            if (drag.current.moved) {
+              persistHandle(ratioFromClientY(event.clientY));
+              return;
+            }
+            toggleExpanded();
+          }}
+          onPointerCancel={() => {
+            drag.current.active = false;
+            setDragging(false);
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+          }}
+        >
+          <LogOut className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-180")} />
+        </button>
+      </Tooltip>
     </nav>
   );
 }
@@ -177,26 +273,35 @@ export function AdminSidebar() {
 function AdminNavLink({
   item,
   active,
+  expanded,
   onPrefetch,
 }: {
   item: NavItem;
   active: boolean;
+  expanded: boolean;
   onPrefetch: () => void;
 }) {
   const Icon = item.icon;
+  const button = (
+    <UnstyledButton
+      component={Link}
+      href={item.href}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
+      aria-label={item.label}
+      className={cn(classes.link, "pressable")}
+      data-active={active || undefined}
+    >
+      <Icon size={20} strokeWidth={1.5} className="shrink-0" />
+      {expanded ? <span>{item.label}</span> : null}
+    </UnstyledButton>
+  );
+
+  if (expanded) return button;
+
   return (
     <Tooltip label={item.label} position="right" transitionProps={{ duration: 0 }}>
-      <UnstyledButton
-        component={Link}
-        href={item.href}
-        onMouseEnter={onPrefetch}
-        onFocus={onPrefetch}
-        aria-label={item.label}
-        className={cn(classes.link, "pressable")}
-        data-active={active || undefined}
-      >
-        <Icon size={20} strokeWidth={1.5} />
-      </UnstyledButton>
+      {button}
     </Tooltip>
   );
 }
@@ -213,6 +318,8 @@ export function ServerSidebar({
   const items = SERVER_NAV.filter((item) => {
     if (!server) return true;
     if (item.href === "settings") return canOpenSettings(server);
+    if (item.href === "databases" && !(server.databaseLimit && server.databaseLimit > 0)) return false;
+    if (item.href === "backups" && server.backupsEnabled === false) return false;
     const perm = NAV_PERMISSION[item.href];
     return perm ? can(server, perm) : true;
   }).map((item) => ({

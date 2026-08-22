@@ -1,6 +1,7 @@
 import {
   FlutterError,
   heartbeatSchema,
+  daemonConfigSaveSchema,
   PANEL_VERSION,
   type PowerAction,
 } from "@flutter-software/shared";
@@ -19,7 +20,7 @@ export type InstallSpec = {
   installScript: string;
   installImage: string;
   environment: Record<string, string>;
-  limits: { memoryBytes: number; diskBytes: number; cpuPercent: number };
+  limits: { memoryBytes: number; diskBytes: number; cpuPercent: number; cpuPinning?: number };
   allocation: { ip: string; port: number };
 };
 
@@ -53,6 +54,16 @@ export async function heartbeat(c: Context) {
   const node = await authenticateNodeToken(token, parsed.data.nodeId);
   node.daemonListenUrl = parsed.data.listenUrl.replace(/\/+$/, "");
   node.lastHeartbeatAt = new Date();
+  if (parsed.data.version) node.daemonVersion = parsed.data.version;
+  const system = parsed.data.system;
+  if (system) {
+    if (system.hostname) node.systemHostname = system.hostname;
+    if (system.platform) node.systemPlatform = system.platform;
+    if (system.release) node.systemRelease = system.release;
+    if (system.arch) node.systemArch = system.arch;
+    if (system.cpuThreads) node.systemCpuThreads = system.cpuThreads;
+    if (system.totalMemoryMb) node.systemTotalMemoryMb = system.totalMemoryMb;
+  }
   if (!node.daemonToken) {
     node.daemonToken = token;
     node.tokenPrefix = token.slice(0, 12);
@@ -77,7 +88,7 @@ async function daemonFetch(
     nodeId: node._id.toString(),
     serverUuid: spec.uuid,
     op: spec.op,
-    ttlMs: Math.min(timeoutMs, 120_000),
+    ttlMs: spec.timeoutMs ?? 60_000,
   });
   const url = `${node.daemonListenUrl.replace(/\/+$/, "")}/v1/servers/${spec.uuid}/${spec.path}`;
   let response: Response;
@@ -211,14 +222,15 @@ export async function filesOnNode(
     to?: string;
     name?: string;
     contentBase64?: string;
+    maxBytes?: number;
   },
 ) {
   const node = await loadNode(nodeId);
   const timeoutMs =
     body.action === "upload" || body.action === "extract"
-      ? 180_000
+      ? 600_000
       : body.action === "read" || body.action === "write"
-        ? 60_000
+        ? 300_000
         : 30_000;
   return daemonFetch(node, {
     uuid,
@@ -242,4 +254,61 @@ export async function backupsOnNode(
     body,
     timeoutMs: 300_000,
   });
+}
+
+async function daemonNodeOp(
+  node: { _id: { toString(): string }; daemonListenUrl?: string | null; lastHeartbeatAt?: Date | null },
+  spec: { method: "GET" | "PUT"; path: string; body?: unknown },
+) {
+  if (!isNodeOnline(node.lastHeartbeatAt) || !node.daemonListenUrl) {
+    throw FlutterError.unavailable("Node daemon is offline");
+  }
+  const ticket = signDaemonRequest(env().DAEMON_REQUEST_SECRET, {
+    nodeId: node._id.toString(),
+    serverUuid: "node",
+    op: "config",
+    ttlMs: 30_000,
+  });
+  const url = `${node.daemonListenUrl.replace(/\/+$/, "")}/v1/node/${spec.path}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: spec.method,
+      headers: {
+        Authorization: `Bearer ${ticket}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: spec.method === "GET" ? undefined : JSON.stringify(spec.body ?? {}),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw FlutterError.unavailable(
+      error instanceof Error ? `Daemon unreachable: ${error.message}` : "Daemon unreachable",
+    );
+  }
+  const json = (await response.json().catch(() => null)) as
+    | { ok?: boolean; data?: unknown; error?: { message?: string } }
+    | null;
+  if (!response.ok || json?.ok === false) {
+    throw FlutterError.unavailable(json?.error?.message || `Daemon HTTP ${response.status}`);
+  }
+  return json?.data;
+}
+
+export async function getNodeDaemonConfig(nodeId: string) {
+  const node = await loadNode(nodeId);
+  return daemonNodeOp(node, { method: "GET", path: "config" }) as Promise<{
+    path: string;
+    content: string;
+  }>;
+}
+
+export async function saveNodeDaemonConfig(nodeId: string, body: unknown) {
+  const parsed = daemonConfigSaveSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Invalid daemon config", parsed.error.flatten());
+  }
+  const node = await loadNode(nodeId);
+  return daemonNodeOp(node, { method: "PUT", path: "config", body: { content: parsed.data.content } });
 }

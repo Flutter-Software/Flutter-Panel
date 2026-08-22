@@ -14,7 +14,10 @@ model User {
   passwordHash String
   role         String    @default("user")
   totpSecret   String?
-  totpEnabled  Boolean   @default(false)
+  totpEnabled           Boolean   @default(false)
+  emailVerified         Boolean   @default(true)
+  emailVerifyHash       String?
+  emailVerifyExpiresAt  DateTime?
   sessions     Session[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -117,6 +120,9 @@ model Server {
   memoryMb      Int
   diskMb        Int
   cpuPercent    Int      @default(100)
+  cpuPinning    Int      @default(0)
+  databaseLimit Int      @default(0)
+  backupsEnabled Boolean @default(true)
   status        String   @default("offline")
   environment   Json?
   createdAt     DateTime @default(now())

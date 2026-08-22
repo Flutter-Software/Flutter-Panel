@@ -1,12 +1,10 @@
+import { FILE_OPEN_LIMIT_BYTES, FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } from "@flutter-software/shared";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { unzipSync } from "fflate";
 import { gunzipSync } from "node:zlib";
 import type { DaemonConfig } from "./config";
 import { bindPath, ensureServerOwnership, runBackupContainer, serverRoot } from "./docker";
-
-const TEXT_LIMIT = 16 * 1024 * 1024;
-const UPLOAD_LIMIT = 50 * 1024 * 1024;
 
 export function safeJoin(root: string, rel: string) {
   const cleaned = (rel || ".").replace(/\\/g, "/").replace(/^\/+/, "");
@@ -76,7 +74,7 @@ export async function readServerFile(config: DaemonConfig, uuid: string, relPath
   const target = safeJoin(root, relPath);
   const info = await stat(target);
   if (info.isDirectory()) throw new Error("Cannot read a directory");
-  if (info.size > TEXT_LIMIT) throw new Error("File is larger than 16 MB");
+  if (info.size > FILE_OPEN_LIMIT_BYTES) throw new Error("File is larger than 250 MB");
   const buffer = await readFile(target);
   if (buffer.includes(0)) throw new Error("Binary files cannot be edited in the panel");
   return { path: displayPath(root, target), content: buffer.toString("utf8"), size: info.size };
@@ -91,7 +89,7 @@ export async function writeServerFile(
   const root = serverRoot(config, uuid);
   const target = safeJoin(root, relPath);
   return withWritable(config, uuid, async () => {
-    if (Buffer.byteLength(content) > TEXT_LIMIT) throw new Error("File is larger than 16 MB");
+    if (Buffer.byteLength(content) > FILE_OPEN_LIMIT_BYTES) throw new Error("File is larger than 250 MB");
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, content, "utf8");
     return { path: displayPath(root, target), size: Buffer.byteLength(content) };
@@ -139,6 +137,7 @@ export async function uploadServerFile(
   dir: string,
   name: string,
   contentBase64: string,
+  maxBytes = FILE_UPLOAD_LIMIT_BYTES,
 ) {
   const fileName = name.replace(/\\/g, "/").replace(/^\/+/, "");
   if (!fileName || fileName.split("/").some((part) => part === ".." || part === "")) {
@@ -151,7 +150,8 @@ export async function uploadServerFile(
     throw new Error("Invalid upload payload");
   }
   if (!buffer.length) throw new Error("File is empty");
-  if (buffer.length > UPLOAD_LIMIT) throw new Error("File is larger than 50 MB");
+  const limit = maxBytes > 0 ? maxBytes : FILE_UPLOAD_LIMIT_BYTES;
+  if (buffer.length > limit) throw new Error(`File is larger than ${formatUploadLimit(limit)}`);
 
   const root = serverRoot(config, uuid);
   const rel = [dir.replace(/^\/+|\/+$/g, ""), fileName].filter(Boolean).join("/");

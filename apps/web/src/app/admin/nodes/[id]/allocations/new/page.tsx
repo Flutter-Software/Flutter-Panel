@@ -29,7 +29,7 @@ type Node = {
 export default function CreateAllocationsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const backHref = `/admin/nodes/${params.id}`;
+  const backHref = `/admin/nodes/${params.id}/allocations`;
   const { data, error } = useQuery<{ data: { nodes: Node[] } }>("/api/v1/admin/nodes");
   const node = data?.data.nodes.find((row) => row.id === params.id) ?? null;
   const [pending, setPending] = useState(false);
@@ -198,10 +198,12 @@ export default function CreateAllocationsPage() {
         summary={
           <span className="inline-flex items-center gap-2">
             <Plug className="size-4 text-primary" />
-            Adding{" "}
-            <span className="font-medium text-foreground">{newCount || 0} ports</span> on{" "}
-            <span className="font-mono text-foreground">{ip || "IP"}</span> to{" "}
-            <span className="font-medium text-foreground">{node?.name ?? "node"}</span>.
+            <span>
+              Adding{" "}
+              <span className="font-medium text-foreground">{newCount || 0} ports</span> on{" "}
+              <span className="font-mono text-foreground">{ip || "IP"}</span> to{" "}
+              <span className="font-medium text-foreground">{node?.name ?? "node"}</span>.
+            </span>
           </span>
         }
       />

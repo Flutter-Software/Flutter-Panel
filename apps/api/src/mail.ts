@@ -14,7 +14,7 @@ import { log } from "./log";
 import { PanelSettings } from "./db/models";
 
 const LOGO_CID = "flutter-logo@panel";
-const LOGO_FILE = "apps/web/public/flutter-logo.png";
+const LOGO_FILE = "apps/web/public/email-logo.png";
 
 export type SmtpConfig = {
   host: string;
@@ -134,6 +134,8 @@ function logoCandidates() {
   return [
     resolve(here, "../../../", LOGO_FILE),
     resolve(cwd, LOGO_FILE),
+    resolve(cwd, "../web/public/email-logo.png"),
+    resolve(here, "../../web/public/email-logo.png"),
     resolve(cwd, "../web/public/flutter-logo.png"),
     resolve(here, "../../web/public/flutter-logo.png"),
   ];
@@ -145,7 +147,7 @@ async function loadInviteLogo() {
     try {
       const data = await readFile(path);
       if (!data.byteLength) continue;
-      return { data, mime: "image/png", filename: "flutter-logo.png" };
+      return { data, mime: "image/png", filename: "email-logo.png" };
     } catch {
       /* try next */
     }
@@ -202,7 +204,7 @@ export async function sendSubuserInvite(options: SubuserInviteMail) {
     ...options,
     siteName,
     panelUrl: appUrl,
-    logoUrl: logo ? `cid:${LOGO_CID}` : `${appUrl}/flutter-logo.png`,
+    logoUrl: logo ? `cid:${LOGO_CID}` : `${appUrl}/email-logo.png`,
   });
   try {
     return await sendMail({
@@ -231,9 +233,195 @@ export async function sendSubuserInvite(options: SubuserInviteMail) {
   }
 }
 
+export type VerificationMail = {
+  to: string;
+  code: string;
+  ip?: string;
+  userAgent?: string;
+};
+
+export function describeUserAgent(userAgent?: string) {
+  const ua = userAgent ?? "";
+  if (!ua.trim()) return "Unknown browser";
+  const browser = ua.includes("Edg/")
+    ? "Edge"
+    : ua.includes("Chrome/")
+      ? "Chrome"
+      : ua.includes("Firefox/")
+        ? "Firefox"
+        : ua.includes("Safari/") && !ua.includes("Chrome/")
+          ? "Safari"
+          : "a browser";
+  const os = /Windows/i.test(ua)
+    ? "Windows"
+    : /Mac OS X|Macintosh/i.test(ua)
+      ? "macOS"
+      : /Android/i.test(ua)
+        ? "Android"
+        : /iPhone|iPad|iPod/i.test(ua)
+          ? "iOS"
+          : /Linux/i.test(ua)
+            ? "Linux"
+            : "unknown";
+  return `${browser} on ${os}`;
+}
+
+function formatUtcStamp(date = new Date()) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = months[date.getUTCMonth()];
+  const day = date.getUTCDate();
+  const year = date.getUTCFullYear();
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${month} ${day}, ${year} · ${hours}:${minutes} UTC`;
+}
+
+function spacedCode(code: string) {
+  const digits = code.replace(/\D/g, "").slice(0, 6).split("");
+  while (digits.length < 6) digits.push("·");
+  return `${digits.slice(0, 3).join(" ")}&nbsp;&nbsp;&nbsp;${digits.slice(3).join(" ")}`;
+}
+
+export async function sendVerificationEmail(options: VerificationMail) {
+  const settings = await PanelSettings.findOne({ key: "panel" });
+  const siteName = (typeof settings?.siteName === "string" && settings.siteName.trim()) || "Flutter";
+  const appUrl = env().APP_URL.replace(/\/+$/, "");
+  const subject = `Your ${siteName} verification code`;
+  const client = describeUserAgent(options.userAgent);
+  const ip = options.ip?.trim() || "Unknown IP";
+  const when = formatUtcStamp();
+  const grouped = `${options.code.slice(0, 3)} ${options.code.slice(3)}`;
+  const text = [
+    `Enter this code to finish signing in to your ${siteName} account:`,
+    grouped,
+    "",
+    "This code is valid for the next 10 minutes.",
+    `Requested from ${ip} · ${client}`,
+    `Time ${when}`,
+    "",
+    "If you didn't request this, you can ignore this email.",
+  ].join("\n");
+  const logo = await loadInviteLogo();
+  const html = verificationHtml({
+    siteName,
+    panelUrl: appUrl,
+    code: options.code,
+    ip,
+    client,
+    when,
+    logoUrl: logo ? `cid:${LOGO_CID}` : `${appUrl}/email-logo.png`,
+  });
+  try {
+    return await sendMail({
+      to: options.to,
+      subject,
+      text,
+      html,
+      attachments: logo
+        ? [
+            {
+              filename: logo.filename,
+              content: logo.data,
+              contentType: logo.mime,
+              cid: LOGO_CID,
+              contentDisposition: "inline",
+            },
+          ]
+        : undefined,
+    });
+  } catch (error) {
+    log("error", "verification email failed", {
+      to: options.to,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+function verificationHtml(options: {
+  siteName: string;
+  panelUrl: string;
+  code: string;
+  ip: string;
+  client: string;
+  when: string;
+  logoUrl: string;
+}) {
+  const year = new Date().getFullYear();
+  const siteName = escapeHtml(options.siteName);
+  const panelUrl = escapeHtml(options.panelUrl);
+  const ip = escapeHtml(options.ip);
+  const client = escapeHtml(options.client);
+  const when = escapeHtml(options.when);
+  const codeHtml = spacedCode(options.code);
+  const logo = `<img src="${escapeHtml(options.logoUrl)}" alt="${siteName}" width="40" height="40" style="display:block;width:40px;height:40px;border-radius:10px;border:0;background:#000000;" />`;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Verify your sign-in</title>
+</head>
+<body style="margin:0;padding:0;background:#000000;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">Your ${siteName} verification code is ${escapeHtml(options.code)}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#000000;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+        <table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;">
+          <tr>
+            <td style="padding-bottom:28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td valign="middle" style="padding-right:12px;">${logo}</td>
+                  <td valign="middle">
+                    <div style="font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:20px;line-height:24px;color:#ffffff;font-weight:700;">${siteName}</div>
+                    <div style="font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:11px;line-height:16px;color:#9ca3af;letter-spacing:0.16em;text-transform:uppercase;padding-top:3px;">Control Panel</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#141414;border:1px solid #1f1f1f;border-top:2px solid #22d3ee;border-radius:14px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding:32px 32px 28px 32px;">
+                    <h1 style="margin:0 0 14px 0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:28px;line-height:34px;color:#ffffff;font-weight:700;">Verify your sign-in</h1>
+                    <p style="margin:0 0 24px 0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:24px;color:#a3a3a3;">Enter the code below to finish signing in to your ${siteName} account. This code is valid for the next <strong style="color:#ffffff;font-weight:600;">10 minutes</strong>.</p>
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#000000;border-radius:10px;">
+                      <tr>
+                        <td align="center" style="padding:22px 16px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:36px;line-height:40px;color:#22d3ee;font-weight:700;letter-spacing:0.12em;">${codeHtml}</td>
+                      </tr>
+                    </table>
+                    <p style="margin:24px 0 0 0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;color:#8a8a8a;">Didn't request this? You can safely ignore this email — your account stays secure and no one can access it without this code.</p>
+                    <div style="margin:24px 0 0 0;border-top:1px solid #2a2a2a;padding-top:16px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:20px;color:#737373;">
+                      Requested from ${ip} · ${client}<br />
+                      Time ${when}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:28px 12px 0 12px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:20px;color:#6b6b6b;">
+              This is an automated security message from ${siteName} Control Panel.<br />
+              &copy; ${year} ${siteName}. All rights reserved.<br />
+              <a href="${panelUrl}" style="color:#6b6b6b;text-decoration:none;">Help center</a>
+              &nbsp;&middot;&nbsp;
+              <a href="${panelUrl}" style="color:#6b6b6b;text-decoration:none;">Security</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
 function permissionGroupGranted(granted: readonly string[], group: string) {
   if (granted.includes("*")) return true;
-  if (group === "schedules") return hasServerPermission(granted, "schedule.read");
   const found = PERMISSION_GROUPS.find((row) => row.key === group);
   if (!found) return hasServerPermission(granted, group as ServerPermission);
   return found.permissions.some((permission) => hasServerPermission(granted, permission.key));
@@ -253,7 +441,7 @@ function subuserInviteHtml(options: SubuserInviteMail & { siteName: string; pane
   const online = Boolean(options.online);
   const statusColor = online ? "#4ade80" : "#6b7280";
   const statusLabel = online ? "Online" : "Offline";
-  const logo = `<img src="${escapeHtml(options.logoUrl)}" alt="${siteName}" width="36" height="36" style="display:block;width:36px;height:36px;border-radius:8px;border:0;background:#0a0a0a;" />`;
+  const logo = `<img src="${escapeHtml(options.logoUrl)}" alt="${siteName}" width="40" height="40" style="display:block;width:40px;height:40px;border-radius:10px;border:0;background:#0a0a0a;" />`;
 
   const permissionCells = INVITE_PERMISSIONS.map((row) => {
     const enabled = permissionGroupGranted(granted, row.group);

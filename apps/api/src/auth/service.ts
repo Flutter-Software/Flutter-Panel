@@ -1,22 +1,94 @@
-import { FlutterError, adminUserCreateSchema, adminUserUpdateSchema, changePasswordSchema, loginSchema, registerSchema } from "@flutter-software/shared";
+import { randomInt } from "node:crypto";
+import {
+  EMAIL_VERIFY_TTL_MS,
+  FlutterError,
+  adminUserCreateSchema,
+  adminUserUpdateSchema,
+  changePasswordSchema,
+  loginSchema,
+  registerSchema,
+  resendVerifySchema,
+  verifyEmailSchema,
+} from "@flutter-software/shared";
 import type { Context } from "hono";
 import { User } from "../db/models";
 import {
   dummyPasswordHash,
   hashPassword,
   publicUser,
+  sha256,
+  tokenEquals,
   validatePassword,
   verifyPassword,
 } from "./crypto";
 import { createSession, destroyOtherSessions, destroySession, getSessionUser } from "./session";
+import { resolveSmtp, sendVerificationEmail } from "../mail";
 import { attachPendingSubusers } from "../subusers";
+
+export type AuthPayload =
+  | { user: ReturnType<typeof publicUser>; needsVerification: false }
+  | { user: null; needsVerification: true; email: string };
+
+function requestIp(c: Context) {
+  return (
+    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+    c.req.header("x-real-ip") ||
+    c.req.header("cf-connecting-ip") ||
+    "Unknown IP"
+  );
+}
+
+function isVerified(user: { emailVerified?: boolean | null }) {
+  return user.emailVerified !== false;
+}
+
+async function requireSmtp() {
+  if (await resolveSmtp()) return;
+  throw FlutterError.unavailable(
+    "Email is not configured. Ask an administrator to set up SMTP before creating an account.",
+  );
+}
+
+async function issueVerificationCode(
+  user: {
+    email: string;
+    emailVerifyHash?: string | null;
+    emailVerifyExpiresAt?: Date | null;
+    save: () => Promise<unknown>;
+  },
+  c: Context,
+  options?: { force?: boolean },
+) {
+  const remaining = (user.emailVerifyExpiresAt?.getTime() ?? 0) - Date.now();
+  const recentlyIssued = remaining > EMAIL_VERIFY_TTL_MS - 45_000;
+  if (!options?.force && recentlyIssued && user.emailVerifyHash) {
+    return;
+  }
+
+  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  user.emailVerifyHash = sha256(code);
+  user.emailVerifyExpiresAt = new Date(Date.now() + EMAIL_VERIFY_TTL_MS);
+  await user.save();
+
+  const sent = await sendVerificationEmail({
+    to: user.email,
+    code,
+    ip: requestIp(c),
+    userAgent: c.req.header("user-agent") ?? undefined,
+  });
+  if (!sent) {
+    throw FlutterError.unavailable(
+      "Could not send a verification email. Ask an administrator to configure SMTP.",
+    );
+  }
+}
 
 export async function setupStatus() {
   const userCount = await User.countDocuments();
   return { initialized: userCount > 0, userCount };
 }
 
-export async function register(c: Context, body: unknown) {
+export async function register(c: Context, body: unknown): Promise<AuthPayload> {
   const parsed = registerSchema.safeParse(body);
   if (!parsed.success) {
     throw FlutterError.validation("Invalid registration", parsed.error.flatten());
@@ -35,19 +107,37 @@ export async function register(c: Context, body: unknown) {
     throw FlutterError.conflict("Username or email is already taken");
   }
 
+  if (setup.initialized) {
+    await requireSmtp();
+  }
+
   const created = await User.create({
     username: parsed.data.username,
     email,
     passwordHash: await hashPassword(parsed.data.password),
     role,
+    emailVerified: !setup.initialized,
+    emailVerifyHash: null,
+    emailVerifyExpiresAt: null,
   });
 
-  await createSession(c, created._id.toString(), true);
-  await attachPendingSubusers(created);
-  return publicUser(created);
+  if (!setup.initialized) {
+    await createSession(c, created._id.toString(), true);
+    await attachPendingSubusers(created);
+    return { user: publicUser(created), needsVerification: false };
+  }
+
+  try {
+    await issueVerificationCode(created, c, { force: true });
+  } catch (error) {
+    await User.deleteOne({ _id: created._id });
+    throw error;
+  }
+
+  return { user: null, needsVerification: true, email };
 }
 
-export async function login(c: Context, body: unknown) {
+export async function login(c: Context, body: unknown): Promise<AuthPayload> {
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {
     throw FlutterError.validation("Invalid login", parsed.error.flatten());
@@ -68,9 +158,58 @@ export async function login(c: Context, body: unknown) {
     throw FlutterError.unauthorized("Invalid login or password");
   }
 
+  if (!isVerified(user)) {
+    await issueVerificationCode(user, c);
+    return { user: null, needsVerification: true, email: user.email };
+  }
+
   await createSession(c, user._id.toString(), parsed.data.remember);
   await attachPendingSubusers(user);
-  return publicUser(user);
+  return { user: publicUser(user), needsVerification: false };
+}
+
+export async function verifyEmail(c: Context, body: unknown): Promise<AuthPayload> {
+  const parsed = verifyEmailSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Enter the 6-digit code from your email", parsed.error.flatten());
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const user = await User.findOne({ email });
+  if (!user || isVerified(user) || !user.emailVerifyHash || !user.emailVerifyExpiresAt) {
+    throw FlutterError.validation("Invalid or expired code");
+  }
+  if (user.emailVerifyExpiresAt.getTime() < Date.now()) {
+    throw FlutterError.validation("That code has expired. Request a new one.");
+  }
+  if (!tokenEquals(user.emailVerifyHash, sha256(parsed.data.code))) {
+    throw FlutterError.validation("Invalid or expired code");
+  }
+
+  user.emailVerified = true;
+  user.emailVerifyHash = null;
+  user.emailVerifyExpiresAt = null;
+  await user.save();
+
+  await createSession(c, user._id.toString(), true);
+  await attachPendingSubusers(user);
+  return { user: publicUser(user), needsVerification: false };
+}
+
+export async function resendVerification(c: Context, body: unknown) {
+  const parsed = resendVerifySchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Enter a valid email", parsed.error.flatten());
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const user = await User.findOne({ email });
+  if (!user || isVerified(user)) {
+    return { ok: true };
+  }
+
+  await issueVerificationCode(user, c);
+  return { ok: true };
 }
 
 export async function logout(c: Context) {
@@ -135,6 +274,7 @@ export async function createUser(body: unknown) {
     email,
     passwordHash: await hashPassword(parsed.data.password),
     role: parsed.data.role,
+    emailVerified: true,
   });
   return publicUser(created);
 }

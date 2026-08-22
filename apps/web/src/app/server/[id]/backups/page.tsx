@@ -2,7 +2,9 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import { Button, Card } from "@/components/ui";
+import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
+import { ServerSection } from "@/components/server-section";
 
 type Backup = { id: string; name: string; size: number; createdAt: string };
 
@@ -13,9 +15,11 @@ function formatSize(bytes: number) {
 
 export default function BackupsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const server = useServerRecord();
   const [backups, setBackups] = useState<Backup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const enabled = server?.backupsEnabled !== false;
 
   const load = useCallback(() => {
     return api<{ data: { backups: Backup[] } }>(`/api/v1/client/servers/${id}/backups`, {
@@ -27,8 +31,9 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
   }, [id]);
 
   useEffect(() => {
+    if (!enabled) return;
     load();
-  }, [load]);
+  }, [enabled, load]);
 
   async function run(action: string, backupId?: string) {
     setError(null);
@@ -44,6 +49,15 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
     } finally {
       setPending(false);
     }
+  }
+
+  if (server && !enabled) {
+    return (
+      <ServerSection
+        title="Backups"
+        description="Backups are disabled for this server. An administrator can turn them on from the server edit page."
+      />
+    );
   }
 
   return (

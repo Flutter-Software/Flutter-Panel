@@ -85,6 +85,7 @@ apps/daemon/data/
 # Panel self-updater
 .flutter-update.json
 .flutter-revision
+.update-work/
 
 
 # dotenv environment variable files

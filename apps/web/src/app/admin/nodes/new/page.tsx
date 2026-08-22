@@ -16,6 +16,7 @@ import {
   Server,
 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
+import { AdminCreateFooter } from "@/components/admin-create";
 import { Button, ButtonLink, Card, Field, Input, Select, Textarea } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -53,12 +54,32 @@ export default function CreateNodePage() {
   const [diskOverallocate, setDiskOverallocate] = useState("0");
   const [daemonPort, setDaemonPort] = useState("8080");
   const [sftpPort, setSftpPort] = useState("2022");
+  const [uploadLimitMb, setUploadLimitMb] = useState("250");
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
   const resolvedLocationId = locationId || locations[0]?.id || "";
 
   const selectedLocation = useMemo(
     () => locations.find((location) => location.id === resolvedLocationId),
     [locations, resolvedLocationId],
   );
+
+  const dirty =
+    name.trim() !== "" ||
+    description.trim() !== "" ||
+    fqdn.trim() !== "" ||
+    !isPublic ||
+    scheme !== "https" ||
+    behindProxy ||
+    daemonBase !== "/var/lib/flutter/volumes" ||
+    memoryGiB !== "64" ||
+    cpuCores !== "8" ||
+    memoryOverallocate !== "0" ||
+    diskGiB !== "1024" ||
+    diskOverallocate !== "0" ||
+    daemonPort !== "8080" ||
+    sftpPort !== "2022" ||
+    uploadLimitMb !== "250" ||
+    maintenanceMode;
 
   async function copy(value: string, key: "token" | "configure" | "start") {
     await navigator.clipboard.writeText(value);
@@ -93,6 +114,8 @@ export default function CreateNodePage() {
             diskOverallocate: Number(diskOverallocate),
             daemonPort: Number(daemonPort),
             sftpPort: Number(sftpPort),
+            uploadLimitMb: Number(uploadLimitMb),
+            maintenanceMode,
           }),
         },
       );
@@ -335,33 +358,56 @@ export default function CreateNodePage() {
               />
             </Field>
           </div>
+          <Field
+            label="Maximum web upload filesize"
+            hint="Applies to the Files tab for every server on this node."
+          >
+            <UnitInput
+              unit="MB"
+              type="number"
+              min={1}
+              max={2048}
+              required
+              value={uploadLimitMb}
+              onChange={(event) => setUploadLimitMb(event.target.value)}
+            />
+          </Field>
+          <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
+            <div>
+              <p className="text-sm font-medium">Maintenance mode</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Users can see servers on this node but cannot open them.
+              </p>
+            </div>
+            <Switch checked={maintenanceMode} onChange={setMaintenanceMode} />
+          </div>
         </Section>
       </div>
 
-      <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-3 border-t border-border bg-background/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <p className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-          <Rocket className="size-4 text-primary" />
-          <span>
-            Deploying <span className="font-medium text-foreground">{name || "node"}</span> in{" "}
-            <span className="font-medium text-foreground">
-              {selectedLocation?.shortCode.toUpperCase() || "—"}
-            </span>{" "}
-            over{" "}
-            <span className="font-medium text-foreground">
-              {scheme === "https" ? "SSL" : "HTTP"}
+      <AdminCreateFooter
+        visible={dirty}
+        cancelHref="/admin/nodes"
+        submitLabel="Create node"
+        pending={pending}
+        pendingLabel="Creating…"
+        disabled={locations.length === 0}
+        summary={
+          <span className="inline-flex items-center gap-2">
+            <Rocket className="size-4 text-primary" />
+            <span>
+              Deploying <span className="font-medium text-foreground">{name || "node"}</span> in{" "}
+              <span className="font-medium text-foreground">
+                {selectedLocation?.shortCode.toUpperCase() || "—"}
+              </span>{" "}
+              over{" "}
+              <span className="font-medium text-foreground">
+                {scheme === "https" ? "SSL" : "HTTP"}
+              </span>
+              .
             </span>
-            .
           </span>
-        </p>
-        <div className="flex items-center gap-2">
-          <ButtonLink href="/admin/nodes" variant="ghost">
-            Cancel
-          </ButtonLink>
-          <Button type="submit" disabled={pending || locations.length === 0}>
-            {pending ? "Creating…" : "Create node"}
-          </Button>
-        </div>
-      </div>
+        }
+      />
     </form>
   );
 }

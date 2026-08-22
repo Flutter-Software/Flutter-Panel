@@ -5,11 +5,12 @@ import {
   powerActionSchema,
   serverCreateSchema,
   serverUpdateSchema,
+  uploadLimitBytes,
   type PowerAction,
   type ServerPermission,
   type ServerStatus,
 } from "@flutter-software/shared";
-import { Allocation, Egg, Location, Node, Server, Subuser, User } from "./db/models";
+import { Allocation, Egg, Location, Node, Schedule, Server, Subuser, User } from "./db/models";
 import {
   backupsOnNode,
   commandOnNode,
@@ -105,6 +106,9 @@ export function toClientServer(
     memoryMb: number;
     diskMb: number;
     cpuPercent: number;
+    cpuPinning?: number;
+    databaseLimit?: number;
+    backupsEnabled?: boolean;
     status: string;
     environment: unknown;
   },
@@ -135,6 +139,9 @@ export function toClientServer(
     cpu: { used: 0, limit: server.cpuPercent },
     memory: { usedMb: 0, limitMb: server.memoryMb },
     disk: { usedMb: 0, limitMb: server.diskMb },
+    cpuPinning: Number(server.cpuPinning) || 0,
+    databaseLimit: Number(server.databaseLimit) || 0,
+    backupsEnabled: server.backupsEnabled !== false,
     dockerImage: egg?.dockerImage ?? "",
     startup: egg?.startup ?? "",
     stopCommand: egg?.stopCommand ?? "",
@@ -147,6 +154,8 @@ export function toClientServer(
         })).filter((variable) => variable.key)
       : [],
     nodeOnline: isNodeOnline(node?.lastHeartbeatAt),
+    nodeMaintenance: Boolean(node?.maintenanceMode),
+    uploadLimitBytes: uploadLimitBytes(node?.uploadLimitMb),
     sftpHost: node?.fqdn ?? "",
     sftpPort: node?.sftpPort ?? 2022,
   };
@@ -205,6 +214,7 @@ function toSpec(
     memoryMb: number;
     diskMb: number;
     cpuPercent: number;
+    cpuPinning?: number;
     environment: unknown;
   },
   egg: {
@@ -227,9 +237,10 @@ function toSpec(
     installImage: egg.installImage,
     environment: { ...eggDefaults(egg), ...envRecord(server.environment) },
     limits: {
-      memoryBytes: server.memoryMb * 1024 * 1024,
-      diskBytes: server.diskMb * 1024 * 1024,
-      cpuPercent: server.cpuPercent,
+      memoryBytes: Math.max(0, server.memoryMb) * 1024 * 1024,
+      diskBytes: Math.max(0, server.diskMb) * 1024 * 1024,
+      cpuPercent: Math.max(0, server.cpuPercent),
+      cpuPinning: Math.max(0, Number(server.cpuPinning) || 0),
     },
     allocation: { ip: allocation.ip, port: allocation.port },
   };
@@ -312,6 +323,9 @@ export async function createServer(body: unknown, actorId: string) {
     memoryMb: parsed.data.memoryMb,
     diskMb: parsed.data.diskMb,
     cpuPercent: parsed.data.cpuPercent ?? 100,
+    cpuPinning: parsed.data.cpuPinning ?? 0,
+    databaseLimit: parsed.data.databaseLimit ?? 0,
+    backupsEnabled: parsed.data.backupsEnabled ?? true,
     status: "installing",
     environment,
   });
@@ -330,9 +344,12 @@ export async function updateServer(serverId: string, body: unknown, actorId: str
 
   if (parsed.data.name) server.name = parsed.data.name;
   if (parsed.data.description !== undefined) server.description = parsed.data.description;
-  if (parsed.data.memoryMb) server.memoryMb = parsed.data.memoryMb;
-  if (parsed.data.diskMb) server.diskMb = parsed.data.diskMb;
-  if (parsed.data.cpuPercent) server.cpuPercent = parsed.data.cpuPercent;
+  if (parsed.data.memoryMb !== undefined) server.memoryMb = parsed.data.memoryMb;
+  if (parsed.data.diskMb !== undefined) server.diskMb = parsed.data.diskMb;
+  if (parsed.data.cpuPercent !== undefined) server.cpuPercent = parsed.data.cpuPercent;
+  if (parsed.data.cpuPinning !== undefined) server.cpuPinning = parsed.data.cpuPinning;
+  if (parsed.data.databaseLimit !== undefined) server.databaseLimit = parsed.data.databaseLimit;
+  if (parsed.data.backupsEnabled !== undefined) server.backupsEnabled = parsed.data.backupsEnabled;
   if (parsed.data.environment) {
     server.environment = parsed.data.environment;
     server.markModified("environment");
@@ -440,6 +457,7 @@ export async function deleteServer(serverId: string) {
   }
   await Allocation.updateMany({ serverId: server._id }, { $set: { serverId: null } });
   await Subuser.deleteMany({ serverId: server._id });
+  await Schedule.deleteMany({ serverId: server._id });
   await Server.deleteOne({ _id: server._id });
   return { ok: true };
 }
@@ -485,6 +503,12 @@ async function requireServer(
   permission: ServerPermission,
 ) {
   const access = await requireAccess(serverId, viewerId, admin, permission);
+  if (!access.admin) {
+    const node = await Node.findById(access.server.nodeId);
+    if (node?.maintenanceMode) {
+      throw FlutterError.unavailable("This node is in maintenance mode. Try again later.");
+    }
+  }
   return access.server;
 }
 
@@ -542,6 +566,7 @@ export async function serverFiles(
   const permission = filePerm[action];
   if (!permission) throw FlutterError.validation("Unknown file action");
   const server = await requireServer(serverId, viewerId, admin, permission);
+  const node = await Node.findById(server.nodeId);
   return filesOnNode(server.nodeId.toString(), server.uuid, {
     action,
     path: parsed.path,
@@ -549,6 +574,7 @@ export async function serverFiles(
     to: parsed.to,
     name: parsed.name,
     contentBase64: parsed.contentBase64,
+    maxBytes: uploadLimitBytes(node?.uploadLimitMb),
   });
 }
 
@@ -568,6 +594,9 @@ export async function serverBackups(
   };
   const permission = backupPerm[action] ?? "backup.read";
   const server = await requireServer(serverId, viewerId, admin, permission);
+  if ((action === "create" || action === "restore") && server.backupsEnabled === false) {
+    throw FlutterError.forbidden("Backups are disabled for this server");
+  }
   if (action === "restore") {
     const docs = await related(server);
     if (docs.egg && docs.allocation) {
@@ -612,4 +641,48 @@ export async function consoleSocket(
     userId: viewerId,
   });
   return { token, socket: consoleWsUrl(requestOrigin) };
+}
+
+export async function applyPowerDirect(serverId: string, action: PowerAction) {
+  const server = await Server.findById(serverId);
+  if (!server) throw FlutterError.notFound("Server not found");
+  if (server.status === "installing") {
+    throw FlutterError.conflict("Wait for install to finish before sending power actions");
+  }
+  const docs = await related(server);
+  if (!docs.egg || !docs.allocation) throw FlutterError.notFound("Server is missing egg or allocation");
+  if (!isNodeOnline(docs.node?.lastHeartbeatAt) || !docs.node?.daemonListenUrl) {
+    throw FlutterError.unavailable("Node daemon is offline");
+  }
+  server.status = action === "start" || action === "restart" ? "starting" : "stopping";
+  await server.save();
+  try {
+    const result = await powerOnNode(server.nodeId.toString(), toSpec(server, docs.egg, docs.allocation), action);
+    const row = await Server.findById(serverId);
+    if (!row || row.status === "installing") return;
+    row.status = result?.status === "running" ? "running" : "offline";
+    await row.save();
+  } catch (error) {
+    const row = await Server.findById(serverId);
+    if (row && row.status !== "installing") {
+      row.status = "offline";
+      await row.save();
+    }
+    throw error;
+  }
+}
+
+export async function sendCommandDirect(serverId: string, command: string) {
+  const server = await Server.findById(serverId);
+  if (!server) throw FlutterError.notFound("Server not found");
+  await commandOnNode(server.nodeId.toString(), server.uuid, command.trim());
+}
+
+export async function createBackupDirect(serverId: string) {
+  const server = await Server.findById(serverId);
+  if (!server) throw FlutterError.notFound("Server not found");
+  if (server.backupsEnabled === false) {
+    throw FlutterError.forbidden("Backups are disabled for this server");
+  }
+  return backupsOnNode(server.nodeId.toString(), server.uuid, { action: "create" });
 }

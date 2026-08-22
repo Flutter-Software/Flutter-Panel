@@ -107,12 +107,82 @@ export async function deleteLocation(id: string) {
   return { deleted: true };
 }
 
+function nodeBase(node: {
+  _id: { toString(): string };
+  locationId: { toString(): string };
+  name: string;
+  description?: string;
+  fqdn: string;
+  public?: boolean;
+  scheme?: string;
+  behindProxy?: boolean;
+  daemonBase?: string;
+  memoryMb: number;
+  diskMb: number;
+  cpuCores?: number;
+  memoryOverallocate?: number;
+  diskOverallocate?: number;
+  daemonPort?: number;
+  sftpPort?: number;
+  uploadLimitMb?: number;
+  maintenanceMode?: boolean;
+  daemonVersion?: string | null;
+  systemHostname?: string | null;
+  systemPlatform?: string | null;
+  systemRelease?: string | null;
+  systemArch?: string | null;
+  systemCpuThreads?: number;
+  systemTotalMemoryMb?: number;
+  daemonToken?: string | null;
+  tokenPrefix?: string | null;
+  daemonListenUrl?: string | null;
+  lastHeartbeatAt?: Date | null;
+  createdAt: Date;
+}) {
+  return {
+    id: node._id.toString(),
+    locationId: node.locationId.toString(),
+    name: node.name,
+    description: node.description ?? "",
+    fqdn: node.fqdn,
+    public: node.public !== false,
+    scheme: node.scheme === "http" ? "http" : "https",
+    behindProxy: Boolean(node.behindProxy),
+    daemonBase: node.daemonBase || "/var/lib/flutter/volumes",
+    memoryMb: node.memoryMb,
+    diskMb: node.diskMb,
+    cpuCores: Number(node.cpuCores) || 0,
+    memoryOverallocate: Number(node.memoryOverallocate) || 0,
+    diskOverallocate: Number(node.diskOverallocate) || 0,
+    daemonPort: Number(node.daemonPort) || 8080,
+    sftpPort: Number(node.sftpPort) || 2022,
+    uploadLimitMb: Number(node.uploadLimitMb) > 0 ? Number(node.uploadLimitMb) : 250,
+    maintenanceMode: Boolean(node.maintenanceMode),
+    daemonVersion: node.daemonVersion || null,
+    system: {
+      hostname: node.systemHostname || null,
+      platform: node.systemPlatform || null,
+      release: node.systemRelease || null,
+      arch: node.systemArch || null,
+      cpuThreads: Number(node.systemCpuThreads) || 0,
+      totalMemoryMb: Number(node.systemTotalMemoryMb) || 0,
+    },
+    tokenPrefix: node.daemonToken
+      ? String(node.daemonToken).slice(0, 12)
+      : node.tokenPrefix ?? null,
+    daemonListenUrl: node.daemonListenUrl ?? null,
+    lastHeartbeatAt: node.lastHeartbeatAt ?? null,
+    createdAt: node.createdAt,
+    online: isNodeOnline(node.lastHeartbeatAt),
+  };
+}
+
 export async function listNodes() {
   const [rows, locations, allocations, servers] = await Promise.all([
     Node.find().sort({ name: 1 }),
     Location.find(),
     Allocation.find().sort({ ip: 1, port: 1 }),
-    Server.find({}, { nodeId: 1, memoryMb: 1 }),
+    Server.find({}, { nodeId: 1, memoryMb: 1, diskMb: 1, name: 1, status: 1, allocationId: 1 }),
   ]);
   const locationById = new Map(locations.map((row) => [row._id.toString(), row.shortCode]));
   const allocByNode = new Map<string, typeof allocations>();
@@ -123,40 +193,71 @@ export async function listNodes() {
     allocByNode.set(key, list);
   }
   const memoryByNode = new Map<string, number>();
+  const diskByNode = new Map<string, number>();
+  const countByNode = new Map<string, number>();
   for (const server of servers) {
     const key = server.nodeId.toString();
     memoryByNode.set(key, (memoryByNode.get(key) ?? 0) + server.memoryMb);
+    diskByNode.set(key, (diskByNode.get(key) ?? 0) + server.diskMb);
+    countByNode.set(key, (countByNode.get(key) ?? 0) + 1);
   }
+  const serverNameById = new Map(servers.map((row) => [row._id.toString(), row.name]));
 
   return rows.map((node) => {
     const id = node._id.toString();
     const ports = allocByNode.get(id) ?? [];
     return {
-      id,
-      locationId: node.locationId.toString(),
+      ...nodeBase(node),
       location: locationById.get(node.locationId.toString()) ?? "",
-      name: node.name,
-      description: node.description ?? "",
-      fqdn: node.fqdn,
-      memoryMb: node.memoryMb,
-      diskMb: node.diskMb,
-      cpuCores: Number(node.cpuCores) || 0,
       memoryCommittedMb: memoryByNode.get(id) ?? 0,
-      tokenPrefix: node.daemonToken
-        ? String(node.daemonToken).slice(0, 12)
-        : node.tokenPrefix ?? null,
-      daemonListenUrl: node.daemonListenUrl,
-      lastHeartbeatAt: node.lastHeartbeatAt,
-      createdAt: node.createdAt,
-      online: isNodeOnline(node.lastHeartbeatAt),
-      allocations: ports.map((row) => ({
-        id: row._id.toString(),
-        ip: row.ip,
-        port: row.port,
-        assigned: Boolean(row.serverId),
-      })),
+      diskCommittedMb: diskByNode.get(id) ?? 0,
+      serverCount: countByNode.get(id) ?? 0,
+      allocations: ports.map((row) => {
+        const serverId = row.serverId ? row.serverId.toString() : null;
+        return {
+          id: row._id.toString(),
+          ip: row.ip,
+          port: row.port,
+          alias: row.alias ?? "",
+          notes: row.notes ?? "",
+          assigned: Boolean(row.serverId),
+          serverId,
+          serverName: serverId ? serverNameById.get(serverId) ?? "Unknown" : null,
+        };
+      }),
     };
   });
+}
+
+export async function getNode(id: string) {
+  const [nodes, servers] = await Promise.all([
+    listNodes(),
+    Server.find({ nodeId: id }).sort({ name: 1 }),
+  ]);
+  const node = nodes.find((row) => row.id === id);
+  if (!node) throw FlutterError.notFound("Node not found");
+  const allocationById = new Map(node.allocations.map((row) => [row.id, row]));
+  return {
+    ...node,
+    servers: servers.map((row) => {
+      const allocation = node.allocations.find((item) => item.serverId === row._id.toString());
+      const assigned = allocationById.get(row.allocationId?.toString() ?? "");
+      return {
+        id: row._id.toString(),
+        name: row.name,
+        uuid: row.uuid,
+        status: row.status,
+        memoryMb: row.memoryMb,
+        diskMb: row.diskMb,
+        cpuPercent: row.cpuPercent,
+        allocation: assigned
+          ? `${assigned.ip}:${assigned.port}`
+          : allocation
+            ? `${allocation.ip}:${allocation.port}`
+            : "unassigned",
+      };
+    }),
+  };
 }
 
 export async function createNode(body: unknown) {
@@ -184,6 +285,8 @@ export async function createNode(body: unknown) {
     diskOverallocate: parsed.data.diskOverallocate,
     daemonPort: parsed.data.daemonPort,
     sftpPort: parsed.data.sftpPort,
+    uploadLimitMb: parsed.data.uploadLimitMb,
+    maintenanceMode: parsed.data.maintenanceMode,
     tokenHash: await hashPassword(token),
     tokenPrefix: token.slice(0, 12),
     daemonToken: token,
@@ -218,26 +321,34 @@ export async function updateNode(id: string, body: unknown) {
   }
   const node = await Node.findById(id);
   if (!node) throw FlutterError.notFound("Node not found");
-  if (parsed.data.memoryMb) node.memoryMb = parsed.data.memoryMb;
-  if (parsed.data.diskMb) node.diskMb = parsed.data.diskMb;
-  if (parsed.data.cpuCores) node.cpuCores = parsed.data.cpuCores;
+  if (parsed.data.locationId) {
+    const location = await Location.findById(parsed.data.locationId);
+    if (!location) throw FlutterError.notFound("Location not found");
+    node.locationId = parsed.data.locationId;
+  }
+  if (parsed.data.name !== undefined) node.name = parsed.data.name;
+  if (parsed.data.description !== undefined) node.description = parsed.data.description;
+  if (parsed.data.public !== undefined) node.public = parsed.data.public;
+  if (parsed.data.fqdn !== undefined) node.fqdn = parsed.data.fqdn;
+  if (parsed.data.scheme !== undefined) node.scheme = parsed.data.scheme;
+  if (parsed.data.behindProxy !== undefined) node.behindProxy = parsed.data.behindProxy;
+  if (parsed.data.daemonBase !== undefined) node.daemonBase = parsed.data.daemonBase;
+  if (parsed.data.memoryMb !== undefined) node.memoryMb = parsed.data.memoryMb;
+  if (parsed.data.diskMb !== undefined) node.diskMb = parsed.data.diskMb;
+  if (parsed.data.cpuCores !== undefined) node.cpuCores = parsed.data.cpuCores;
+  if (parsed.data.memoryOverallocate !== undefined) node.memoryOverallocate = parsed.data.memoryOverallocate;
+  if (parsed.data.diskOverallocate !== undefined) node.diskOverallocate = parsed.data.diskOverallocate;
+  if (parsed.data.daemonPort !== undefined) node.daemonPort = parsed.data.daemonPort;
+  if (parsed.data.sftpPort !== undefined) node.sftpPort = parsed.data.sftpPort;
+  if (parsed.data.uploadLimitMb !== undefined) node.uploadLimitMb = parsed.data.uploadLimitMb;
+  if (parsed.data.maintenanceMode !== undefined) node.maintenanceMode = parsed.data.maintenanceMode;
   await node.save();
-  const [updated] = (await listNodes()).filter((row) => row.id === id);
-  return updated;
+  return getNode(id);
 }
 
 export async function listAllocations(nodeId: string) {
-  const node = await Node.findById(nodeId);
-  if (!node) throw FlutterError.notFound("Node not found");
-  const rows = await Allocation.find({ nodeId }).sort({ ip: 1, port: 1 });
-  return rows.map((row) => ({
-    id: row._id.toString(),
-    nodeId: row.nodeId.toString(),
-    ip: row.ip,
-    port: row.port,
-    assigned: Boolean(row.serverId),
-    serverId: row.serverId ? row.serverId.toString() : null,
-  }));
+  const node = await getNode(nodeId);
+  return node.allocations;
 }
 
 export async function createAllocations(nodeId: string, body: unknown) {
