@@ -184,7 +184,7 @@ async function main() {
   if (sha) await writeFile(revisionPath, `${sha}\n`, "utf8");
 
   log("Installing packages");
-  await run("npm", ["ci"]);
+  await run("npm", ["ci", "--include=dev"]);
   log("Applying database schema");
   await run("npm", ["run", "db:push"]);
   log("Building panel");
