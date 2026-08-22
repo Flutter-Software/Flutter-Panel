@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import type {
-  ButtonHTMLAttributes,
-  InputHTMLAttributes,
-  ReactNode,
-  SelectHTMLAttributes,
-  TextareaHTMLAttributes,
+import {
+  useEffect,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
 } from "react";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -184,5 +186,78 @@ export function EmptyState({
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       ) : null}
     </Card>
+  );
+}
+
+export function Modal({
+  title,
+  description,
+  open,
+  onClose,
+  children,
+  footer,
+  className,
+}: {
+  title: string;
+  description?: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  className?: string;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+      <button
+        type="button"
+        className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+        aria-label="Close"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="flutter-modal-title"
+        className={cn(
+          "relative flex max-h-[min(92vh,52rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl",
+          className,
+        )}
+      >
+        <div className="flex shrink-0 items-start gap-3 border-b border-border px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h2 id="flutter-modal-title" className="text-base font-semibold">
+              {title}
+            </h2>
+            {description ? (
+              <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+            ) : null}
+          </div>
+          <Button type="button" size="sm" variant="ghost" className="size-8 px-0" onClick={onClose} aria-label="Close">
+            <X className="size-4" />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+        {footer ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
+            {footer}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }

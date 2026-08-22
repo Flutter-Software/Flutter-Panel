@@ -10,7 +10,7 @@ import {
   type ServerPermission,
 } from "@flutter-software/shared";
 import type { Context } from "hono";
-import { Server, Subuser, User } from "./db/models";
+import { Allocation, Node, Server, Subuser, User } from "./db/models";
 import { env } from "./env";
 import { sendSubuserInvite } from "./mail";
 import { hashPassword, publicUser, randomToken, sha256, validatePassword } from "./auth/crypto";
@@ -25,6 +25,25 @@ function escapeRegex(value: string) {
 
 function inviteUrl(token: string) {
   return `${env().APP_URL.replace(/\/+$/, "")}/invite/${encodeURIComponent(token)}`;
+}
+
+async function inviteMailContext(server: {
+  name: string;
+  status?: string;
+  nodeId: unknown;
+  allocationId: unknown;
+}) {
+  const [node, allocation] = await Promise.all([
+    Node.findById(server.nodeId),
+    Allocation.findById(server.allocationId),
+  ]);
+  const host = (typeof allocation?.alias === "string" && allocation.alias.trim()) || allocation?.ip || "";
+  return {
+    serverName: server.name,
+    nodeName: typeof node?.name === "string" ? node.name : "",
+    address: allocation ? `${host}:${allocation.port}` : "",
+    online: server.status === "running",
+  };
 }
 
 export async function attachPendingSubusers(user: { _id: { toString(): string }; email: string }) {
@@ -175,9 +194,10 @@ export async function createSubuser(
   const url = inviteUrl(token);
   const emailed = await sendSubuserInvite({
     to: email,
-    serverName: access.server.name,
     inviterName: actorName,
     url,
+    permissions,
+    ...(await inviteMailContext(access.server)),
   });
   const usersById = await usersForSubusers([row]);
   return { subuser: await toSubuserDto(row, usersById), emailed, inviteUrl: url };
@@ -227,9 +247,10 @@ export async function resendSubuserInvite(
   const url = inviteUrl(token);
   const emailed = await sendSubuserInvite({
     to: row.email,
-    serverName: access.server.name,
     inviterName: actorName,
     url,
+    permissions: normalizePermissions(row.permissions),
+    ...(await inviteMailContext(access.server)),
   });
   const usersById = await usersForSubusers([row]);
   return { subuser: await toSubuserDto(row, usersById), emailed, inviteUrl: url };

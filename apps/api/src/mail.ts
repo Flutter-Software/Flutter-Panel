@@ -1,5 +1,10 @@
 import nodemailer from "nodemailer";
-import type { SmtpEncryption } from "@flutter-software/shared";
+import {
+  PERMISSION_GROUPS,
+  hasServerPermission,
+  type ServerPermission,
+  type SmtpEncryption,
+} from "@flutter-software/shared";
 import { env } from "./env";
 import { log } from "./log";
 import { PanelSettings } from "./db/models";
@@ -108,25 +113,56 @@ export async function verifySmtp(config: SmtpConfig) {
   await transport.verify();
 }
 
-export async function sendSubuserInvite(options: {
+const INVITE_PERMISSIONS: { label: string; group: string }[] = [
+  { label: "Console", group: "control" },
+  { label: "File manager", group: "files" },
+  { label: "Backups", group: "backups" },
+  { label: "Schedules", group: "schedules" },
+  { label: "Startup", group: "startup" },
+  { label: "Settings", group: "settings" },
+];
+
+export type SubuserInviteMail = {
   to: string;
   serverName: string;
   inviterName: string;
   url: string;
-}) {
+  nodeName?: string;
+  address?: string;
+  online?: boolean;
+  permissions?: readonly string[];
+};
+
+export async function sendSubuserInvite(options: SubuserInviteMail) {
   const settings = await PanelSettings.findOne({ key: "panel" });
   const siteName = (typeof settings?.siteName === "string" && settings.siteName.trim()) || "Flutter";
+  const appUrl = env().APP_URL.replace(/\/+$/, "");
+  const hasLogo = Boolean(settings?.logoMime && settings?.logo);
   const subject = `You're invited to ${options.serverName} on ${siteName}`;
+  const granted = options.permissions ?? [];
+  const enabledLabels = INVITE_PERMISSIONS.filter((row) => permissionGroupGranted(granted, row.group)).map(
+    (row) => row.label,
+  );
   const text = [
-    `${options.inviterName} added you as a subuser on ${options.serverName}.`,
+    `${options.inviterName} has added you as a subuser on their ${siteName} game server.`,
     "",
-    "Set up your account (link expires in 7 days):",
+    `Server: ${options.serverName}`,
+    options.nodeName || options.address
+      ? [options.nodeName, options.address].filter(Boolean).join(" • ")
+      : "",
+    enabledLabels.length ? `Permissions: ${enabledLabels.join(", ")}` : "",
+    "",
+    "Accept the invitation (link expires in 7 days):",
     options.url,
-  ].join("\n");
-  const html = `
-    <p>${escapeHtml(options.inviterName)} added you as a subuser on <strong>${escapeHtml(options.serverName)}</strong>.</p>
-    <p><a href="${escapeHtml(options.url)}">Set up your account</a> — this link expires in 7 days.</p>
-  `;
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+  const html = subuserInviteHtml({
+    ...options,
+    siteName,
+    panelUrl: appUrl,
+    logoUrl: hasLogo ? `${appUrl}/api/v1/branding/logo` : "",
+  });
   try {
     return await sendMail({ to: options.to, subject, text, html });
   } catch (error) {
@@ -136,6 +172,141 @@ export async function sendSubuserInvite(options: {
     });
     return false;
   }
+}
+
+function permissionGroupGranted(granted: readonly string[], group: string) {
+  if (granted.includes("*")) return true;
+  if (group === "schedules") return hasServerPermission(granted, "schedule.read");
+  const found = PERMISSION_GROUPS.find((row) => row.key === group);
+  if (!found) return hasServerPermission(granted, group as ServerPermission);
+  return found.permissions.some((permission) => hasServerPermission(granted, permission.key));
+}
+
+function subuserInviteHtml(options: SubuserInviteMail & { siteName: string; panelUrl: string; logoUrl: string }) {
+  const year = new Date().getFullYear();
+  const inviter = escapeHtml(options.inviterName);
+  const serverName = escapeHtml(options.serverName);
+  const siteName = escapeHtml(options.siteName);
+  const url = escapeHtml(options.url);
+  const panelUrl = escapeHtml(options.panelUrl);
+  const nodeName = escapeHtml(options.nodeName?.trim() || "");
+  const address = escapeHtml(options.address?.trim() || "");
+  const meta = [nodeName, address].filter(Boolean).join(" • ");
+  const mark = escapeHtml(options.siteName.trim().charAt(0).toUpperCase() || "F");
+  const granted = options.permissions ?? [];
+  const online = Boolean(options.online);
+  const statusColor = online ? "#4ade80" : "#6b7280";
+  const statusLabel = online ? "Online" : "Offline";
+  const logo = options.logoUrl
+    ? `<img src="${escapeHtml(options.logoUrl)}" alt="${siteName}" width="36" height="36" style="display:block;width:36px;height:36px;border-radius:8px;border:0;" />`
+    : `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="36" height="36" bgcolor="#3bb2f6" align="center" valign="middle" style="width:36px;height:36px;background:#3bb2f6;color:#ffffff;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;border-radius:8px;">${mark}</td></tr></table>`;
+
+  const permissionCells = INVITE_PERMISSIONS.map((row) => {
+    const enabled = permissionGroupGranted(granted, row.group);
+    const color = enabled ? "#ffffff" : "#6b7280";
+    return `
+      <td width="50%" valign="top" style="padding:0 8px 12px 0;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td width="3" height="14" bgcolor="#3bb2f6" style="width:3px;height:14px;background:#3bb2f6;font-size:0;line-height:14px;border-radius:2px;">&nbsp;</td>
+            <td style="padding-left:10px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:20px;color:${color};font-weight:500;">${escapeHtml(row.label)}</td>
+          </tr>
+        </table>
+      </td>`;
+  });
+  const permissionRows: string[] = [];
+  for (let i = 0; i < permissionCells.length; i += 2) {
+    permissionRows.push(`<tr>${permissionCells[i]}${permissionCells[i + 1] ?? `<td width="50%"></td>`}</tr>`);
+  }
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${siteName} invitation</title>
+</head>
+<body style="margin:0;padding:0;background:#0a0a0a;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">You've been invited to manage ${serverName}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0a0a0a;">
+    <tr>
+      <td align="center" style="padding:36px 16px;">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;">
+          <tr>
+            <td style="padding-bottom:20px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td valign="middle" style="padding-right:12px;">${logo}</td>
+                  <td valign="middle">
+                    <div style="font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:18px;line-height:22px;color:#ffffff;font-weight:700;">${siteName}</div>
+                    <div style="font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:11px;line-height:16px;color:#9ca3af;letter-spacing:0.14em;text-transform:uppercase;padding-top:2px;">Control Panel</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="height:2px;line-height:2px;font-size:0;background:#3bb2f6;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="padding-top:20px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1a1a1a;border:1px solid #262626;border-radius:12px;">
+                <tr>
+                  <td style="padding:28px 28px 24px 28px;">
+                    <span style="display:inline-block;padding:4px 10px;background:#12324a;color:#7dd3fc;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;border-radius:999px;">Server invitation</span>
+                    <h1 style="margin:16px 0 12px 0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:26px;line-height:32px;color:#ffffff;font-weight:700;">You've been invited to manage a server</h1>
+                    <p style="margin:0 0 22px 0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:24px;color:#a0a0a0;"><strong style="color:#ffffff;font-weight:600;">${inviter}</strong> has added you as a subuser on their ${siteName} game server. Accept the invite to access the console, files, and more.</p>
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#121212;border:1px solid #262626;border-radius:10px;">
+                      <tr>
+                        <td style="padding:16px 18px;">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td valign="middle">
+                                <div style="font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:22px;color:#ffffff;font-weight:700;">${serverName}</div>
+                                ${meta ? `<div style="padding-top:4px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:18px;color:#a0a0a0;">${meta}</div>` : ""}
+                              </td>
+                              <td valign="middle" align="right" width="90" style="white-space:nowrap;">
+                                <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:${statusColor};vertical-align:middle;"></span>
+                                <span style="padding-left:6px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:18px;color:${statusColor};font-weight:600;vertical-align:middle;">${statusLabel}</span>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    <p style="margin:22px 0 10px 0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:11px;line-height:16px;color:#6b7280;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">Your permissions</p>
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      ${permissionRows.join("")}
+                    </table>
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;">
+                      <tr>
+                        <td align="center" bgcolor="#3bb2f6" style="background:#3bb2f6;border-radius:10px;">
+                          <a href="${url}" style="display:block;padding:14px 20px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:20px;color:#0a0a0a;font-weight:700;text-decoration:none;">Accept invitation</a>
+                        </td>
+                      </tr>
+                    </table>
+                    <p style="margin:14px 0 0 0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;color:#a0a0a0;text-align:center;">Or paste this link into your browser:<br /><a href="${url}" style="color:#3bb2f6;text-decoration:none;word-break:break-all;">${url}</a></p>
+                    <div style="margin:22px 0 0 0;border-top:1px solid #2a2a2a;padding-top:16px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;color:#a0a0a0;">This invitation expires in <strong style="color:#ffffff;font-weight:600;">7 days</strong>. If you weren't expecting it, you can ignore this email.</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:24px 12px 0 12px;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:20px;color:#606060;">
+              Sent by ${siteName} Control Panel on behalf of ${inviter}.<br />
+              &copy; ${year} ${siteName}. All rights reserved.<br />
+              <a href="${panelUrl}" style="color:#606060;text-decoration:underline;">Help center</a>
+              &nbsp;&middot;&nbsp;
+              <a href="${panelUrl}" style="color:#606060;text-decoration:underline;">Privacy</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 function escapeHtml(value: string) {

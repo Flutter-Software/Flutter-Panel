@@ -3,7 +3,7 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Mail, Search, Trash2, UserPlus } from "lucide-react";
 import { PERMISSION_GROUPS, type ServerPermission } from "@flutter-software/shared";
-import { Badge, Button, Card, EmptyState, Input } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Input, Modal } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { can } from "@/lib/access";
@@ -118,6 +118,7 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
   const [permissions, setPermissions] = useState<ServerPermission[]>(DEFAULT_PERMS);
   const [editing, setEditing] = useState<string | null>(null);
   const [editPerms, setEditPerms] = useState<ServerPermission[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const allowRead = can(server, "user.read");
@@ -171,6 +172,7 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
     () => new Set(subusers.map((row) => row.email.toLowerCase())),
     [subusers],
   );
+  const editingSub = subusers.find((row) => row.id === editing) ?? null;
 
   async function addUser() {
     setError(null);
@@ -187,6 +189,7 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
       setIdentifier("");
       setHits([]);
       setPermissions(DEFAULT_PERMS);
+      setAddOpen(false);
       await load();
       if (result.data.inviteUrl) {
         setInviteLink(result.data.inviteUrl);
@@ -275,13 +278,27 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold">Users</h2>
-        <p className="text-sm text-muted-foreground">
-          Search an existing account, or type an email to invite someone new. Invites expire in 7 days.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Users</h2>
+          <p className="text-sm text-muted-foreground">
+            Search an existing account, or type an email to invite someone new. Invites expire in 7 days.
+          </p>
+        </div>
+        {canCreate ? (
+          <Button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setAddOpen(true);
+            }}
+          >
+            <UserPlus className="size-4" />
+            Add subuser
+          </Button>
+        ) : null}
       </div>
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error && !addOpen && !editing ? <p className="text-sm text-destructive">{error}</p> : null}
       {notice ? (
         <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
           <p>{notice}</p>
@@ -297,12 +314,28 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
         </div>
       ) : null}
 
-      {canCreate ? (
-        <Card className="space-y-4 p-4">
-          <div className="flex items-center gap-2">
-            <UserPlus className="size-4 text-primary" />
-            <p className="text-sm font-semibold">Add subuser</p>
-          </div>
+      <Modal
+        title="Add subuser"
+        description="Search an existing account, or type an email to send an invite."
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setAddOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={pending || identifier.trim().length < 2}
+              onClick={() => void addUser()}
+            >
+              {emailLike && !exactHit ? "Invite subuser" : "Add subuser"}
+            </Button>
+          </>
+        }
+      >
+        {error ? <p className="mb-3 text-sm text-destructive">{error}</p> : null}
+        <div className="space-y-4">
           <div ref={boxRef} className="relative">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -363,15 +396,36 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
             ) : null}
           </div>
           <PermissionPicker value={permissions} onChange={setPermissions} disabled={pending} />
-          <Button
-            type="button"
-            disabled={pending || identifier.trim().length < 2}
-            onClick={() => void addUser()}
-          >
-            {emailLike && !exactHit ? "Invite subuser" : "Add subuser"}
-          </Button>
-        </Card>
-      ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        title="Permissions"
+        description={
+          editingSub
+            ? `Access for ${editingSub.username ?? editingSub.email}`
+            : "Choose what this user can do on this server."
+        }
+        open={Boolean(editing)}
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={pending || !editing}
+              onClick={() => editing && void saveEdit(editing)}
+            >
+              Save permissions
+            </Button>
+          </>
+        }
+      >
+        {error ? <p className="mb-3 text-sm text-destructive">{error}</p> : null}
+        <PermissionPicker value={editPerms} onChange={setEditPerms} disabled={pending} />
+      </Modal>
 
       {subusers.length === 0 && !server ? (
         <EmptyState
@@ -439,14 +493,12 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
                       size="sm"
                       variant="secondary"
                       onClick={() => {
-                        if (editing === sub.id) setEditing(null);
-                        else {
-                          setEditing(sub.id);
-                          setEditPerms(sub.permissions);
-                        }
+                        setError(null);
+                        setEditing(sub.id);
+                        setEditPerms(sub.permissions);
                       }}
                     >
-                      {editing === sub.id ? "Close" : "Permissions"}
+                      Permissions
                     </Button>
                   ) : null}
                   {canDelete ? (
@@ -463,14 +515,6 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
                   ) : null}
                 </div>
               </div>
-              {editing === sub.id ? (
-                <div className="mt-4 space-y-3 border-t border-border pt-4">
-                  <PermissionPicker value={editPerms} onChange={setEditPerms} disabled={pending} />
-                  <Button type="button" size="sm" disabled={pending} onClick={() => void saveEdit(sub.id)}>
-                    Save permissions
-                  </Button>
-                </div>
-              ) : null}
             </Card>
           ))
           )}
