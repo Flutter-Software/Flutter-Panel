@@ -28,6 +28,7 @@ type Session = {
   resetAt: number | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
   seedPromise: Promise<void> | null;
+  crashed: boolean;
 };
 
 const sessions = new Map<string, Session>();
@@ -67,6 +68,7 @@ export function clearConsole(uuid: string) {
     current.history = [];
     current.resetAt = Date.now();
     current.seedPromise = null;
+    current.crashed = false;
     for (const listener of current.listeners) listener("cleared", "");
     return;
   }
@@ -79,6 +81,7 @@ export function clearConsole(uuid: string) {
     resetAt: Date.now(),
     idleTimer: null,
     seedPromise: null,
+    crashed: false,
   });
 }
 
@@ -98,6 +101,7 @@ function session(uuid: string) {
       resetAt: null,
       idleTimer: null,
       seedPromise: null,
+      crashed: false,
     };
     pendingNotices.delete(uuid);
     sessions.set(uuid, current);
@@ -275,6 +279,11 @@ async function pump(config: DaemonConfig, uuid: string) {
   signal.addEventListener("abort", () => clearInterval(statsTimer), { once: true });
 
   while (!signal.aborted) {
+    if (current.crashed) {
+      emit(uuid, "status", "offline");
+      await sleep(500, signal);
+      continue;
+    }
     const running = await containerRunning(uuid).catch(() => false);
     emit(uuid, "status", running ? "running" : "offline");
     if (!running) {
@@ -290,6 +299,7 @@ async function pump(config: DaemonConfig, uuid: string) {
     if (signal.aborted) break;
 
     if (result === "crashed" || result === "error") {
+      current.crashed = true;
       emit(uuid, "status", "offline");
       if (result === "error") {
         const still = await containerRunning(uuid).catch(() => false);

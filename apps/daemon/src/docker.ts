@@ -195,6 +195,7 @@ export async function killContainer(uuid: string) {
   if (!info) return;
   await signalContainer(info.Id, "SIGKILL");
   await withTimeout(docker.getContainer(info.Id).kill(), 2_000).catch(() => undefined);
+  await waitUntilStopped(uuid, 2_000);
   invalidateInspect(uuid);
 }
 
@@ -731,6 +732,17 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       return { status, action };
     };
 
+    const settleStarted = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      invalidateInspect(uuid);
+      const after = await inspectContainer(uuid, true);
+      if (after?.State.Running) return done("running");
+      const code = after?.State.ExitCode ?? 0;
+      if (after?.State.OOMKilled) notice(uuid, "Server ran out of memory");
+      else if (code !== 0) notice(uuid, `Server crashed (exit ${code})`);
+      return done("offline");
+    };
+
     if (action === "kill") {
       if (existing) {
         await signalContainer(existing.Id, "SIGKILL");
@@ -745,18 +757,18 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
     }
 
     if (action === "start" && existing?.State.Running) {
-      return done("running");
+      return settleStarted();
     }
 
     if (sameSpec && existing) {
       await applyCompute(existing.Id, merged);
       if (action === "restart" && existing.State.Running) {
         await docker.getContainer(existing.Id).restart({ t: 2 });
-        return done("running");
+        return settleStarted();
       }
       if (!existing.State.Running) {
         await docker.getContainer(existing.Id).start();
-        return done("running");
+        return settleStarted();
       }
     }
 
@@ -798,7 +810,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       Labels: { "flutter.server": uuid, "flutter.spec": fingerprint },
     });
     await container.start();
-    return done("running");
+    return settleStarted();
   } catch (error) {
     notice(
       uuid,

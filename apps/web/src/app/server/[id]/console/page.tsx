@@ -166,7 +166,13 @@ export default function ConsolePage({
   const socketRef = useRef<WebSocket | null>(null);
   const lastNet = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const liveGraphs = useRef(false);
+  const crashedUntilStart = useRef(false);
+  const startGraceUntil = useRef(0);
   const [series, setSeries] = useState<StatSeries>(emptySeries);
+
+  function inStartGrace() {
+    return Date.now() < startGraceUntil.current;
+  }
 
   async function loadServer() {
     const result = await api<{ data: { server: ServerRecord } }>(`/api/v1/client/servers/${id}`);
@@ -176,8 +182,15 @@ export default function ConsolePage({
       if (current.status === "installing" && (next.status === "running" || next.status === "starting" || next.status === "stopping")) {
         return { ...next, status: "installing" };
       }
-      if (current.status === "starting" && next.status === "offline") return { ...next, status: "starting" };
-      if (current.status === "stopping" && next.status === "running") return { ...next, status: "stopping" };
+      if (crashedUntilStart.current && next.status !== "installing" && next.status !== "install_failed") {
+        return { ...next, status: "offline" };
+      }
+      if (current.status === "starting" && next.status === "offline" && inStartGrace()) {
+        return { ...next, status: "starting" };
+      }
+      if (current.status === "stopping" && next.status === "running" && inStartGrace()) {
+        return { ...next, status: "stopping" };
+      }
       const emptyLive =
         next.cpu.used === 0 &&
         next.memory.usedMb === 0 &&
@@ -356,13 +369,25 @@ export default function ConsolePage({
               setServer((current) => {
                 if (!current) return current;
                 if (current.status === "installing" || current.status === "install_failed") return current;
-                if (status === "offline" && current.status === "starting") return current;
+                if (status === "offline" && current.status === "starting" && inStartGrace()) return current;
                 if (status === "running" && current.status === "stopping") return current;
+                if (status === "running" && crashedUntilStart.current) return { ...current, status: "offline" };
                 return { ...current, status };
               });
               return;
             }
-            if (parsed.event === "error" && parsed.data) setError(parsed.data);
+            if (parsed.event === "error" && parsed.data) {
+              if (/crashed \(exit|out of memory/i.test(parsed.data)) {
+                crashedUntilStart.current = true;
+                startGraceUntil.current = 0;
+                setServer((current) =>
+                  current && current.status !== "installing" && current.status !== "install_failed"
+                    ? { ...current, status: "offline" }
+                    : current,
+                );
+              }
+              setError(parsed.data);
+            }
           } catch {
             push(String(event.data));
           }
@@ -421,6 +446,10 @@ export default function ConsolePage({
       setNetRate(0);
     }
     applyStatus(action === "stop" ? "stopping" : "starting");
+    if (action === "start" || action === "restart") {
+      crashedUntilStart.current = false;
+      startGraceUntil.current = Date.now() + 2_500;
+    }
     try {
       const result = await api<{ data: { server: ServerRecord } }>(`/api/v1/client/servers/${id}/power`, {
         method: "POST",
