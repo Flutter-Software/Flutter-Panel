@@ -332,6 +332,7 @@ fi
 
 cat > "$PREFIX/apps/web/.env.local" <<EOF
 API_INTERNAL_URL=http://127.0.0.1:4000
+APP_URL=${APP_URL}
 EOF
 chown "$SERVICE_USER:$SERVICE_USER" "$PREFIX/apps/web/.env.local"
 
@@ -408,15 +409,39 @@ printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/flutter-restart, /usr/local/sbin
 chmod 440 /etc/sudoers.d/flutter-panel
 visudo -cf /etc/sudoers.d/flutter-panel >/dev/null
 
+start_nginx() {
+  systemctl enable nginx >/dev/null
+  if systemctl restart nginx; then
+    return 0
+  fi
+  warn "nginx.service failed to start. Recent logs:"
+  journalctl -u nginx.service -n 40 --no-pager || true
+  warn "Listeners on :80 / :443:"
+  ss -tlnp 2>/dev/null | grep -E ':80|:443' || true
+  warn "Enabled sites:"
+  ls -la /etc/nginx/sites-enabled/ || true
+  die "nginx failed to start. Fix the error above, then re-run: systemctl restart nginx"
+}
+
 if [[ "$INSTALL_NGINX" -eq 1 ]]; then
   log "Configuring nginx"
   install -m 644 "$PREFIX/install/nginx/upgrade-map.conf" /etc/nginx/conf.d/flutter-upgrade.conf
   sed "s/__SERVER_NAME__/${URL_HOST}/g" "$PREFIX/install/nginx/flutter.conf" > /etc/nginx/sites-available/flutter
+  # Hosts with IPv6 disabled fail at start (not during nginx -t) on listen [::]:80
+  if [[ ! -s /proc/net/if_inet6 ]]; then
+    sed -i '/listen \[::\]:80;/d' /etc/nginx/sites-available/flutter
+  fi
   ln -sfn /etc/nginx/sites-available/flutter /etc/nginx/sites-enabled/flutter
   rm -f /etc/nginx/sites-enabled/default
+
+  if grep -R --include='*.conf' -l "server_name[[:space:]].*${URL_HOST}" /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null \
+    | grep -v '/sites-enabled/flutter$' >/dev/null; then
+    warn "Another nginx site already uses server_name ${URL_HOST}."
+    warn "Duplicate vhosts are ignored; keep only one of: /etc/nginx/sites-enabled/flutter or the existing site."
+  fi
+
   nginx -t
-  systemctl enable --now nginx
-  systemctl reload nginx
+  start_nginx
 
   if [[ "$LETSENCRYPT" -eq 1 ]]; then
     log "Requesting Let's Encrypt certificate"

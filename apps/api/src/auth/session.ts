@@ -9,11 +9,12 @@ import {
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Session, User } from "../db/models";
-import { env, isProduction } from "../env";
+import { env } from "../env";
 import { publicUser, randomToken, sha256 } from "./crypto";
 
 function cookieSecure() {
-  return env().COOKIE_SECURE ?? isProduction();
+  if (env().COOKIE_SECURE !== undefined) return env().COOKIE_SECURE;
+  return env().APP_URL.startsWith("https://");
 }
 
 export function sessionCookieOptions() {

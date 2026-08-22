@@ -59,7 +59,8 @@ export default function LoginPage() {
                   body: JSON.stringify(body),
                 });
                 setUser(result.data.user);
-                router.push("/");
+                const next = new URLSearchParams(window.location.search).get("next");
+                router.push(next?.startsWith("/") ? next : "/");
                 router.refresh();
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Sign in failed");
