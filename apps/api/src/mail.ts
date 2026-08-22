@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import nodemailer from "nodemailer";
 import {
   PERMISSION_GROUPS,
@@ -9,7 +13,8 @@ import { env } from "./env";
 import { log } from "./log";
 import { PanelSettings } from "./db/models";
 
-const FLUTTER_LOGO_URL = "https://cdn.phxservices.co/file/chrome_wPFwHuRJ8P.png";
+const LOGO_CID = "flutter-logo@panel";
+const LOGO_FILE = "apps/web/public/flutter-logo.png";
 
 export type SmtpConfig = {
   host: string;
@@ -91,6 +96,13 @@ export async function sendMail(
     subject: string;
     text: string;
     html?: string;
+    attachments?: {
+      filename: string;
+      content: Buffer;
+      contentType: string;
+      cid?: string;
+      contentDisposition?: "inline" | "attachment";
+    }[];
   },
   override?: SmtpConfig | null,
 ) {
@@ -106,6 +118,7 @@ export async function sendMail(
     subject: options.subject,
     text: options.text,
     html: options.html,
+    attachments: options.attachments,
   });
   return true;
 }
@@ -113,6 +126,32 @@ export async function sendMail(
 export async function verifySmtp(config: SmtpConfig) {
   const transport = nodemailer.createTransport(transportOptions(config));
   await transport.verify();
+}
+
+function logoCandidates() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const cwd = process.cwd();
+  return [
+    resolve(here, "../../../", LOGO_FILE),
+    resolve(cwd, LOGO_FILE),
+    resolve(cwd, "../web/public/flutter-logo.png"),
+    resolve(here, "../../web/public/flutter-logo.png"),
+  ];
+}
+
+async function loadInviteLogo() {
+  for (const path of logoCandidates()) {
+    if (!existsSync(path)) continue;
+    try {
+      const data = await readFile(path);
+      if (!data.byteLength) continue;
+      return { data, mime: "image/png", filename: "flutter-logo.png" };
+    } catch {
+      /* try next */
+    }
+  }
+  log("warn", "invite logo missing", { tried: logoCandidates() });
+  return null;
 }
 
 const INVITE_PERMISSIONS: { label: string; group: string }[] = [
@@ -139,7 +178,6 @@ export async function sendSubuserInvite(options: SubuserInviteMail) {
   const settings = await PanelSettings.findOne({ key: "panel" });
   const siteName = (typeof settings?.siteName === "string" && settings.siteName.trim()) || "Flutter";
   const appUrl = env().APP_URL.replace(/\/+$/, "");
-  const hasLogo = Boolean(settings?.logoMime && settings?.logo);
   const subject = `You're invited to ${options.serverName} on ${siteName}`;
   const granted = options.permissions ?? [];
   const enabledLabels = INVITE_PERMISSIONS.filter((row) => permissionGroupGranted(granted, row.group)).map(
@@ -159,14 +197,31 @@ export async function sendSubuserInvite(options: SubuserInviteMail) {
   ]
     .filter((line) => line !== "")
     .join("\n");
+  const logo = await loadInviteLogo();
   const html = subuserInviteHtml({
     ...options,
     siteName,
     panelUrl: appUrl,
-    logoUrl: hasLogo ? `${appUrl}/api/v1/branding/logo` : FLUTTER_LOGO_URL,
+    logoUrl: logo ? `cid:${LOGO_CID}` : `${appUrl}/flutter-logo.png`,
   });
   try {
-    return await sendMail({ to: options.to, subject, text, html });
+    return await sendMail({
+      to: options.to,
+      subject,
+      text,
+      html,
+      attachments: logo
+        ? [
+            {
+              filename: logo.filename,
+              content: logo.data,
+              contentType: logo.mime,
+              cid: LOGO_CID,
+              contentDisposition: "inline",
+            },
+          ]
+        : undefined,
+    });
   } catch (error) {
     log("error", "invite email failed", {
       to: options.to,

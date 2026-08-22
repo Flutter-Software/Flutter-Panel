@@ -732,6 +732,9 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       ...(merged.startup?.trim() || env.STARTUP?.trim() ? { Cmd: ["sh", "-c", command] } : {}),
       Tty: true,
       OpenStdin: true,
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
       WorkingDir: "/home/container",
       Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
       ExposedPorts: { [`${port}/tcp`]: {} },
@@ -1179,22 +1182,13 @@ export async function followLogs(
     tail: options.tail ?? 80,
     ...(options.since ? { since: options.since } : {}),
   })) as NodeJS.ReadableStream & { destroy?: () => void };
-
-  let buf = "";
-  const onData = (chunk: Buffer | string) => {
-    const raw = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    buf += decodeDockerLogs(raw).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const parts = buf.split("\n");
-    buf = parts.pop() ?? "";
-    for (const line of parts) {
-      const formatted = formatDockerLogLine(line);
-      if (formatted) onChunk(formatted);
-    }
-  };
+  const parser = createOutputParser(Boolean(info.Config.Tty), onChunk);
 
   await new Promise<void>((resolve) => {
+    const onData = (chunk: Buffer | string) => parser.push(chunk);
     const stop = () => {
       stream.off("data", onData);
+      parser.end();
       stream.destroy?.();
       resolve();
     };
@@ -1208,10 +1202,6 @@ export async function followLogs(
     stream.on("error", stop);
     stream.resume?.();
   });
-  if (buf.trim()) {
-    const formatted = formatDockerLogLine(buf);
-    if (formatted) onChunk(formatted);
-  }
 }
 
 let tryConsoleWrite: ((uuid: string, command: string) => boolean) | null = null;
@@ -1221,7 +1211,7 @@ export function setConsoleWriter(write: (uuid: string, command: string) => boole
 }
 
 export async function attachStdin(uuid: string) {
-  return attachStream(uuid, { stdin: true, stdout: false, stderr: false });
+  return attachStream(uuid, { stdin: true, stdout: true, stderr: true });
 }
 
 export async function attachConsole(
@@ -1234,14 +1224,7 @@ export async function attachConsole(
   if (!info?.State.Running) throw new Error("Server is not running");
   const stream = await attachStream(uuid, { stdin: true, stdout: true, stderr: true });
   const parser = createOutputParser(Boolean(info.Config.Tty), onLine);
-  const write = (command: string) => {
-    try {
-      stream.write(command.endsWith("\n") ? command : `${command}\n`);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const write = (command: string) => writeAttach(stream, command);
   onReady?.(write);
 
   await new Promise<void>((resolve) => {
@@ -1264,36 +1247,64 @@ export async function attachConsole(
   });
 }
 
+function stdinBytes(command: string) {
+  if (command === "\x03") return Buffer.from("\x03");
+  const text = command.endsWith("\n") ? command : `${command}\n`;
+  return Buffer.from(text, "utf8");
+}
+
+function writeAttach(stream: NodeJS.WritableStream, command: string) {
+  try {
+    stream.write(stdinBytes(command));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function attachStream(
   uuid: string,
   streams: { stdin: boolean; stdout: boolean; stderr: boolean },
 ) {
   const info = await inspectContainer(uuid);
   if (!info?.State.Running) throw new Error("Server is not running");
-  const id = encodeURIComponent(info.Id);
-  const stdin = streams.stdin ? 1 : 0;
-  const stdout = streams.stdout ? 1 : 0;
-  const stderr = streams.stderr ? 1 : 0;
-  return new Promise<NodeJS.ReadWriteStream & { destroy?: () => void }>((resolve, reject) => {
-    docker.modem.dial(
-      {
-        path: `/containers/${id}/attach?stream=1&stdin=${stdin}&stdout=${stdout}&stderr=${stderr}&logs=0`,
-        method: "POST",
-        isStream: true,
-        hijack: true,
-        openStdin: streams.stdin,
-        statusCodes: {
-          200: true,
-          404: "no such container",
-          500: "server error",
+  const container = docker.getContainer(info.Id);
+  try {
+    const stream = await container.attach({
+      stream: true,
+      stdin: streams.stdin,
+      stdout: streams.stdout,
+      stderr: streams.stderr,
+      hijack: true,
+      logs: false,
+    });
+    return stream as NodeJS.ReadWriteStream & { destroy?: () => void };
+  } catch {
+    const id = encodeURIComponent(info.Id);
+    const stdin = streams.stdin ? 1 : 0;
+    const stdout = streams.stdout ? 1 : 0;
+    const stderr = streams.stderr ? 1 : 0;
+    return new Promise<NodeJS.ReadWriteStream & { destroy?: () => void }>((resolve, reject) => {
+      docker.modem.dial(
+        {
+          path: `/containers/${id}/attach?stream=1&stdin=${stdin}&stdout=${stdout}&stderr=${stderr}&logs=0`,
+          method: "POST",
+          isStream: true,
+          hijack: true,
+          openStdin: streams.stdin,
+          statusCodes: {
+            200: true,
+            404: "no such container",
+            500: "server error",
+          },
         },
-      },
-      (error: Error | null, stream?: unknown) => {
-        if (error || !stream) reject(error ?? new Error("Attach failed"));
-        else resolve(stream as NodeJS.ReadWriteStream & { destroy?: () => void });
-      },
-    );
-  });
+        (error: Error | null, stream?: unknown) => {
+          if (error || !stream) reject(error ?? new Error("Attach failed"));
+          else resolve(stream as NodeJS.ReadWriteStream & { destroy?: () => void });
+        },
+      );
+    });
+  }
 }
 
 export async function injectContainerLog(uuid: string, message: string) {
@@ -1316,12 +1327,15 @@ export async function injectContainerLog(uuid: string, message: string) {
 }
 
 export async function sendCommand(uuid: string, command: string) {
-  const payload = command.endsWith("\n") ? command : `${command}\n`;
+  const payload = command.endsWith("\n") || command === "\x03" ? command : `${command}\n`;
   if (tryConsoleWrite?.(uuid, payload)) return { ok: true };
-  const stream = await withTimeout(attachStdin(uuid), 1_500);
-  stream.write(payload);
-  await new Promise((resolveWrite) => setTimeout(resolveWrite, 20));
-  stream.destroy?.();
+  const stream = await withTimeout(attachStream(uuid, { stdin: true, stdout: true, stderr: true }), 2_000);
+  try {
+    if (!writeAttach(stream, payload)) throw new Error("stdin write failed");
+    await new Promise((resolveWrite) => setTimeout(resolveWrite, 80));
+  } finally {
+    stream.destroy?.();
+  }
   return { ok: true };
 }
 

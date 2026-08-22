@@ -16,7 +16,7 @@ function sign(secret: string, body: string) {
 export function signConsoleTicket(
   secret: string,
   input: Omit<ConsoleTicket, "v" | "expiresAt">,
-  ttlMs = 60_000,
+  ttlMs = 5 * 60_000,
 ): string {
   const payload: ConsoleTicket = {
     v: 1,

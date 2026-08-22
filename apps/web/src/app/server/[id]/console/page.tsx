@@ -7,7 +7,6 @@ import { StatGraph } from "@/components/status";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { browserConsoleSocketUrl } from "@/lib/console-socket";
-import { peekQuery } from "@/lib/query";
 import { formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/access";
@@ -209,7 +208,6 @@ export default function ConsolePage({
 
   useEffect(() => {
     let closed = false;
-    let skipCache = false;
     let retryMs = 400;
     let retryTimer: number | undefined;
     let ws: WebSocket | null = null;
@@ -226,11 +224,9 @@ export default function ConsolePage({
     const connect = async () => {
       if (closed) return;
       try {
-        const socketPath = `/api/v1/client/servers/${id}/console/socket`;
-        const cached = skipCache ? undefined : peekQuery<{ data: { token: string; socket: string } }>(socketPath);
-        skipCache = true;
-        const result =
-          cached ?? (await api<{ data: { token: string; socket: string } }>(socketPath));
+        const result = await api<{ data: { token: string; socket: string } }>(
+          `/api/v1/client/servers/${id}/console/socket`,
+        );
         if (closed) return;
         const url = browserConsoleSocketUrl(result.data.token, result.data.socket);
         ws = new WebSocket(url);
@@ -429,17 +425,17 @@ export default function ConsolePage({
     if (!value || !server || server.status === "installing") return;
     setCommand("");
     setLines((current) => trimLines(current, [`> ${value}`]));
-    const socket = socketRef.current;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ event: "command", data: value }));
-      return;
-    }
     try {
       await api(`/api/v1/client/servers/${id}/command`, {
         method: "POST",
         body: JSON.stringify({ command: value }),
       });
     } catch (err) {
+      const socket = socketRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ event: "command", data: value }));
+        return;
+      }
       setError(err instanceof Error ? err.message : "Could not send command");
     }
   }

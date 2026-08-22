@@ -605,6 +605,16 @@ function sendClient(ws: WSContext, payload: { event: string; data: string }) {
   ws.send(JSON.stringify(payload));
 }
 
+function wsText(data: unknown) {
+  if (typeof data === "string") return data;
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(data)) return data.toString("utf8");
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
+  if (ArrayBuffer.isView(data)) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
+  }
+  return String(data);
+}
+
 async function connectDaemonConsole(
   claims: { uuid: string; nodeId: string },
   ws: WSContext,
@@ -628,7 +638,7 @@ async function connectDaemonConsole(
   );
   setDaemon(daemonWs);
   daemonWs.addEventListener("message", (event) => {
-    if (Number(ws.readyState) === 1) ws.send(String(event.data));
+    if (Number(ws.readyState) === 1) ws.send(wsText(event.data));
   });
   daemonWs.addEventListener("close", () => {
     sendClient(ws, { event: "status", data: "offline" });

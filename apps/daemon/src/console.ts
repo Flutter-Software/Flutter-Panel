@@ -1,7 +1,7 @@
 import type { WSContext } from "hono/ws";
 import type { DaemonConfig } from "./config";
 import {
-  attachStdin,
+  attachConsole,
   containerRunning,
   followLogs,
   getLogs,
@@ -187,30 +187,14 @@ export async function sendConsoleCommand(uuid: string, command: string) {
 }
 
 async function attachStdinStream(uuid: string, current: Session, signal: AbortSignal) {
-  const stream = await attachStdin(uuid);
-  current.write = (command) => {
-    try {
-      stream.write(command.endsWith("\n") || command === "\x03" ? command : `${command}\n`);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  await new Promise<void>((resolve) => {
-    const stop = () => {
-      current.write = null;
-      stream.destroy?.();
-      resolve();
-    };
-    if (signal.aborted) {
-      stop();
-      return;
-    }
-    signal.addEventListener("abort", stop, { once: true });
-    stream.on("end", stop);
-    stream.on("error", stop);
-    stream.resume?.();
-  });
+  await attachConsole(
+    uuid,
+    (line) => emitOutput(uuid, line),
+    signal,
+    (write) => {
+      current.write = write;
+    },
+  );
 }
 
 async function seedLogs(uuid: string) {
@@ -240,9 +224,7 @@ async function attachLive(uuid: string, signal: AbortSignal) {
   try {
     await Promise.all([
       attachStdinStream(uuid, current, local.signal).catch(() => undefined),
-      followLogs(uuid, (line) => emitOutput(uuid, line), local.signal, { tail: 1 }).finally(() =>
-        local.abort(),
-      ),
+      followLogs(uuid, (line) => emitOutput(uuid, line), local.signal, { tail: 1 }).catch(() => undefined),
     ]);
   } finally {
     signal.removeEventListener("abort", onAbort);

@@ -251,7 +251,14 @@ export function createDaemonApp(config: DaemonConfig) {
           void runDaemonConsole(config, uuid, ws, ac.signal);
         },
         onMessage(event) {
-          const raw = typeof event.data === "string" ? event.data : "";
+          const raw =
+            typeof event.data === "string"
+              ? event.data
+              : Buffer.isBuffer(event.data)
+                ? event.data.toString("utf8")
+                : ArrayBuffer.isView(event.data)
+                  ? Buffer.from(event.data.buffer, event.data.byteOffset, event.data.byteLength).toString("utf8")
+                  : "";
           let command = raw.trim();
           try {
             const parsed = JSON.parse(raw) as { event?: string; data?: string };
