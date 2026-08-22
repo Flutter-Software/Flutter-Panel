@@ -108,3 +108,7 @@ export async function requireAdmin(c: Context) {
   if (session.user.role !== "admin") throw FlutterError.forbidden();
   return session;
 }
+
+export async function destroyOtherSessions(userId: string, keepSessionId: string) {
+  await Session.deleteMany({ userId, _id: { $ne: keepSessionId } });
+}

@@ -1,4 +1,4 @@
-import { FlutterError, adminUserCreateSchema, adminUserUpdateSchema, loginSchema, registerSchema } from "@flutter-software/shared";
+import { FlutterError, adminUserCreateSchema, adminUserUpdateSchema, changePasswordSchema, loginSchema, registerSchema } from "@flutter-software/shared";
 import type { Context } from "hono";
 import { User } from "../db/models";
 import {
@@ -8,7 +8,7 @@ import {
   validatePassword,
   verifyPassword,
 } from "./crypto";
-import { createSession, destroySession, getSessionUser } from "./session";
+import { createSession, destroyOtherSessions, destroySession, getSessionUser } from "./session";
 import { attachPendingSubusers } from "../subusers";
 
 export async function setupStatus() {
@@ -83,6 +83,30 @@ export async function me(c: Context) {
   const row = await User.findById(session.user.id);
   if (row) await attachPendingSubusers(row);
   return session.user;
+}
+
+export async function changePassword(c: Context, body: unknown) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  const parsed = changePasswordSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Invalid password", parsed.error.flatten());
+  }
+  const passwordError = validatePassword(parsed.data.password);
+  if (passwordError) throw FlutterError.validation(passwordError);
+  if (parsed.data.password === parsed.data.currentPassword) {
+    throw FlutterError.validation("Choose a different password than the current one");
+  }
+
+  const row = await User.findById(session.user.id);
+  if (!row) throw FlutterError.unauthorized();
+  const ok = await verifyPassword(row.passwordHash, parsed.data.currentPassword);
+  if (!ok) throw FlutterError.unauthorized("Current password is incorrect");
+
+  row.passwordHash = await hashPassword(parsed.data.password);
+  await row.save();
+  await destroyOtherSessions(row._id.toString(), session.sessionId);
+  return { ok: true };
 }
 
 export async function listUsers() {

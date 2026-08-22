@@ -60,16 +60,52 @@ export function stripAttachNoise(text: string) {
     .trim();
 }
 
+/** Cursor-home / erase-line / color codes from npm and similar TTY installers. */
+function sanitizeConsoleOutput(text: string) {
+  let value = text.replace(/\r\n/g, "\n");
+  value = value.replace(/\x1b\[[0-9;]*[GHf]/g, "\r");
+  value = value.replace(/\x1b\[[0-9;]*[KJ]/g, "");
+  value = value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  value = value.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
+  value = value.replace(/\x1b./g, "");
+  // ESC sometimes arrives as `[`, leaving `[[1G` / `[[33m`.
+  value = value.replace(/\[{1,2}\d*(?:;\d+)*[GHf]/g, "\r");
+  value = value.replace(/\[{1,2}\d*[KJ]/g, "");
+  value = value.replace(/\[{1,2}\d+(?:;\d+)*m/g, "");
+  value = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+  return value;
+}
+
+function visibleConsoleLine(line: string) {
+  const parts = line.split("\r");
+  return (parts[parts.length - 1] ?? "").replace(/[ \t]+$/g, "");
+}
+
+function isProgressJunk(line: string) {
+  const value = line.trim();
+  if (!value) return true;
+  if (/^[\s\\|/\-_.░▒▓█▌▐■▪●]+$/.test(value)) return true;
+  return false;
+}
+
+function collapseConsoleBuffer(text: string) {
+  const prepared = sanitizeConsoleOutput(text);
+  const chunks = prepared.split("\n");
+  const rest = visibleConsoleLine(chunks.pop() ?? "");
+  const lines = chunks.map(visibleConsoleLine).filter((line) => line && !isProgressJunk(line));
+  return { lines, rest };
+}
+
 export function formatDockerLogLine(line: string) {
-  const trimmed = stripAttachNoise(line.replace(/\r/g, "").replace(/\s+$/g, ""));
+  const trimmed = stripAttachNoise(line);
   if (!trimmed) return "";
   if (trimmed.startsWith("{") && trimmed.includes('"hijack"')) return "";
   const match = trimmed.match(/^(\d{4}-\d{2}-\d{2}T[^\s]+)\s+(.*)$/s);
-  if (!match) return `[${clock()}] ${trimmed}`;
-  const parsed = parseDockerTime(match[1]);
-  const message = stripAttachNoise(match[2]);
-  if (!message) return "";
-  return `[${parsed ? clock(parsed) : clock()}] ${message}`;
+  const stamp = match ? parseDockerTime(match[1]) : null;
+  const body = match ? match[2] : trimmed;
+  const visible = visibleConsoleLine(sanitizeConsoleOutput(body)).trim();
+  if (!visible || isProgressJunk(visible)) return "";
+  return `[${stamp ? clock(stamp) : clock()}] ${visible}`;
 }
 
 function createDocker() {
@@ -480,8 +516,8 @@ function pipeInstallLogs(stream: NodeJS.ReadableStream & { destroy?: () => void 
   let text = "";
   let lastAt = 0;
   const emit = (line: string) => {
-    const message = stripAttachNoise(line).replace(/\s+/g, " ").trim();
-    if (!message) return;
+    const message = visibleConsoleLine(sanitizeConsoleOutput(stripAttachNoise(line))).replace(/\s+/g, " ").trim();
+    if (!message || isProgressJunk(message)) return;
     const now = Date.now();
     const progress = /\d+%|\d+(\.\d+)?\s*(MiB|GiB|KiB|MB|GB|kB)/i.test(message);
     if (progress && now - lastAt < 400) return;
@@ -493,10 +529,10 @@ function pipeInstallLogs(stream: NodeJS.ReadableStream & { destroy?: () => void 
     const buf = leftover.length ? Buffer.concat([leftover, incoming]) : incoming;
     const decoded = decodeDockerFrames(buf);
     leftover = decoded.rest;
-    text += decoded.text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const parts = text.split("\n");
-    text = parts.pop() ?? "";
-    for (const line of parts) emit(line);
+    text += decoded.text;
+    const parts = collapseConsoleBuffer(text);
+    text = parts.rest;
+    for (const line of parts.lines) emit(line);
   };
   stream.on("data", onData);
   return () => {
@@ -1126,15 +1162,16 @@ function createOutputParser(tty: boolean, onLine: (line: string) => void) {
       const buf = leftover.length ? Buffer.concat([leftover, incoming]) : incoming;
       const decoded = tty ? { text: buf.toString("utf8"), rest: Buffer.alloc(0) } : decodeDockerFrames(buf);
       leftover = decoded.rest;
-      text += decoded.text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-      const parts = text.split("\n");
-      text = parts.pop() ?? "";
-      for (const line of parts) flushLine(line);
+      text += decoded.text;
+      const parts = collapseConsoleBuffer(text);
+      text = parts.rest;
+      for (const line of parts.lines) flushLine(line);
     },
     end() {
       leftover = Buffer.alloc(0);
-      if (text.trim()) flushLine(text);
+      const leftoverLine = visibleConsoleLine(sanitizeConsoleOutput(text)).trim();
       text = "";
+      if (leftoverLine && !isProgressJunk(leftoverLine)) flushLine(leftoverLine);
     },
   };
 }
@@ -1158,7 +1195,7 @@ export async function getLogs(uuid: string, tail = 200, since?: number) {
     tail,
     ...(since ? { since } : {}),
   });
-  const text = decodeDockerLogs(await asBuffer(raw as Buffer)).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const text = decodeDockerLogs(await asBuffer(raw as Buffer)).replace(/\r\n/g, "\n");
   const lines = text
     .split("\n")
     .map((line) => formatDockerLogLine(line))

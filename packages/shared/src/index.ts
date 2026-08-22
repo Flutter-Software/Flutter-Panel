@@ -32,6 +32,7 @@ export {
   adminUserUpdateSchema,
   loginSchema,
   inviteCompleteSchema,
+  changePasswordSchema,
   serverPermissionSchema,
   subuserUpsertSchema,
   subuserUpdateSchema,

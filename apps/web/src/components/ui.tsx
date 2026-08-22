@@ -25,12 +25,15 @@ export function buttonClass({
   className?: string;
 } = {}) {
   return cn(
-    "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+    "pressable inline-flex items-center justify-center gap-2 rounded-lg font-medium disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none",
     size === "sm" ? "h-8 px-2.5 text-xs" : "h-10 px-3.5 text-sm",
-    variant === "primary" && "bg-primary text-primary-foreground hover:bg-primary/90",
-    variant === "secondary" && "bg-secondary text-secondary-foreground hover:bg-muted",
-    variant === "ghost" && "hover:bg-muted text-foreground",
-    variant === "danger" && "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+    variant === "primary" &&
+      "bg-primary text-primary-foreground shadow-sm hover:bg-primary/80 hover:shadow-md hover:shadow-primary/25 active:bg-primary/70",
+    variant === "secondary" &&
+      "bg-secondary text-secondary-foreground hover:bg-muted hover:shadow-sm active:bg-muted/80",
+    variant === "ghost" && "text-foreground hover:bg-muted active:bg-accent",
+    variant === "danger" &&
+      "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/80 hover:shadow-md hover:shadow-destructive/25 active:bg-destructive/70",
     className,
   );
 }
@@ -227,7 +230,7 @@ export function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
       <button
         type="button"
-        className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+        className="no-press absolute inset-0 bg-background/80 backdrop-blur-sm"
         aria-label="Close"
         onClick={onClose}
       />

@@ -95,7 +95,12 @@ function sparkPath(values: number[], max: number, width: number, height: number,
     .join(" ");
   const first = points[0];
   const last = points[points.length - 1];
-  const area = `M${first[0].toFixed(2)} ${height} ${line} L${last[0].toFixed(2)} ${height} Z`;
+  const area = [
+    `M${first[0].toFixed(2)} ${height}`,
+    ...points.map(([x, y]) => `L${x.toFixed(2)} ${y.toFixed(2)}`),
+    `L${last[0].toFixed(2)} ${height}`,
+    "Z",
+  ].join(" ");
   return { line, area };
 }
 
@@ -139,7 +144,7 @@ export function StatGraph({
       </div>
       <svg
         viewBox={`0 0 120 ${height}`}
-        className={cn(tall ? "h-24" : "h-20", "w-full overflow-visible", tone)}
+        className={cn(tall ? "h-24" : "h-20", "w-full overflow-hidden", tone)}
         preserveAspectRatio="none"
       >
         <path d={area} fill="currentColor" className="opacity-20" />

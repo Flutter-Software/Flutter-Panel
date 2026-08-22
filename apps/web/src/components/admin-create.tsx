@@ -128,7 +128,7 @@ export function Switch({
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+        "no-press relative h-6 w-11 shrink-0 rounded-full transition-colors",
         checked ? "bg-primary" : "bg-muted",
       )}
     >

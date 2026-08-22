@@ -158,6 +158,10 @@ export function createApp() {
     await auth.logout(c);
     return c.json({ data: { ok: true } });
   });
+  app.post("/auth/password", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.changePassword(c, await c.req.json()) });
+  });
   app.get("/auth/invite/:token", async (c) => c.json({ data: await subusers.peekInvite(c.req.param("token")) }));
   app.post("/auth/invite/complete", async (c) => {
     const result = await subusers.completeInvite(c, await c.req.json());

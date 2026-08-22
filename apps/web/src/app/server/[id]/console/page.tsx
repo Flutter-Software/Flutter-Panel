@@ -38,11 +38,20 @@ function isAttachNoise(line: string) {
 }
 
 function lineBody(line: string) {
-  return line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, "");
+  return displayConsoleText(line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, ""));
+}
+
+function displayConsoleText(value: string) {
+  return value
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\[{1,2}\d*(?:;\d+)*[GHfKJ]/g, "")
+    .replace(/\[{1,2}\d+(?:;\d+)*m/g, "")
+    .replace(/\u001b./g, "");
 }
 
 function ConsoleLine({ line }: { line: string }) {
-  const flutter = /^\[(\d{2}:\d{2}:\d{2})\] \[Flutter\] (.*)$/.exec(line);
+  const cleaned = displayConsoleText(line);
+  const flutter = /^\[(\d{2}:\d{2}:\d{2})\] \[Flutter\] (.*)$/.exec(cleaned);
   if (flutter) {
     return (
       <div className="whitespace-pre-wrap break-all">
@@ -52,7 +61,7 @@ function ConsoleLine({ line }: { line: string }) {
       </div>
     );
   }
-  const stamped = /^\[(\d{2}:\d{2}:\d{2})\] (.*)$/.exec(line);
+  const stamped = /^\[(\d{2}:\d{2}:\d{2})\] (.*)$/.exec(cleaned);
   if (stamped) {
     return (
       <div className="whitespace-pre-wrap break-all">
@@ -60,7 +69,8 @@ function ConsoleLine({ line }: { line: string }) {
       </div>
     );
   }
-  return <div className="whitespace-pre-wrap break-all">{line}</div>;
+  if (!cleaned.trim()) return null;
+  return <div className="whitespace-pre-wrap break-all">{cleaned}</div>;
 }
 
 function trimLines(current: string[], incoming: string[]) {
@@ -163,6 +173,9 @@ export default function ConsolePage({
     setServer((current) => {
       const next = result.data.server;
       if (!current) return next;
+      if (current.status === "installing" && (next.status === "running" || next.status === "starting" || next.status === "stopping")) {
+        return { ...next, status: "installing" };
+      }
       if (current.status === "starting" && next.status === "offline") return { ...next, status: "starting" };
       if (current.status === "stopping" && next.status === "running") return { ...next, status: "stopping" };
       const emptyLive =
@@ -342,6 +355,7 @@ export default function ConsolePage({
               }
               setServer((current) => {
                 if (!current) return current;
+                if (current.status === "installing" || current.status === "install_failed") return current;
                 if (status === "offline" && current.status === "starting") return current;
                 if (status === "running" && current.status === "stopping") return current;
                 return { ...current, status };

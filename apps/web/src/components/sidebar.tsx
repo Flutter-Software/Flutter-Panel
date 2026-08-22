@@ -20,12 +20,14 @@ import {
   Terminal,
   Users,
 } from "lucide-react";
+import { Stack, Tooltip, UnstyledButton } from "@mantine/core";
 import { cn } from "@/lib/cn";
 import { prefetchQuery } from "@/lib/query";
 import { useAuth } from "@/components/auth-provider";
 import { can, canOpenSettings } from "@/lib/access";
 import { NAV_PERMISSION } from "@flutter-software/shared";
 import type { ServerRecord } from "@/lib/types";
+import classes from "./navbar-minimal.module.css";
 
 export type NavItem = {
   href: string;
@@ -120,7 +122,7 @@ export function SidebarNav({
             onMouseEnter={() => onPrefetch?.(item.href)}
             onFocus={() => onPrefetch?.(item.href)}
             className={cn(
-              "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+              "pressable relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm",
               active
                 ? "bg-accent font-medium text-primary before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary"
                 : "text-sidebar-foreground/80 hover:bg-accent/70 hover:text-foreground",
@@ -137,24 +139,65 @@ export function SidebarNav({
 
 export function AdminSidebar() {
   const pathname = usePathname();
+  const main = ADMIN_NAV.filter((group) => group.group !== "Management").flatMap((group) => group.items);
+  const footer = ADMIN_NAV.find((group) => group.group === "Management")?.items ?? [];
+
+  function isActive(href: string) {
+    return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+  }
 
   return (
-    <aside className="sticky top-16 hidden h-[calc(100dvh-4rem)] w-60 shrink-0 overflow-y-auto border-r border-sidebar-border bg-sidebar md:block">
-      {ADMIN_NAV.map((group) => (
-        <div key={group.group} className="px-3 pt-4">
-          <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            {group.group}
-          </p>
-          <SidebarNav
-            items={group.items}
-            onPrefetch={prefetchAdmin}
-            match={(href) =>
-              href === "/admin" ? pathname === "/admin" : pathname.startsWith(href)
-            }
+    <nav className={cn(classes.navbar, "sticky top-16 hidden h-[calc(100dvh-4rem)] shrink-0 bg-sidebar md:flex")}>
+      <div className={classes.navbarMain}>
+        <Stack justify="center" gap={0}>
+          {main.map((item) => (
+            <AdminNavLink
+              key={item.href}
+              item={item}
+              active={isActive(item.href)}
+              onPrefetch={() => prefetchAdmin(item.href)}
+            />
+          ))}
+        </Stack>
+      </div>
+      <Stack justify="center" gap={0}>
+        {footer.map((item) => (
+          <AdminNavLink
+            key={item.href}
+            item={item}
+            active={isActive(item.href)}
+            onPrefetch={() => prefetchAdmin(item.href)}
           />
-        </div>
-      ))}
-    </aside>
+        ))}
+      </Stack>
+    </nav>
+  );
+}
+
+function AdminNavLink({
+  item,
+  active,
+  onPrefetch,
+}: {
+  item: NavItem;
+  active: boolean;
+  onPrefetch: () => void;
+}) {
+  const Icon = item.icon;
+  return (
+    <Tooltip label={item.label} position="right" transitionProps={{ duration: 0 }}>
+      <UnstyledButton
+        component={Link}
+        href={item.href}
+        onMouseEnter={onPrefetch}
+        onFocus={onPrefetch}
+        aria-label={item.label}
+        className={cn(classes.link, "pressable")}
+        data-active={active || undefined}
+      >
+        <Icon size={20} strokeWidth={1.5} />
+      </UnstyledButton>
+    </Tooltip>
   );
 }
 
@@ -189,7 +232,7 @@ export function ServerSidebar({
           <Link
             href="/admin"
             onMouseEnter={() => prefetchQuery("/api/v1/admin/servers")}
-            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/80 hover:bg-accent/70 hover:text-foreground"
+            className="pressable flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/80 hover:bg-accent/70 hover:text-foreground"
           >
             <Shield className="size-4 shrink-0" />
             Admin
