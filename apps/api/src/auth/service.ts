@@ -8,6 +8,10 @@ import {
   loginSchema,
   registerSchema,
   resendVerifySchema,
+  totpDisableSchema,
+  totpEnableSchema,
+  totpLoginSchema,
+  totpSetupSchema,
   verifyEmailSchema,
 } from "@flutter-software/shared";
 import type { Context } from "hono";
@@ -24,10 +28,21 @@ import {
 import { createSession, destroyOtherSessions, destroySession, getSessionUser } from "./session";
 import { resolveSmtp, sendVerificationEmail } from "../mail";
 import { attachPendingSubusers } from "../subusers";
+import { env } from "../env";
+import { getSiteName } from "../settings";
+import {
+  generateTotpSecret,
+  otpauthUrl,
+  signTotpChallenge,
+  totpQrDataUrl,
+  verifyTotpChallenge,
+  verifyTotpCode,
+} from "./totp";
 
 export type AuthPayload =
-  | { user: ReturnType<typeof publicUser>; needsVerification: false }
-  | { user: null; needsVerification: true; email: string };
+  | { user: ReturnType<typeof publicUser>; needsVerification: false; needsTotp?: false }
+  | { user: null; needsVerification: true; email: string }
+  | { user: null; needsVerification: false; needsTotp: true; totpToken: string };
 
 function requestIp(c: Context) {
   return (
@@ -163,6 +178,21 @@ export async function login(c: Context, body: unknown): Promise<AuthPayload> {
     return { user: null, needsVerification: true, email: user.email };
   }
 
+  if (user.totpEnabled) {
+    if (!user.totpSecret) {
+      throw FlutterError.unauthorized("Two-factor authentication is misconfigured for this account");
+    }
+    return {
+      user: null,
+      needsVerification: false,
+      needsTotp: true,
+      totpToken: signTotpChallenge(env().SESSION_SECRET, {
+        userId: user._id.toString(),
+        remember: parsed.data.remember,
+      }),
+    };
+  }
+
   await createSession(c, user._id.toString(), parsed.data.remember);
   await attachPendingSubusers(user);
   return { user: publicUser(user), needsVerification: false };
@@ -245,6 +275,120 @@ export async function changePassword(c: Context, body: unknown) {
   row.passwordHash = await hashPassword(parsed.data.password);
   await row.save();
   await destroyOtherSessions(row._id.toString(), session.sessionId);
+  return { ok: true };
+}
+
+export async function loginWithTotp(c: Context, body: unknown): Promise<AuthPayload> {
+  const parsed = totpLoginSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Enter the 6-digit authenticator code", parsed.error.flatten());
+  }
+  const challenge = verifyTotpChallenge(env().SESSION_SECRET, parsed.data.token);
+  if (!challenge) {
+    throw FlutterError.unauthorized("That sign-in code expired. Sign in again.");
+  }
+  const user = await User.findById(challenge.userId);
+  if (!user?.totpEnabled || !user.totpSecret) {
+    throw FlutterError.unauthorized("Two-factor authentication is not enabled");
+  }
+  if (!verifyTotpCode(user.totpSecret, parsed.data.code)) {
+    throw FlutterError.unauthorized("Invalid authenticator code");
+  }
+  await createSession(c, user._id.toString(), challenge.remember);
+  await attachPendingSubusers(user);
+  return { user: publicUser(user), needsVerification: false };
+}
+
+async function requirePassword(user: { passwordHash: string }, password: string, message: string) {
+  const ok = await verifyPassword(user.passwordHash, password);
+  if (!ok) throw FlutterError.unauthorized(message);
+}
+
+export async function setupTotp(c: Context, body: unknown) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  const parsed = totpSetupSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Enter your current password", parsed.error.flatten());
+  }
+
+  const row = await User.findById(session.user.id);
+  if (!row) throw FlutterError.unauthorized();
+  await requirePassword(row, parsed.data.password, "Current password is incorrect");
+  if (row.totpEnabled) {
+    throw FlutterError.conflict("Two-factor authentication is already enabled");
+  }
+
+  const secret = generateTotpSecret();
+  row.totpSecret = secret;
+  row.totpEnabled = false;
+  await row.save();
+
+  const issuer = await getSiteName();
+  const otpauth = otpauthUrl({ issuer, account: row.email, secret });
+  return {
+    secret,
+    otpauth,
+    qrDataUrl: await totpQrDataUrl(otpauth),
+  };
+}
+
+export async function enableTotp(c: Context, body: unknown) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  const parsed = totpEnableSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Enter the 6-digit authenticator code", parsed.error.flatten());
+  }
+
+  const row = await User.findById(session.user.id);
+  if (!row) throw FlutterError.unauthorized();
+  if (row.totpEnabled) {
+    throw FlutterError.conflict("Two-factor authentication is already enabled");
+  }
+  if (!row.totpSecret || !verifyTotpCode(row.totpSecret, parsed.data.code)) {
+    throw FlutterError.validation("Invalid authenticator code");
+  }
+
+  row.totpEnabled = true;
+  await row.save();
+  return { user: publicUser(row) };
+}
+
+export async function disableTotp(c: Context, body: unknown) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  const parsed = totpDisableSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Password and authenticator code are required", parsed.error.flatten());
+  }
+
+  const row = await User.findById(session.user.id);
+  if (!row) throw FlutterError.unauthorized();
+  await requirePassword(row, parsed.data.password, "Current password is incorrect");
+  if (!row.totpEnabled || !row.totpSecret) {
+    throw FlutterError.conflict("Two-factor authentication is not enabled");
+  }
+  if (!verifyTotpCode(row.totpSecret, parsed.data.code)) {
+    throw FlutterError.validation("Invalid authenticator code");
+  }
+
+  row.totpEnabled = false;
+  row.totpSecret = null;
+  await row.save();
+  return { user: publicUser(row) };
+}
+
+export async function cancelTotpSetup(c: Context) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  const row = await User.findById(session.user.id);
+  if (!row) throw FlutterError.unauthorized();
+  if (row.totpEnabled) {
+    throw FlutterError.conflict("Two-factor authentication is already enabled");
+  }
+  row.totpSecret = null;
+  await row.save();
   return { ok: true };
 }
 

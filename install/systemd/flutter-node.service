@@ -1,5 +1,6 @@
 [Unit]
-Description=Flutter node daemon
+Description=Flutter game-node daemon
+Documentation=https://github.com/Flutter-Software/Flutter-Panel
 After=network-online.target docker.service
 Wants=network-online.target docker.service
 
@@ -8,11 +9,10 @@ Type=simple
 User=flutter
 Group=flutter
 SupplementaryGroups=docker
-WorkingDirectory=/opt/flutter
-EnvironmentFile=/opt/flutter/.env
+WorkingDirectory=/opt/flutter-node
 Environment=NODE_ENV=production
-Environment=PATH=/opt/flutter/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-Environment=DAEMON_CONFIG=/opt/flutter/apps/daemon/data/config.json
+Environment=PATH=/opt/flutter-node/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Environment=DAEMON_CONFIG=/opt/flutter-node/apps/daemon/data/config.json
 Environment=DAEMON_DATA_DIR=/var/lib/flutter
 Environment=NO_PROXY=127.0.0.1,localhost,::1
 Environment=no_proxy=127.0.0.1,localhost,::1

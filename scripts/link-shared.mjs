@@ -4,13 +4,12 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const target = join(root, "packages", "shared");
-const dests = [
-  join(root, "apps", "web", "node_modules", "@flutter-software", "shared"),
-  join(root, "apps", "api", "node_modules", "@flutter-software", "shared"),
-  join(root, "apps", "daemon", "node_modules", "@flutter-software", "shared"),
-];
+const apps = ["web", "api", "daemon"];
 
-for (const dest of dests) {
+for (const app of apps) {
+  const appDir = join(root, "apps", app);
+  if (!existsSync(appDir)) continue;
+  const dest = join(appDir, "node_modules", "@flutter-software", "shared");
   mkdirSync(dirname(dest), { recursive: true });
   if (existsSync(dest)) {
     rmSync(dest, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthBrand } from "@/components/brand";
@@ -15,6 +15,8 @@ export default function LoginPage() {
   const [initialized, setInitialized] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [totpToken, setTotpToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState("");
 
   useEffect(() => {
     api<SetupResponse>("/api/v1/auth/setup")
@@ -24,6 +26,32 @@ export default function LoginPage() {
 
   const setupMode = initialized === false;
 
+  function finishLogin(user: AuthResponse["data"]["user"]) {
+    if (!user) throw new Error("Sign in failed");
+    setUser(user);
+    const next = new URLSearchParams(window.location.search).get("next");
+    router.push(next?.startsWith("/") ? next : "/");
+    router.refresh();
+  }
+
+  async function submitTotp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!totpToken) return;
+    setError(null);
+    setPending(true);
+    try {
+      const result = await api<AuthResponse>("/api/v1/auth/totp/login", {
+        method: "POST",
+        body: JSON.stringify({ token: totpToken, code: totpCode }),
+      });
+      finishLogin(result.data.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign in failed");
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <div className="relative flex min-h-full flex-col items-center justify-center bg-background px-4 py-16">
       <div className="w-full max-w-[400px]">
@@ -31,10 +59,48 @@ export default function LoginPage() {
 
         <div className="rounded-xl border border-border bg-card p-8">
           <h1 className="text-2xl font-semibold tracking-tight">
-            {setupMode ? "Create admin" : "Sign in"}
+            {setupMode ? "Create admin" : totpToken ? "Authenticator code" : "Sign in"}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Game-server control panel.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {totpToken
+              ? "Enter the 6-digit code from your authenticator app."
+              : "Game-server control panel."}
+          </p>
 
+          {totpToken ? (
+            <form className="mt-6 space-y-4" onSubmit={(event) => void submitTotp(event)}>
+              <label className="block space-y-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Authentication code
+                </span>
+                <Input
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                  maxLength={8}
+                  placeholder="000000"
+                  className="h-12 text-center font-mono text-xl tracking-[0.35em]"
+                  value={totpCode}
+                  onChange={(event) => setTotpCode(event.currentTarget.value.replace(/\D/g, "").slice(0, 6))}
+                />
+              </label>
+              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+              <Button type="submit" className="h-11 w-full" disabled={pending || totpCode.length !== 6}>
+                {pending ? "Please wait…" : "Verify"}
+              </Button>
+              <button
+                type="button"
+                className="w-full text-center text-sm font-medium text-primary"
+                onClick={() => {
+                  setTotpToken(null);
+                  setTotpCode("");
+                  setError(null);
+                }}
+              >
+                Back to sign in
+              </button>
+            </form>
+          ) : (
           <form
             className="mt-6 space-y-4"
             onSubmit={async (event) => {
@@ -67,13 +133,12 @@ export default function LoginPage() {
                   );
                   return;
                 }
-                if (!result.data.user) {
-                  throw new Error("Sign in failed");
+                if (result.data.needsTotp && result.data.totpToken) {
+                  setTotpToken(result.data.totpToken);
+                  setTotpCode("");
+                  return;
                 }
-                setUser(result.data.user);
-                const next = new URLSearchParams(window.location.search).get("next");
-                router.push(next?.startsWith("/") ? next : "/");
-                router.refresh();
+                finishLogin(result.data.user);
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Sign in failed");
               } finally {
@@ -119,8 +184,9 @@ export default function LoginPage() {
               {pending ? "Please wait…" : setupMode ? "Create admin" : "Sign in"}
             </Button>
           </form>
+          )}
 
-          {setupMode ? (
+          {totpToken ? null : setupMode ? (
             <p className="mt-5 text-center text-sm text-muted-foreground">
               First account becomes the panel administrator.
             </p>

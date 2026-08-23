@@ -138,8 +138,9 @@ export default function CreateNodePage() {
         <PageIntro title="Node created" />
         <Card className="space-y-4 border-primary/30 bg-primary/5 p-5 sm:p-6">
           <p className="text-sm text-muted-foreground">
-            Save the daemon token now. It will not be shown again. Configure writes the config file;
-            the node stays offline until you start the daemon.
+            Save the daemon token now. It will not be shown again. On a remote host, run the
+            configure command (daemon-only installer). The node stays offline until the daemon
+            heartbeats.
           </p>
           <CopyRow
             label="Token"
@@ -148,7 +149,7 @@ export default function CreateNodePage() {
             onCopy={() => copy(created.token, "token")}
           />
           <CopyRow
-            label="Configure"
+            label="Install on node"
             value={created.configure}
             copied={copied === "configure"}
             onCopy={() => copy(created.configure, "configure")}

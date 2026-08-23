@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Pencil, Plus, Server, Trash2 } from "lucide-react";
+import { ExternalLink, Pencil, Plus, Server, Trash2 } from "lucide-react";
 import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { statusMeta } from "@/components/status";
@@ -73,14 +73,16 @@ export default function AdminServersPage() {
             return (
               <Card key={server.id} className="p-5">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <Link
-                    href={`/admin/servers/${server.id}`}
-                    onMouseEnter={() => prefetchQuery(`/api/v1/admin/servers/${server.id}`)}
-                    className="min-w-0"
-                  >
+                  <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Server className="size-4 text-muted-foreground" />
-                      <span className="text-base font-semibold">{server.name}</span>
+                      <Link
+                        href={`/admin/servers/${server.id}`}
+                        onMouseEnter={() => prefetchQuery(`/api/v1/admin/servers/${server.id}`)}
+                        className="flex min-w-0 items-center gap-2 hover:underline"
+                      >
+                        <Server className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate text-base font-semibold">{server.name}</span>
+                      </Link>
                       <span
                         className={cn(
                           "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
@@ -90,12 +92,21 @@ export default function AdminServersPage() {
                         <span className={cn("size-1.5 rounded-full", meta.bar)} />
                         {meta.label}
                       </span>
+                      <ButtonLink
+                        href={`/server/${server.id}`}
+                        variant="secondary"
+                        size="sm"
+                        className="h-7 px-2"
+                      >
+                        <ExternalLink className="size-3.5" />
+                        Open
+                      </ButtonLink>
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{server.egg}</p>
                     {server.description ? (
                       <p className="mt-1 text-sm text-muted-foreground">{server.description}</p>
                     ) : null}
-                  </Link>
+                  </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <ButtonLink href={`/admin/servers/${server.id}`} variant="secondary" size="sm">
                       <Pencil className="size-3.5" />

@@ -97,19 +97,27 @@ sudo systemctl restart flutter-daemon
 
 `--panel-url http://127.0.0.1:4000` is correct **only when the daemon runs on the same host as the API**. systemd already points at `/opt/flutter/apps/daemon/data/config.json` and `/var/lib/flutter`.
 
-**Remote node** (another Ubuntu host with Docker): install the daemon on that machine, use the **public** panel URL, and a `--listen-url` the panel can reach (not `127.0.0.1`):
+**Remote node** (another Ubuntu 24.04 host with a public IP). Do **not** run the panel installer there. Create the node in Admin, copy the `flt_` token, then:
 
 ```bash
-cd /opt/flutter
-sudo -u flutter npm run daemon:configure -- \
-  --panel-url https://panel.example.com \
-  --token <flt_token> \
-  --node <nodeId> \
-  --listen-url http://<this-server-public-ip>:8080
-sudo systemctl enable --now flutter-daemon
+curl -fsSL https://raw.githubusercontent.com/Flutter-Software/Flutter-Panel/main/install/ubuntu-node.sh \
+  | sudo bash -s -- \
+    --panel-url https://panel.example.com \
+    --token <flt_token> \
+    --node <nodeId> \
+    --listen-url http://<this-server-public-ip>:8080
 ```
 
-Allow **8080/tcp** from the panel host, plus each game allocation port on the node.
+That installs Docker, Node.js, and the daemon under `/opt/flutter-node` (data in `/var/lib/flutter`) and starts `flutter-daemon`. It does not install MongoDB, Redis, nginx, or the web UI.
+
+`--listen-url` must be reachable from the **panel API host**, not `127.0.0.1`. Allow **8080/tcp** from the panel, plus each game allocation port on the node.
+
+```bash
+sudo systemctl status flutter-daemon
+sudo journalctl -u flutter-daemon -f
+```
+
+To rewrite config later: `sudo flutter-node-configure --panel-url https://panel.example.com --token … --node … --listen-url http://<ip>:8080`
 
 ### 5. Updates and maintenance
 

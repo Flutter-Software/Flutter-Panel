@@ -1189,7 +1189,13 @@ function createOutputParser(tty: boolean, onLine: (line: string) => void) {
       for (const line of parts.lines) flushLine(line);
     },
     end() {
-      leftover = Buffer.alloc(0);
+      if (leftover.length) {
+        const decoded = tty
+          ? { text: leftover.toString("utf8"), rest: Buffer.alloc(0) }
+          : decodeDockerFrames(leftover);
+        leftover = Buffer.alloc(0);
+        text += decoded.text;
+      }
       const leftoverLine = visibleConsoleLine(sanitizeConsoleOutput(text)).trim();
       text = "";
       if (leftoverLine && !isProgressJunk(leftoverLine)) flushLine(leftoverLine);
@@ -1207,7 +1213,7 @@ async function asBuffer(value: Buffer | NodeJS.ReadableStream) {
 }
 
 export async function getLogs(uuid: string, tail = 200, since?: number) {
-  const info = await inspectContainer(uuid);
+  const info = await inspectContainer(uuid, true);
   if (!info) return { running: false, lines: [] as string[] };
   const raw = await docker.getContainer(info.Id).logs({
     stdout: true,
@@ -1230,8 +1236,9 @@ export async function followLogs(
   signal: AbortSignal,
   options: { tail?: number; since?: number } = {},
 ): Promise<void> {
-  const info = await inspectContainer(uuid);
-  if (!info?.State.Running) return;
+  const info = await inspectContainer(uuid, true);
+  if (!info) return;
+  if (!info.State.Running) return;
   const stream = (await docker.getContainer(info.Id).logs({
     follow: true,
     stdout: true,

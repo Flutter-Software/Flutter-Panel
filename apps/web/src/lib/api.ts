@@ -127,6 +127,8 @@ export type AuthResponse = {
   data: {
     user: PublicUser | null;
     needsVerification: boolean;
+    needsTotp?: boolean;
+    totpToken?: string;
     email?: string;
   };
 };

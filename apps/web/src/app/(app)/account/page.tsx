@@ -5,6 +5,7 @@ import { Check, X } from "lucide-react";
 import { Box, Center, Group, PasswordInput, Progress, Text } from "@mantine/core";
 import { PASSWORD_MIN_LENGTH } from "@flutter-software/shared";
 import { useAuth } from "@/components/auth-provider";
+import { TwoFactorCard } from "@/components/two-factor-card";
 import { Button, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 
@@ -35,7 +36,7 @@ function getStrength(password: string) {
 }
 
 export default function AccountPage() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -94,6 +95,10 @@ export default function AccountPage() {
             <div className="flex justify-between gap-4">
               <dt className="text-muted-foreground">Role</dt>
               <dd className="capitalize">{user?.role ?? "—"}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-foreground">2FA</dt>
+              <dd>{user?.totpEnabled ? "On" : "Off"}</dd>
             </div>
           </dl>
         </Card>
@@ -166,6 +171,7 @@ export default function AccountPage() {
             </Button>
           </form>
         </Card>
+        <TwoFactorCard enabled={Boolean(user?.totpEnabled)} onUser={setUser} />
       </div>
     </div>
   );

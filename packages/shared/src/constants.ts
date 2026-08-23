@@ -11,6 +11,7 @@ export const PASSWORD_MAX_LENGTH = 128;
 
 export const INVITE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 export const EMAIL_VERIFY_TTL_MS = 1000 * 60 * 10;
+export const TOTP_CHALLENGE_TTL_MS = 1000 * 60 * 5;
 
 export const NODE_ONLINE_MS = 120_000;
 export const DAEMON_HEARTBEAT_MS = 15_000;

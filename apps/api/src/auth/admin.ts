@@ -306,10 +306,13 @@ export async function createNode(body: unknown) {
       createdAt: row.createdAt,
     },
     token,
-    configure: `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${nodeId}`,
+    configure:
+      process.env.NODE_ENV === "production"
+        ? `curl -fsSL https://raw.githubusercontent.com/Flutter-Software/Flutter-Panel/main/install/ubuntu-node.sh | sudo bash -s -- --panel-url ${panelUrl} --token ${token} --node ${nodeId} --listen-url http://<this-server-public-ip>:8080`
+        : `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${nodeId}`,
     start:
       process.env.NODE_ENV === "production"
-        ? "sudo systemctl restart flutter-daemon"
+        ? "sudo systemctl enable --now flutter-daemon"
         : "npm run dev:daemon",
   };
 }
@@ -416,10 +419,13 @@ export async function revealDaemonToken(id: string) {
     return {
       token,
       preview: token.slice(0, 12),
-      configure: `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${id}`,
+      configure:
+        process.env.NODE_ENV === "production"
+          ? `curl -fsSL https://raw.githubusercontent.com/Flutter-Software/Flutter-Panel/main/install/ubuntu-node.sh | sudo bash -s -- --panel-url ${panelUrl} --token ${token} --node ${id} --listen-url http://<this-server-public-ip>:8080`
+          : `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${id}`,
       start:
         process.env.NODE_ENV === "production"
-          ? "sudo systemctl restart flutter-daemon"
+          ? "sudo systemctl enable --now flutter-daemon"
           : "npm run dev:daemon",
     };
   }

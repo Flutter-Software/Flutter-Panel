@@ -78,6 +78,29 @@ export const changePasswordSchema = z
     path: ["confirmPassword"],
   });
 
+export const totpCodeSchema = z
+  .string()
+  .transform((value) => value.replace(/\D/g, ""))
+  .pipe(z.string().regex(/^\d{6}$/, "Enter the 6-digit authenticator code"));
+
+export const totpSetupSchema = z.object({
+  password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+});
+
+export const totpEnableSchema = z.object({
+  code: totpCodeSchema,
+});
+
+export const totpDisableSchema = z.object({
+  password: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+  code: totpCodeSchema,
+});
+
+export const totpLoginSchema = z.object({
+  token: z.string().min(16).max(2000),
+  code: totpCodeSchema,
+});
+
 export const serverPermissionSchema = z.enum(SERVER_PERMISSIONS);
 
 export const subuserUpsertSchema = z.object({

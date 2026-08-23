@@ -202,40 +202,28 @@ async function attachStdinStream(uuid: string, current: Session, signal: AbortSi
 }
 
 async function seedLogs(uuid: string) {
-  const current = session(uuid);
   try {
+    const current = session(uuid);
     const since = current.resetAt ? Math.floor(current.resetAt / 1000) : undefined;
     const { lines } = await getLogs(uuid, since ? 400 : 120, since);
-    for (const line of lines) rememberLine(current.history, line);
+    for (const line of lines) emitOutput(uuid, line);
   } catch {
     /* docker may be down */
   }
 }
 
-async function attachLive(uuid: string, signal: AbortSignal) {
-  const info = await inspectContainer(uuid);
-  if (!info?.State.Running) return "offline" as const;
-  const current = session(uuid);
-  const local = new AbortController();
-  const onAbort = () => local.abort();
-  if (signal.aborted) return "offline" as const;
-  signal.addEventListener("abort", onAbort, { once: true });
+async function flushContainerLogs(uuid: string) {
+  await seedLogs(uuid);
+  const current = sessions.get(uuid);
+  if (!current?.history.length) return;
+  const snapshot = JSON.stringify(current.history);
+  for (const listener of current.listeners) listener("history", snapshot);
+}
 
-  const seeding = current.seedPromise ??= seedLogs(uuid);
-  await seeding.catch(() => undefined);
-  if (current.seedPromise === seeding) current.seedPromise = null;
-
-  try {
-    await Promise.all([
-      attachStdinStream(uuid, current, local.signal).catch(() => undefined),
-      followLogs(uuid, (line) => emitOutput(uuid, line), local.signal, { tail: 1 }).catch(() => undefined),
-    ]);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-    current.write = null;
-  }
-
-  const after = await inspectContainer(uuid).catch(() => null);
+async function finishAttach(uuid: string) {
+  await new Promise<void>((resolve) => setTimeout(resolve, 150));
+  await flushContainerLogs(uuid);
+  const after = await inspectContainer(uuid, true).catch(() => null);
   const state = after?.State;
   if (state?.OOMKilled || (state && !state.Running && (state.ExitCode ?? 0) !== 0)) {
     const reason = state.OOMKilled
@@ -249,6 +237,39 @@ async function attachLive(uuid: string, signal: AbortSignal) {
     return "crashed" as const;
   }
   return state?.Running ? ("running" as const) : ("offline" as const);
+}
+
+async function attachLive(uuid: string, signal: AbortSignal) {
+  const info = await inspectContainer(uuid);
+  if (!info?.State.Running) return finishAttach(uuid);
+  const current = session(uuid);
+  const local = new AbortController();
+  const onAbort = () => local.abort();
+  if (signal.aborted) return "offline" as const;
+  signal.addEventListener("abort", onAbort, { once: true });
+
+  const since = current.resetAt ? Math.floor(current.resetAt / 1000) : undefined;
+  const seeding = current.seedPromise ??= seedLogs(uuid);
+
+  try {
+    await Promise.all([
+      attachStdinStream(uuid, current, local.signal).catch(() => undefined),
+      followLogs(uuid, (line) => emitOutput(uuid, line), local.signal, {
+        tail: 80,
+        since,
+      }).catch(() => undefined),
+      seeding.catch(() => undefined),
+    ]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    current.write = null;
+    if (current.seedPromise === seeding) current.seedPromise = null;
+  }
+
+  // Docker often closes the follow/attach stream before the last stderr
+  // frame (egg syntax errors, missing binaries) is delivered. Pull the
+  // persisted logs and push any missing lines before crash notices.
+  return finishAttach(uuid);
 }
 
 async function pump(config: DaemonConfig, uuid: string) {

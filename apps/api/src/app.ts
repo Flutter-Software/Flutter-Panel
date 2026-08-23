@@ -54,6 +54,7 @@ export function createApp() {
       path.endsWith("/auth/register") ||
       path.endsWith("/auth/verify") ||
       path.endsWith("/auth/verify/resend") ||
+      path.endsWith("/auth/totp/login") ||
       path.includes("/auth/invite");
     if (!skipCsrf) {
       assertCsrf(c);
@@ -171,6 +172,26 @@ export function createApp() {
   app.post("/auth/password", async (c) => {
     await requireUser(c);
     return c.json({ data: await auth.changePassword(c, await c.req.json()) });
+  });
+  app.post("/auth/totp/setup", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.setupTotp(c, await c.req.json()) });
+  });
+  app.post("/auth/totp/enable", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.enableTotp(c, await c.req.json()) });
+  });
+  app.post("/auth/totp/disable", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.disableTotp(c, await c.req.json()) });
+  });
+  app.post("/auth/totp/cancel", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.cancelTotpSetup(c) });
+  });
+  app.post("/auth/totp/login", async (c) => {
+    const result = await auth.loginWithTotp(c, await c.req.json());
+    return c.json({ data: result });
   });
   app.get("/auth/invite/:token", async (c) => c.json({ data: await subusers.peekInvite(c.req.param("token")) }));
   app.post("/auth/invite/complete", async (c) => {

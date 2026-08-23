@@ -17,6 +17,8 @@
 #   --no-daemon        Skip installing the local game-node daemon
 #   --force            Continue on a distro that is not Ubuntu 24.04
 #   --prefix DIR       Install directory (default /opt/flutter)
+#
+# Remote game nodes: run install/ubuntu-node.sh on those hosts (no panel).
 set -euo pipefail
 
 FLUTTER_REPO="${FLUTTER_REPO:-https://github.com/Flutter-Software/Flutter-Panel.git}"
