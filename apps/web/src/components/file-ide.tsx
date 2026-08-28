@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useTheme } from "next-themes";
-import { Save, X } from "lucide-react";
+import { FileCode, Save, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 const LANGUAGES: Record<string, string> = {
@@ -73,27 +73,40 @@ type FileIdeModalProps = {
   pending?: boolean;
   readOnly?: boolean;
   onChange: (content: string) => void;
-  onSave: () => void;
+  onSave: () => boolean | Promise<boolean>;
   onClose: () => void;
 };
 
 export function FileIdeModal({ path, content, pending, readOnly, onChange, onSave, onClose }: FileIdeModalProps) {
   const { resolvedTheme } = useTheme();
-  const dirty = useRef(false);
   const original = useRef(content);
+  const [dirty, setDirty] = useState(false);
   const language = languageFor(path);
   const dark = resolvedTheme !== "light";
+  const fileName = path.split("/").pop() || path;
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) || "/" : "";
 
   useEffect(() => {
     original.current = content;
-    dirty.current = false;
+    setDirty(false);
   }, [path]);
+
+  async function handleSave() {
+    if (readOnly || pending) return;
+    const ok = await onSave();
+    if (!ok) return;
+    original.current = content;
+    setDirty(false);
+  }
+
+  const saveRef = useRef(handleSave);
+  saveRef.current = handleSave;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        if (!readOnly) onSave();
+        void saveRef.current();
       }
       if (event.key === "Escape") {
         event.preventDefault();
@@ -102,7 +115,7 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, onSave, readOnly]);
+  }, [onClose]);
 
   const onMount: OnMount = (_editor, monaco) => {
     monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
@@ -127,22 +140,51 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
         role="dialog"
         aria-modal="true"
         aria-label={`Edit ${path}`}
-        className="relative flex h-[min(92vh,52rem)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+        className="relative flex h-[min(92vh,52rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-2xl"
       >
-        <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-2.5">
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-mono text-sm">{path}</p>
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{language}</p>
+        <div className="flex h-7 shrink-0 items-center bg-muted/70">
+          <p className="min-w-0 flex-1 truncate px-2.5 text-center font-mono text-[11px] leading-none text-muted-foreground">
+            {dirty ? "● " : ""}
+            {fileName}
+            {dir ? ` — ${dir}` : ""}
+          </p>
+          <div className="flex shrink-0 items-stretch">
+            {readOnly ? null : (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 rounded-none px-2 text-[11px]"
+                disabled={pending || !dirty}
+                onClick={() => void handleSave()}
+                title="Save (Ctrl+S)"
+              >
+                <Save className="size-3.5" />
+                {pending ? "Saving" : "Save"}
+              </Button>
+            )}
+            <button
+              type="button"
+              className="flex size-7 items-center justify-center text-muted-foreground hover:bg-destructive hover:text-white"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close (Esc)"
+            >
+              <X className="size-3.5" />
+            </button>
           </div>
-          {readOnly ? null : (
-          <Button type="button" size="sm" disabled={pending} onClick={onSave}>
-            <Save className="size-3.5" />
-            {pending ? "Saving…" : "Save"}
-          </Button>
-          )}
-          <Button type="button" size="sm" variant="ghost" onClick={onClose} aria-label="Close">
-            <X className="size-4" />
-          </Button>
+        </div>
+        <div className="flex h-7 shrink-0 items-stretch border-b border-border bg-muted/40">
+          <div className="flex min-w-0 max-w-[min(100%,24rem)] items-center gap-1.5 border-r border-border bg-card px-2.5" title={path}>
+            <FileCode className="size-3 shrink-0 text-muted-foreground" />
+            <span className="truncate font-mono text-[12px] leading-none">{fileName}</span>
+            {dirty ? (
+              <span className="size-1.5 shrink-0 rounded-full bg-foreground/70" title="Unsaved changes" />
+            ) : null}
+            <span className="hidden shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground sm:inline">
+              {language}
+            </span>
+          </div>
         </div>
         <div className="min-h-0 flex-1 bg-background">
           <Editor
@@ -151,8 +193,9 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
             value={content}
             theme={dark ? "vs-dark" : "light"}
             onChange={(value) => {
-              dirty.current = value !== original.current;
-              onChange(value ?? "");
+              const next = value ?? "";
+              setDirty(next !== original.current);
+              onChange(next);
             }}
             onMount={onMount}
             options={{
@@ -163,7 +206,7 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
               scrollBeyondLastLine: false,
               automaticLayout: true,
               tabSize: 2,
-              padding: { top: 12, bottom: 12 },
+              padding: { top: 8, bottom: 8 },
               readOnly: Boolean(readOnly),
               wordWrap: "on",
               renderLineHighlight: "line",
@@ -176,9 +219,6 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
             }
           />
         </div>
-        <p className="shrink-0 border-t border-border px-4 py-1.5 text-[11px] text-muted-foreground">
-          {readOnly ? "Read only · Esc to close" : "Ctrl+S to save · Esc to close"}
-        </p>
       </div>
     </div>
   );

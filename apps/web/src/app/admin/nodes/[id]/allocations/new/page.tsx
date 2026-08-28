@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { use, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Globe, HardDrive, Layers, MemoryStick, Network, Plug } from "lucide-react";
 import { parsePortSpec } from "@flutter-software/shared";
 import { AdminError } from "@/components/admin-table";
@@ -27,12 +27,12 @@ type Node = {
   allocations: Allocation[];
 };
 
-export default function CreateAllocationsPage() {
-  const params = useParams<{ id: string }>();
+export default function CreateAllocationsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
-  const backHref = `/admin/nodes/${params.id}/allocations`;
+  const backHref = `/admin/nodes/${id}/allocations`;
   const { data, error } = useQuery<{ data: { nodes: Node[] } }>("/api/v1/admin/nodes");
-  const node = data?.data.nodes.find((row) => row.id === params.id) ?? null;
+  const node = data?.data.nodes.find((row) => row.id === id) ?? null;
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [ip, setIp] = useState("0.0.0.0");
@@ -71,7 +71,7 @@ export default function CreateAllocationsPage() {
     setActionError(null);
     setPending(true);
     try {
-      await api(`/api/v1/admin/nodes/${params.id}/allocations`, {
+      await api(`/api/v1/admin/nodes/${id}/allocations`, {
         method: "POST",
         body: JSON.stringify({ ip, alias, ports, notes }),
       });

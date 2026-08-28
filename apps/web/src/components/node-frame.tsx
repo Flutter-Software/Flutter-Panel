@@ -4,7 +4,8 @@ import { createContext, useContext, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { AdminError, ListSkeleton } from "@/components/admin-table";
+import { ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { cn } from "@/lib/cn";
 import { useQuery } from "@/lib/query";
 
@@ -92,9 +93,21 @@ const TABS = [
 
 export function NodeFrame({ nodeId, children }: { nodeId: string; children: ReactNode }) {
   const pathname = usePathname();
-  const { data, error, reload } = useQuery<NodePayload>(`/api/v1/admin/nodes/${nodeId}`);
+  const { data, error, errorStatus, reload } = useQuery<NodePayload>(`/api/v1/admin/nodes/${nodeId}`);
   const node = data?.data.node ?? null;
   const base = `/admin/nodes/${nodeId}`;
+
+  if (error && !node) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin/nodes"
+        homeLabel="Back to nodes"
+      />
+    );
+  }
 
   return (
     <NodeContext.Provider value={{ node, reload }}>
@@ -154,8 +167,7 @@ export function NodeFrame({ nodeId, children }: { nodeId: string; children: Reac
           })}
         </nav>
 
-        <AdminError message={error} />
-        {node ? children : !error ? <ListSkeleton rows={3} /> : null}
+        {node ? children : <ListSkeleton rows={3} />}
       </div>
     </NodeContext.Provider>
   );

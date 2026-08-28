@@ -3,9 +3,10 @@
 import { use, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AuthBrand } from "@/components/brand";
+import { QueryErrorPage } from "@/components/error-page";
 import { Button, Input } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
-import { api } from "@/lib/api";
+import { api, HttpError } from "@/lib/api";
 import { PANEL_VERSION, type PublicUser } from "@flutter-software/shared";
 
 type InviteInfo = {
@@ -21,12 +22,20 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   const { setUser } = useAuth();
   const [info, setInfo] = useState<InviteInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
     api<{ data: InviteInfo }>(`/api/v1/auth/invite/${encodeURIComponent(token)}`)
-      .then((result) => setInfo(result.data))
-      .catch((err) => setError(err instanceof Error ? err.message : "Invite not found"));
+      .then((result) => {
+        setInfo(result.data);
+        setError(null);
+        setErrorStatus(null);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Invite not found");
+        setErrorStatus(err instanceof HttpError ? err.status : 404);
+      });
   }, [token]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -55,6 +64,17 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     } finally {
       setPending(false);
     }
+  }
+
+  if (error && !info) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        homeHref="/login"
+        homeLabel="Back to sign in"
+      />
+    );
   }
 
   return (
@@ -116,10 +136,6 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
                 {pending ? "Creating account…" : "Create account"}
               </Button>
             </form>
-          ) : error ? (
-            <Button type="button" className="mt-6 h-11 w-full" onClick={() => router.push("/login")}>
-              Back to sign in
-            </Button>
           ) : null}
         </div>
       </div>

@@ -238,7 +238,7 @@ function UpdateConsoleModal({
         </button>
         <pre
           ref={scroller}
-          className="min-h-0 flex-1 overflow-auto rounded-xl p-4 font-mono text-[12px] leading-5 text-zinc-300"
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-all rounded-xl p-4 font-mono text-[12px] leading-5 text-zinc-300"
         >
           {job.log.length ? log : "No updater output yet. Start an update to stream logs here."}
           {running ? <span className="ml-0.5 inline-block animate-pulse text-primary">▋</span> : null}

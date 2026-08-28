@@ -1,28 +1,28 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { AdminError, AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { use } from "react";
+import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import type { PublicUser } from "@flutter-software/shared";
 import { UserForm } from "../user-form";
 
-export default function EditUserPage() {
-  const params = useParams<{ id: string }>();
-  const { data, error } = useQuery<{ data: { user: PublicUser } }>(
-    `/api/v1/admin/users/${params.id}`,
+export default function EditUserPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { data, error, errorStatus, reload } = useQuery<{ data: { user: PublicUser } }>(
+    `/api/v1/admin/users/${id}`,
   );
   const user = data?.data.user ?? null;
 
   if (error && !user) {
     return (
-      <AdminFormPage
-        title="User"
-        description="This account could not be loaded."
-        backHref="/admin/users"
-        backLabel="Users"
-      >
-        <AdminError message={error} />
-      </AdminFormPage>
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin/users"
+        homeLabel="Back to users"
+      />
     );
   }
 

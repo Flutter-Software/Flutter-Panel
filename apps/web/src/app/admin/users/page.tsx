@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { Plus, Shield, UserRound } from "lucide-react";
-import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { useAuth } from "@/components/auth-provider";
 import { ButtonLink, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -13,11 +14,23 @@ import type { PublicUser } from "@flutter-software/shared";
 export default function AdminUsersPage() {
   const router = useRouter();
   const { user: viewer } = useAuth();
-  const { data, error } = useQuery<{ data: { users: PublicUser[] } }>("/api/v1/admin/users");
+  const { data, error, errorStatus, reload } = useQuery<{ data: { users: PublicUser[] } }>("/api/v1/admin/users");
   const servers = useQuery<{ data: { servers: ServerRecord[] } }>("/api/v1/admin/servers");
   const users = data?.data.users ?? [];
   const ownedBy = (userId: string) =>
     (servers.data?.data.servers ?? []).filter((server) => server.ownerId === userId).length;
+
+  if (error && !data) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin"
+        homeLabel="Back to admin"
+      />
+    );
+  }
 
   return (
     <AdminPage
@@ -30,8 +43,7 @@ export default function AdminUsersPage() {
         </ButtonLink>
       }
     >
-      <AdminError message={error} />
-      {!data && !error ? (
+      {!data ? (
         <ListSkeleton />
       ) : (
         <Card className="overflow-hidden">

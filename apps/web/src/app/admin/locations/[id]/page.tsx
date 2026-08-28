@@ -1,27 +1,27 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { AdminError, AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { use } from "react";
+import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import { LocationForm, type LocationRecord } from "../location-form";
 
-export default function EditLocationPage() {
-  const params = useParams<{ id: string }>();
-  const { data, error } = useQuery<{ data: { location: LocationRecord } }>(
-    `/api/v1/admin/locations/${params.id}`,
+export default function EditLocationPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { data, error, errorStatus, reload } = useQuery<{ data: { location: LocationRecord } }>(
+    `/api/v1/admin/locations/${id}`,
   );
   const location = data?.data.location ?? null;
 
   if (error && !location) {
     return (
-      <AdminFormPage
-        title="Location"
-        description="This location could not be loaded."
-        backHref="/admin/locations"
-        backLabel="Locations"
-      >
-        <AdminError message={error} />
-      </AdminFormPage>
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin/locations"
+        homeLabel="Back to locations"
+      />
     );
   }
 

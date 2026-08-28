@@ -67,6 +67,49 @@ function filesHref(pathname: string, dir: string) {
   return `${pathname}?path=${encodeURIComponent(next)}`;
 }
 
+const CONTAINER_ROOT = ["home", "container"] as const;
+
+function PathCrumbs({
+  path,
+  onBrowse,
+}: {
+  path: string;
+  onBrowse: (next: string) => void;
+}) {
+  const nested = path === "/" ? [] : path.split("/").filter(Boolean);
+  const crumbs = [
+    ...CONTAINER_ROOT.map((name) => ({ name, dir: "/" as string })),
+    ...nested.map((name, index) => ({
+      name,
+      dir: `/${nested.slice(0, index + 1).join("/")}`,
+    })),
+  ];
+
+  return (
+    <nav className="flex flex-wrap items-center font-mono text-sm text-muted-foreground" aria-label="Current path">
+      {crumbs.map((crumb, index) => {
+        const current = index === crumbs.length - 1;
+        return (
+          <span key={`${crumb.dir}:${crumb.name}:${index}`} className="inline-flex items-center">
+            <span aria-hidden>/</span>
+            {current ? (
+              <span className="text-foreground">{crumb.name}</span>
+            ) : (
+              <button
+                type="button"
+                className="hover:text-foreground hover:underline"
+                onClick={() => onBrowse(crumb.dir)}
+              >
+                {crumb.name}
+              </button>
+            )}
+          </span>
+        );
+      })}
+    </nav>
+  );
+}
+
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -362,13 +405,15 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   }
 
   async function saveFile() {
-    if (!editing) return;
+    if (!editing) return false;
     setPending(true);
     setError(null);
     try {
       await files({ action: "write", path: editing.path, content: editing.content });
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
+      return false;
     } finally {
       setPending(false);
     }
@@ -561,9 +606,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Files</h2>
-          <p className="font-mono text-sm text-muted-foreground">
-            {path === "/" ? "/home/container" : `/home/container${path}`}
-          </p>
+          <PathCrumbs path={path} onBrowse={browse} />
         </div>
         <div className="flex items-center gap-2">
           {percent !== null ? <ProgressRing percent={percent} /> : null}
@@ -892,7 +935,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
           pending={pending}
           readOnly={!canWrite}
           onChange={(content) => setEditing({ ...editing, content })}
-          onSave={() => void saveFile()}
+          onSave={saveFile}
           onClose={() => setEditing(null)}
         />
       ) : null}

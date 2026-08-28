@@ -13,6 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { statusMeta } from "@/components/status";
 import { ButtonLink, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -185,6 +186,36 @@ export default function AdminDashboardPage() {
       hint: userRows.length ? `${adminCount} admin${adminCount === 1 ? "" : "s"}` : "Invite an account",
     },
   ];
+
+  if (
+    loadError &&
+    !loading &&
+    !servers.data &&
+    !nodes.data &&
+    !locations.data &&
+    !users.data &&
+    !nests.data
+  ) {
+    return (
+      <QueryErrorPage
+        error={loadError}
+        status={
+          servers.errorStatus ??
+          nodes.errorStatus ??
+          locations.errorStatus ??
+          users.errorStatus ??
+          nests.errorStatus
+        }
+        onRetry={() => {
+          void servers.reload();
+          void nodes.reload();
+          void locations.reload();
+          void users.reload();
+          void nests.reload();
+        }}
+      />
+    );
+  }
 
   return (
     <AdminPage

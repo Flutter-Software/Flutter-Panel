@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, HttpError } from "@/lib/api";
 import { peekQuery, subscribeQuery } from "@/lib/query-cache";
 
 export { peekQuery, writeQuery, invalidateQuery } from "@/lib/query-cache";
@@ -28,6 +28,7 @@ export function prefetchQuery(path: string) {
 export function useQuery<T>(path: string | null) {
   const [data, setData] = useState<T | undefined>(() => (path ? peekQuery<T>(path) : undefined));
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
 
   useEffect(() => {
     if (!path) return;
@@ -36,19 +37,36 @@ export function useQuery<T>(path: string | null) {
       setData((current) => peekQuery<T>(path) ?? current);
     });
     loadQuery<T>(path)
-      .then(() => setError(null))
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
+      .then(() => {
+        setError(null);
+        setErrorStatus(null);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to load");
+        setErrorStatus(err instanceof HttpError ? err.status : 503);
+      });
     return unsubscribe;
   }, [path]);
 
   const reload = useCallback(() => {
     if (!path) return Promise.resolve(undefined);
-    return loadQuery<T>(path, true);
+    return loadQuery<T>(path, true)
+      .then((result) => {
+        setError(null);
+        setErrorStatus(null);
+        return result;
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to load");
+        setErrorStatus(err instanceof HttpError ? err.status : 503);
+        throw err;
+      });
   }, [path]);
 
   return {
     data,
     error,
+    errorStatus,
     loading: Boolean(path) && data === undefined && !error,
     reload,
   };

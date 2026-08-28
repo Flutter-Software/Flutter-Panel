@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { Box, Boxes, Pencil, Plus, Trash2, Upload } from "lucide-react";
-import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import type { NestRecord } from "./nest-form";
 
 export default function AdminNestsPage() {
-  const { data, error, reload } = useQuery<{ data: { nests: NestRecord[] } }>("/api/v1/admin/nests");
+  const { data, error, errorStatus, reload } = useQuery<{ data: { nests: NestRecord[] } }>("/api/v1/admin/nests");
   const nests = data?.data.nests ?? [];
 
   async function onDeleteNest(nest: NestRecord) {
@@ -34,6 +35,18 @@ export default function AdminNestsPage() {
     }
   }
 
+  if (error && !data) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin"
+        homeLabel="Back to admin"
+      />
+    );
+  }
+
   return (
     <AdminPage
       title="Nests"
@@ -55,8 +68,7 @@ export default function AdminNestsPage() {
         </>
       }
     >
-      <AdminError message={error} />
-      {!data && !error ? (
+      {!data ? (
         <ListSkeleton />
       ) : nests.length === 0 ? (
         <Card className="px-6 py-16 text-center">

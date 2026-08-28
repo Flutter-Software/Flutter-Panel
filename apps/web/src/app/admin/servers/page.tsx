@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { ExternalLink, Pencil, Plus, Server, Trash2 } from "lucide-react";
-import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { statusMeta } from "@/components/status";
 import { cn } from "@/lib/cn";
@@ -21,7 +22,7 @@ const STATUS_PILL: Record<ServerStatus, string> = {
 };
 
 export default function AdminServersPage() {
-  const { data, error, reload } = useQuery<{ data: { servers: ServerRecord[] } }>(
+  const { data, error, errorStatus, reload } = useQuery<{ data: { servers: ServerRecord[] } }>(
     "/api/v1/admin/servers",
   );
   const servers = data?.data.servers ?? [];
@@ -43,6 +44,18 @@ export default function AdminServersPage() {
     }
   }
 
+  if (error && !data) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin"
+        homeLabel="Back to admin"
+      />
+    );
+  }
+
   return (
     <AdminPage
       title="Servers"
@@ -53,8 +66,7 @@ export default function AdminServersPage() {
         </ButtonLink>
       }
     >
-      <AdminError message={error} />
-      {!data && !error ? (
+      {!data ? (
         <ListSkeleton />
       ) : servers.length === 0 ? (
         <Card className="px-6 py-16 text-center">

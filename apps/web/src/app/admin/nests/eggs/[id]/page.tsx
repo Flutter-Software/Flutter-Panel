@@ -1,27 +1,27 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { AdminError, AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { use } from "react";
+import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import { EggForm, type EggRecord } from "../../egg-form";
 
-export default function EditEggPage() {
-  const params = useParams<{ id: string }>();
-  const { data, error } = useQuery<{ data: { egg: EggRecord } }>(
-    `/api/v1/admin/eggs/${params.id}`,
+export default function EditEggPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { data, error, errorStatus, reload } = useQuery<{ data: { egg: EggRecord } }>(
+    `/api/v1/admin/eggs/${id}`,
   );
   const egg = data?.data.egg ?? null;
 
   if (error && !egg) {
     return (
-      <AdminFormPage
-        title="Egg"
-        description="This egg could not be loaded."
-        backHref="/admin/nests"
-        backLabel="Nests"
-      >
-        <AdminError message={error} />
-      </AdminFormPage>
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin/nests"
+        homeLabel="Back to nests"
+      />
     );
   }
 

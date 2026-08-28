@@ -12,8 +12,17 @@ function isLoopbackHost(host: string) {
     hostname === "127.0.0.1" ||
     hostname === "0.0.0.0" ||
     hostname === "::1" ||
-    hostname === "[::1]"
+    hostname === "[::1]" ||
+    hostname === ""
   );
+}
+
+function asUrl(value: string, base?: string) {
+  try {
+    return base ? new URL(value, base) : new URL(value);
+  } catch {
+    return null;
+  }
 }
 
 function publicOrigin(request: NextRequest) {
@@ -32,29 +41,25 @@ function publicOrigin(request: NextRequest) {
     return `${proto}://${host}`;
   }
   if (appUrl) {
-    try {
-      if (!isLoopbackHost(new URL(appUrl).host)) return appUrl;
-    } catch {
-      /* ignore */
-    }
+    const parsed = asUrl(appUrl);
+    if (parsed && !isLoopbackHost(parsed.host)) return appUrl;
   }
   return request.nextUrl.origin;
 }
 
 function redirectTo(request: NextRequest, path: string, nextPath?: string) {
-  const target = new URL(path, "http://flutter.invalid");
-  if (nextPath) target.searchParams.set("next", nextPath);
-  const location = `${target.pathname}${target.search}`;
-  const origin = publicOrigin(request);
-  if (origin && !isLoopbackHost(new URL(origin).host)) {
-    return NextResponse.redirect(new URL(location, `${origin}/`));
-  }
-  // Relative Location on loopback so local `next dev` doesn't bounce you to
-  // whatever APP_URL is (often the public hostname).
-  return new NextResponse(null, {
-    status: 307,
-    headers: { Location: location },
-  });
+  const target = asUrl(path.startsWith("/") ? path : "/", "http://flutter.invalid");
+  if (target && nextPath?.startsWith("/")) target.searchParams.set("next", nextPath);
+  const location = target ? `${target.pathname}${target.search}` : "/";
+  // Next 15's middleware adapter runs `new URL(Location)` with no base.
+  // A relative `/login` throws TypeError: Invalid URL and every route 404s.
+  const publicUrl = asUrl(publicOrigin(request));
+  const requestOrigin = asUrl(request.nextUrl.origin);
+  const origin =
+    publicUrl && !isLoopbackHost(publicUrl.host) ? publicUrl.origin : requestOrigin?.origin;
+  const abs = origin ? asUrl(location, `${origin}/`) : null;
+  if (abs) return NextResponse.redirect(abs);
+  return NextResponse.next();
 }
 
 export function middleware(request: NextRequest) {

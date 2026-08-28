@@ -2,10 +2,10 @@
 
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import Link from "next/link";
-import { Wrench } from "lucide-react";
 import { ServerSidebar } from "@/components/sidebar";
 import { StatusDot } from "@/components/status";
 import { useAuth } from "@/components/auth-provider";
+import { ErrorPage, QueryErrorPage } from "@/components/error-page";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import type { ServerRecord } from "@/lib/types";
 
@@ -26,7 +26,7 @@ export function ServerFrame({
 }) {
   const { user } = useAuth();
   const path = `/api/v1/client/servers/${serverId}`;
-  const { data, error, reload } = useQuery<ServerPayload>(path);
+  const { data, error, errorStatus, reload } = useQuery<ServerPayload>(path);
   const server = data?.data.server ?? null;
   const maintenance = Boolean(server?.nodeMaintenance);
   const admin = user?.role === "admin";
@@ -38,6 +38,22 @@ export function ServerFrame({
     }, 4000);
     return () => window.clearInterval(timer);
   }, [reload, serverId]);
+
+  if (error && !server) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/"
+        homeLabel="Back to server list"
+      />
+    );
+  }
+
+  if (maintenance && !admin && server) {
+    return <ErrorPage kind="maintenance" homeHref="/" onRetry={() => void reload()} />;
+  }
 
   return (
     <ServerRecordContext.Provider value={server}>
@@ -67,25 +83,7 @@ export function ServerFrame({
               This node is in maintenance mode. Users cannot open their servers.
             </div>
           ) : null}
-          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
-            {maintenance && !admin && server ? (
-              <div className="mx-auto flex min-h-[60%] max-w-md flex-col items-center justify-center py-16 text-center">
-                <span className="flex size-12 items-center justify-center rounded-xl bg-status-warn/15 text-status-warn">
-                  <Wrench className="size-6" />
-                </span>
-                <h2 className="mt-4 text-xl font-semibold">Maintenance mode</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {server.node} is temporarily unavailable. Your server is still listed on the
-                  dashboard — check back after maintenance is complete.
-                </p>
-                <Link href="/" className="mt-6 text-sm text-primary hover:underline">
-                  Back to server list
-                </Link>
-              </div>
-            ) : (
-              children
-            )}
-          </div>
+          <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">{children}</div>
         </div>
       </div>
     </ServerRecordContext.Provider>

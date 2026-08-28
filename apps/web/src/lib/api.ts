@@ -10,6 +10,25 @@ export type ApiError = {
   requestId?: string;
 };
 
+export class HttpError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(message: string, status: number, code = "INTERNAL") {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function httpErrorFrom(json: unknown, status: number) {
+  const body = json && typeof json === "object" && "error" in json ? (json as ApiError).error : null;
+  const message = body?.message || `Request failed (${status})`;
+  const code = body?.code || (status === 503 ? "UNAVAILABLE" : "INTERNAL");
+  return new HttpError(message, status, code);
+}
+
 function csrfToken() {
   if (typeof document === "undefined") return "";
   const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]*)`));
@@ -50,20 +69,19 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (csrf) headers.set(CSRF_HEADER, csrf);
   const method = (init.method ?? "GET").toUpperCase();
 
-  const response = await fetch(path, {
-    ...init,
-    headers,
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers,
+      credentials: "include",
+    });
+  } catch {
+    throw new HttpError("We cannot reach the panel API right now.", 503, "UNAVAILABLE");
+  }
 
   const json = (await response.json().catch(() => null)) as T | ApiError | null;
-  if (!response.ok) {
-    const message =
-      json && typeof json === "object" && "error" in json
-        ? json.error.message
-        : `Request failed (${response.status})`;
-    throw new Error(message);
-  }
+  if (!response.ok) throw httpErrorFrom(json, response.status);
 
   if (typeof window !== "undefined" && method === "GET" && json) {
     writeQuery(path, json);
@@ -107,17 +125,13 @@ export function apiUpload<T>(
         json = null;
       }
       if (xhr.status < 200 || xhr.status >= 300) {
-        const message =
-          json && typeof json === "object" && "error" in json
-            ? json.error.message
-            : `Request failed (${xhr.status})`;
-        reject(new Error(message));
+        reject(httpErrorFrom(json, xhr.status));
         return;
       }
       invalidateMutating(path);
       resolve(json as T);
     };
-    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.onerror = () => reject(new HttpError("Upload failed", 503, "UNAVAILABLE"));
     xhr.onabort = () => reject(new Error("Upload cancelled"));
     xhr.send(JSON.stringify(body));
   });

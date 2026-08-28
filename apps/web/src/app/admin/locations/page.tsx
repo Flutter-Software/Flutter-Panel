@@ -3,14 +3,15 @@
 import { useCallback } from "react";
 import Link from "next/link";
 import { MapPin, Pencil, Plus, Trash2 } from "lucide-react";
-import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import type { LocationRecord } from "./location-form";
 
 export default function AdminLocationsPage() {
-  const { data, error, reload } = useQuery<{ data: { locations: LocationRecord[] } }>(
+  const { data, error, errorStatus, reload } = useQuery<{ data: { locations: LocationRecord[] } }>(
     "/api/v1/admin/locations",
   );
   const rows = data?.data.locations ?? [];
@@ -28,6 +29,18 @@ export default function AdminLocationsPage() {
     [reload],
   );
 
+  if (error && !data) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin"
+        homeLabel="Back to admin"
+      />
+    );
+  }
+
   return (
     <AdminPage
       title="Locations"
@@ -38,8 +51,7 @@ export default function AdminLocationsPage() {
         </ButtonLink>
       }
     >
-      <AdminError message={error} />
-      {!data && !error ? (
+      {!data ? (
         <ListSkeleton />
       ) : rows.length === 0 ? (
         <Card className="px-6 py-16 text-center">

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, Copy, Plus, Server, Trash2 } from "lucide-react";
 import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -79,7 +80,7 @@ type Node = {
 };
 
 export default function AdminNodesPage() {
-  const { data, error, reload } = useQuery<{ data: { nodes: Node[] } }>("/api/v1/admin/nodes");
+  const { data, error, errorStatus, reload } = useQuery<{ data: { nodes: Node[] } }>("/api/v1/admin/nodes");
   const nodes = data?.data.nodes ?? [];
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -117,6 +118,18 @@ export default function AdminNodesPage() {
     }
   }
 
+  if (error && !data) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+        homeHref="/admin"
+        homeLabel="Back to admin"
+      />
+    );
+  }
+
   return (
     <AdminPage
       title="Nodes"
@@ -127,8 +140,8 @@ export default function AdminNodesPage() {
         </ButtonLink>
       }
     >
-      <AdminError message={actionError ?? error} />
-      {!data && !error ? (
+      <AdminError message={actionError} />
+      {!data ? (
         <ListSkeleton />
       ) : nodes.length === 0 ? (
         <Card className="px-6 py-16 text-center">

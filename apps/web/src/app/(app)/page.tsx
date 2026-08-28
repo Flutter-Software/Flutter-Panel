@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { LayoutGrid, Table2 } from "lucide-react";
 import { ServerCard, ServerTable } from "@/components/server-card";
 import { ListSkeleton } from "@/components/admin-table";
+import { QueryErrorPage } from "@/components/error-page";
 import { Badge, Button, Input } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
@@ -14,7 +15,7 @@ export default function DashboardPage() {
   const [tab, setTab] = useState<"my" | "other">("my");
   const [layout, setLayout] = useState<"grid" | "table">("grid");
   const [query, setQuery] = useState("");
-  const { data, error, reload } = useQuery<{ data: { servers: ServerRecord[] } }>(
+  const { data, error, errorStatus, reload } = useQuery<{ data: { servers: ServerRecord[] } }>(
     "/api/v1/client/servers",
   );
   const servers = data?.data.servers ?? [];
@@ -50,6 +51,16 @@ export default function DashboardPage() {
       ),
     [query, source],
   );
+
+  if (error && !data) {
+    return (
+      <QueryErrorPage
+        error={error}
+        status={errorStatus}
+        onRetry={() => void reload()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -114,9 +125,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-      {!data && !error ? (
+      {!data ? (
         <ListSkeleton rows={2} />
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-6 py-16 text-center">

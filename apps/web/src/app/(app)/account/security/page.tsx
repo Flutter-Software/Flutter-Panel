@@ -44,9 +44,11 @@ export default function AccountSecurityPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
 
   const strength = getStrength(password);
   const strengthColor = strength > 80 ? "teal" : strength > 50 ? "yellow" : "red";
+  const showRequirements = passwordFocused || password.length > 0;
 
   async function onResetPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -95,39 +97,45 @@ export default function AccountSecurityPage() {
               autoComplete="new-password"
               value={password}
               onChange={(event) => setPassword(event.currentTarget.value)}
+              onFocus={() => setPasswordFocused(true)}
+              onBlur={() => setPasswordFocused(false)}
               minLength={PASSWORD_MIN_LENGTH}
             />
-            <Group gap={5} grow mt="xs" mb="md">
-              {Array(4)
-                .fill(0)
-                .map((_, index) => (
-                  <Progress
-                    styles={{ section: { transitionDuration: "0ms" } }}
-                    value={
-                      password.length > 0 && index === 0
-                        ? 100
-                        : strength >= ((index + 1) / 4) * 100
-                          ? 100
-                          : 0
-                    }
-                    color={strengthColor}
-                    key={index}
-                    size={4}
-                    aria-label={`Password strength segment ${index + 1}`}
+            {showRequirements ? (
+              <>
+                <Group gap={5} grow mt="xs" mb="md">
+                  {Array(4)
+                    .fill(0)
+                    .map((_, index) => (
+                      <Progress
+                        styles={{ section: { transitionDuration: "0ms" } }}
+                        value={
+                          password.length > 0 && index === 0
+                            ? 100
+                            : strength >= ((index + 1) / 4) * 100
+                              ? 100
+                              : 0
+                        }
+                        color={strengthColor}
+                        key={index}
+                        size={4}
+                        aria-label={`Password strength segment ${index + 1}`}
+                      />
+                    ))}
+                </Group>
+                <PasswordRequirement
+                  label={`Has at least ${PASSWORD_MIN_LENGTH} characters`}
+                  meets={password.length >= PASSWORD_MIN_LENGTH}
+                />
+                {requirements.map((requirement) => (
+                  <PasswordRequirement
+                    key={requirement.label}
+                    label={requirement.label}
+                    meets={requirement.re.test(password)}
                   />
                 ))}
-            </Group>
-            <PasswordRequirement
-              label={`Has at least ${PASSWORD_MIN_LENGTH} characters`}
-              meets={password.length >= PASSWORD_MIN_LENGTH}
-            />
-            {requirements.map((requirement) => (
-              <PasswordRequirement
-                key={requirement.label}
-                label={requirement.label}
-                meets={requirement.re.test(password)}
-              />
-            ))}
+              </>
+            ) : null}
           </div>
           <PasswordInput
             label="Confirm new password"
