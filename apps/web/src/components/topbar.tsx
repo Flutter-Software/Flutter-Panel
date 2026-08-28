@@ -44,6 +44,9 @@ export function Topbar() {
       <Link href="/" className="shrink-0">
         <Wordmark />
       </Link>
+      {pathname.startsWith("/account") ? (
+        <p className="hidden text-sm text-muted-foreground sm:block">Account settings.</p>
+      ) : null}
       <div className="ml-auto flex items-center gap-1">
         <button
           type="button"

@@ -44,6 +44,8 @@ export function createApp() {
     ensureCsrfCookie(c);
     const method = c.req.method.toUpperCase();
     const path = c.req.path;
+    // Cookie is set on this response, so a first-hit POST would fail the
+    // header check. Daemon + WS use HMAC tickets instead of the browser cookie.
     const skipCsrf =
       method === "GET" ||
       method === "HEAD" ||
@@ -136,6 +138,8 @@ export function createApp() {
     }
 
     const ok = checks.mongo?.ok === true && checks.prisma?.ok === true;
+    // Redis is optional (schedules + sessions live in Mongo). Prisma talks to
+    // the same Mongo as Mongoose — if generate is stale, this goes 503.
     return c.json(
       {
         ok,
@@ -172,6 +176,18 @@ export function createApp() {
   app.post("/auth/password", async (c) => {
     await requireUser(c);
     return c.json({ data: await auth.changePassword(c, await c.req.json()) });
+  });
+  app.patch("/auth/profile", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.updateProfile(c, await c.req.json()) });
+  });
+  app.get("/auth/sessions", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.listSessions(c) });
+  });
+  app.delete("/auth/sessions/:id", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.revokeSession(c, c.req.param("id")) });
   });
   app.post("/auth/totp/setup", async (c) => {
     await requireUser(c);
@@ -674,6 +690,9 @@ export function createApp() {
             ws.close();
             return;
           }
+          // Browser talks to the panel; we open a second socket to the node.
+          // Queue outbound frames until that handshake finishes so typed
+          // commands aren't dropped on a slow daemon.
           void connectDaemonConsole(claims, ws, (socket) => {
             daemonWs = socket;
             const flush = () => {
@@ -737,6 +756,7 @@ async function connectDaemonConsole(
     op: "console",
     ttlMs: 10 * 60_000,
   });
+  // ^http → ws also turns https into wss. Don't replace inside the hostname.
   const base = node.daemonListenUrl.replace(/\/+$/, "").replace(/^http/, "ws");
   const daemonWs = new WebSocket(
     `${base}/v1/servers/${claims.uuid}/console?ticket=${encodeURIComponent(ticket)}`,

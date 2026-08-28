@@ -15,6 +15,7 @@ async function main() {
   try {
     await connectRedis();
   } catch (error) {
+    // Don't take the API down because Redis is still starting (compose race).
     log("warn", "redis unavailable", {
       error: error instanceof Error ? error.message : "unknown",
     });

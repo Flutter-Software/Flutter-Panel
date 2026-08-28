@@ -116,6 +116,18 @@ html.light {
   .font-mono {
     font-family: var(--font-mono);
   }
+  html:not([data-reduce-motion="off"]) {
+    scroll-behavior: smooth;
+  }
+  html:not([data-reduce-motion="off"]) :where(*, *::before, *::after) {
+    transition-property: color, background-color, border-color, outline-color, text-decoration-color,
+      fill, stroke, box-shadow, opacity, filter, backdrop-filter;
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  html:not([data-reduce-motion="off"]) :is(.monaco-editor, .monaco-editor *) {
+    transition: none !important;
+  }
 }
 
 @layer components {
@@ -145,13 +157,18 @@ html.light {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .pressable,
-  button {
-    transition: background-color 160ms ease, color 160ms ease, opacity 160ms ease !important;
-    transform: none !important;
-    filter: none !important;
-  }
+html[data-reduce-motion="off"],
+html[data-reduce-motion="off"] :where(*, *::before, *::after) {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+html[data-reduce-motion="off"] .pressable,
+html[data-reduce-motion="off"] button {
+  transform: none !important;
+  filter: none !important;
 }
 
 .terminal-scroll::-webkit-scrollbar {

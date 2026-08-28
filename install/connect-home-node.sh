@@ -68,18 +68,22 @@ if [[ -f "$SCRIPT_DIR/ubuntu-node.sh" ]]; then
   INSTALLER="$SCRIPT_DIR/ubuntu-node.sh"
 fi
 
-if [[ ! -x /usr/bin/npm || ! -d "$PREFIX/apps/daemon" ]]; then
-  log "Installing the daemon (no panel) on this machine"
-  if [[ -n "$INSTALLER" ]]; then
-    bash "$INSTALLER" --yes --force --skip-configure --panel-url "$PANEL_URL" --port "$DAEMON_PORT"
-  else
-    curl -fsSL https://raw.githubusercontent.com/Flutter-Software/Flutter-Panel/main/install/ubuntu-node.sh \
-      | bash -s -- --yes --force --skip-configure --panel-url "$PANEL_URL" --port "$DAEMON_PORT"
-  fi
+NEED_INSTALL=0
+if [[ ! -x /usr/local/sbin/flutter-node-configure ]]; then
+  NEED_INSTALL=1
+fi
+if [[ ! -d "$PREFIX/apps/daemon" ]]; then
+  NEED_INSTALL=1
 fi
 
-command -v flutter-node-configure >/dev/null 2>&1 || [[ -x /usr/local/sbin/flutter-node-configure ]] \
-  || die "flutter-node-configure is missing; daemon install failed"
+if [[ "$NEED_INSTALL" -eq 1 ]]; then
+  log "Installing the daemon (no panel) on this machine"
+  [[ -n "$INSTALLER" ]] || die "ubuntu-node.sh not found next to this script"
+  bash "$INSTALLER" --yes --force --skip-configure --panel-url "$PANEL_URL" --port "$DAEMON_PORT"
+fi
+
+[[ -x /usr/local/sbin/flutter-node-configure ]] \
+  || die "flutter-node-configure is missing; daemon install failed. Scroll up for the ubuntu-node error."
 
 CONFIGURE_BIN="$(command -v flutter-node-configure || true)"
 CONFIGURE_BIN="${CONFIGURE_BIN:-/usr/local/sbin/flutter-node-configure}"

@@ -2,8 +2,10 @@ import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ColorSchemeScript, mantineHtmlProps } from "@mantine/core";
 import { ThemeProvider } from "@/components/theme-provider";
+import { MotionProvider } from "@/components/motion-provider";
 import { AuthProvider } from "@/components/auth-provider";
 import { BrandingProvider } from "@/components/branding-provider";
+import { MOTION_BOOTSTRAP_SCRIPT } from "@/lib/motion";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -38,14 +40,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       data-mantine-color-scheme="dark"
     >
       <head>
+        <script dangerouslySetInnerHTML={{ __html: MOTION_BOOTSTRAP_SCRIPT }} />
         <ColorSchemeScript defaultColorScheme="dark" />
       </head>
       <body className="bg-background font-sans text-foreground">
-        <ThemeProvider>
-          <BrandingProvider>
-            <AuthProvider>{children}</AuthProvider>
-          </BrandingProvider>
-        </ThemeProvider>
+        <MotionProvider>
+          <ThemeProvider>
+            <BrandingProvider>
+              <AuthProvider>{children}</AuthProvider>
+            </BrandingProvider>
+          </ThemeProvider>
+        </MotionProvider>
       </body>
     </html>
   );

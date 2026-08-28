@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Boxes, Pencil, Plus, Trash2 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { AdminCreateFooter, AdminCreateHeader, AdminSection } from "@/components/admin-create";
+import { AdminCreateHeader, AdminSection, SaveIsland, isDirty } from "@/components/admin-create";
 import { Button, ButtonLink, Field, Input, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { EggRecord } from "./egg-form";
@@ -32,8 +32,18 @@ export function NestForm({
   const [deleting, setDeleting] = useState(false);
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
+  const dirty = isDirty(
+    { name, description },
+    { name: initial?.name ?? "", description: initial?.description ?? "" },
+  );
 
   const serverCount = (initial?.eggs ?? []).reduce((sum, egg) => sum + (egg.serverCount ?? 0), 0);
+
+  function onCancel() {
+    setName(initial?.name ?? "");
+    setDescription(initial?.description ?? "");
+    setError(null);
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -182,8 +192,9 @@ export function NestForm({
         </AdminSection>
       )}
 
-      <AdminCreateFooter
-        cancelHref="/admin/nests"
+      <SaveIsland
+        visible={dirty || pending}
+        onCancel={onCancel}
         submitLabel={creating ? "Create nest" : "Save changes"}
         pendingLabel={creating ? "Creating…" : "Saving…"}
         pending={pending}

@@ -19,6 +19,7 @@
 #   --prefix DIR       Install directory (default /opt/flutter)
 #
 # Remote game nodes: run install/ubuntu-node.sh on those hosts (no panel).
+# Wipe a test install: sudo bash install/wipe-local.sh --yes
 set -euo pipefail
 
 FLUTTER_REPO="${FLUTTER_REPO:-https://github.com/Flutter-Software/Flutter-Panel.git}"

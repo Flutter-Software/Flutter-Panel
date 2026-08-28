@@ -21,6 +21,8 @@ export default function LoginPage() {
   useEffect(() => {
     api<SetupResponse>("/api/v1/auth/setup")
       .then((result) => setInitialized(result.data.initialized))
+      // If setup is unreachable, show the login form — not the first-admin
+      // register screen. An empty panel still answers this endpoint.
       .catch(() => setInitialized(true));
   }, []);
 

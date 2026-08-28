@@ -19,7 +19,6 @@ export {
   formatUploadLimit,
 } from "./constants";
 export { FlutterError, type ErrorBody, type ErrorCode } from "./errors";
-export { healthResponseSchema, type CheckResult, type HealthResponse } from "./health";
 export {
   SERVER_PERMISSIONS,
   PERMISSION_GROUPS,
@@ -41,6 +40,7 @@ export {
   resendVerifySchema,
   inviteCompleteSchema,
   changePasswordSchema,
+  updateProfileSchema,
   totpCodeSchema,
   totpSetupSchema,
   totpEnableSchema,

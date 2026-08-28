@@ -78,6 +78,7 @@ export function TwoFactorCard({
     resetMessages();
     setPending(true);
     try {
+      // Wipes the pending secret so a later "Show QR" mints a fresh one.
       await api("/api/v1/auth/totp/cancel", { method: "POST" });
       setSecret(null);
       setQrDataUrl(null);
@@ -121,10 +122,10 @@ export function TwoFactorCard({
   }
 
   return (
-    <Card className="p-5 md:col-span-2">
+    <Card className="p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Two-factor authentication</h2>
+          <h3 className="text-sm font-semibold">Two-factor authentication</h3>
           <p className="mt-2 text-sm text-muted-foreground">
             Use an authenticator app to require a code when you sign in.
           </p>

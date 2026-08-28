@@ -30,16 +30,6 @@ type RemoteCommit = {
 
 let remoteCache: { at: number; value: RemoteCommit } | null = null;
 
-export type UpdateJob = {
-  state: "idle" | "running" | "ok" | "failed";
-  log: string[];
-  startedAt?: string;
-  finishedAt?: string;
-  error?: string | null;
-  sha?: string;
-  version?: string;
-};
-
 function repoRoot() {
   if (process.env.FLUTTER_UPDATE_ROOT) return resolve(process.env.FLUTTER_UPDATE_ROOT);
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -282,6 +272,7 @@ export async function startUpdate() {
   const job = await readUpdateJob();
   if (job.state === "running") {
     const started = job.startedAt ? Date.parse(job.startedAt) : 0;
+    // Panel process can die mid-update; after 30m treat the lock as stale.
     if (Date.now() - started < STALE_MS) {
       throw FlutterError.conflict("An update is already running");
     }
@@ -303,6 +294,8 @@ export async function startUpdate() {
   );
   const helper = "/usr/local/sbin/flutter-update";
   try {
+    // Production installer drops a root wrapper so the panel user can restart
+    // systemd units. Dev just spawns scripts/self-update.mjs and hopes.
     if (process.platform !== "win32" && existsSync(helper)) {
       await runHelper("sudo", ["-n", helper]);
     } else {

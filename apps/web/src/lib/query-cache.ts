@@ -1,14 +1,16 @@
-type Entry = { data: unknown; at: number };
+type Entry = { data: unknown };
 
 const store = new Map<string, Entry>();
 const listeners = new Map<string, Set<() => void>>();
+
+// Per-tab only. Refresh is a cold start; we are not trying to be React Query.
 
 export function peekQuery<T>(path: string): T | undefined {
   return store.get(path)?.data as T | undefined;
 }
 
 export function writeQuery(path: string, data: unknown) {
-  store.set(path, { data, at: Date.now() });
+  store.set(path, { data });
   listeners.get(path)?.forEach((listener) => listener());
 }
 

@@ -4,7 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Box, FileJson, Plus, Terminal, Trash2, Upload, Variable } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { AdminCreateFooter, AdminCreateHeader, AdminSection, Segmented } from "@/components/admin-create";
+import { AdminCreateHeader, AdminSection, SaveIsland, Segmented, isDirty } from "@/components/admin-create";
 import { Button, Field, Input, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
@@ -67,6 +67,34 @@ export function EggForm({
   const [source, setSource] = useState<"manual" | "import">("manual");
   const [jsonText, setJsonText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
+  const dirty = isDirty(
+    {
+      nestId,
+      name,
+      description,
+      dockerImage,
+      startup,
+      stopCommand,
+      installImage,
+      installScript,
+      variables,
+      source,
+      jsonText,
+    },
+    {
+      nestId: initial?.nestId ?? defaultNestId ?? "",
+      name: initial?.name ?? "",
+      description: initial?.description ?? "",
+      dockerImage: initial?.dockerImage ?? "",
+      startup: initial?.startup ?? "",
+      stopCommand: initial?.stopCommand || "stop",
+      installImage: initial?.installImage || "alpine:3.20",
+      installScript: initial?.installScript ?? "",
+      variables: initial?.variables?.length ? initial.variables : [],
+      source: "manual",
+      jsonText: "",
+    },
+  );
 
   const selectedNest = nests.find((nest) => nest.id === (nestId || nests[0]?.id));
   const resolvedNestId = nestId || nests[0]?.id || "";
@@ -76,6 +104,22 @@ export function EggForm({
     ? Boolean(resolvedNestId && parsed.egg && !parsed.parseError)
     : Boolean(resolvedNestId && name.trim() && dockerImage.trim());
   const serverCount = initial?.serverCount ?? 0;
+
+  function onCancel() {
+    setNestId(initial?.nestId ?? defaultNestId ?? "");
+    setName(initial?.name ?? "");
+    setDescription(initial?.description ?? "");
+    setDockerImage(initial?.dockerImage ?? "");
+    setStartup(initial?.startup ?? "");
+    setStopCommand(initial?.stopCommand || "stop");
+    setInstallImage(initial?.installImage || "alpine:3.20");
+    setInstallScript(initial?.installScript ?? "");
+    setVariables((initial?.variables?.length ? initial.variables : []).map((row) => ({ ...row })));
+    setSource("manual");
+    setJsonText("");
+    setFileName(null);
+    setError(null);
+  }
 
   function setVariable(index: number, patch: Partial<EggVariable>) {
     setVariables((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -448,8 +492,9 @@ export function EggForm({
         </AdminSection>
       )}
 
-      <AdminCreateFooter
-        cancelHref="/admin/nests"
+      <SaveIsland
+        visible={dirty || pending}
+        onCancel={onCancel}
         submitLabel={importing ? "Import egg" : creating ? "Create egg" : "Save changes"}
         pendingLabel={importing ? "Importing…" : creating ? "Creating…" : "Saving…"}
         pending={pending}

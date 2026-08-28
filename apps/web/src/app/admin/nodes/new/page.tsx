@@ -16,7 +16,7 @@ import {
   Server,
 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { AdminCreateFooter } from "@/components/admin-create";
+import { SaveIsland, isDirty } from "@/components/admin-create";
 import { Button, ButtonLink, Card, Field, Input, Select, Textarea } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -63,28 +63,70 @@ export default function CreateNodePage() {
     [locations, resolvedLocationId],
   );
 
-  const dirty =
-    name.trim() !== "" ||
-    description.trim() !== "" ||
-    fqdn.trim() !== "" ||
-    !isPublic ||
-    scheme !== "https" ||
-    behindProxy ||
-    daemonBase !== "/var/lib/flutter/volumes" ||
-    memoryGiB !== "64" ||
-    cpuCores !== "8" ||
-    memoryOverallocate !== "0" ||
-    diskGiB !== "1024" ||
-    diskOverallocate !== "0" ||
-    daemonPort !== "8080" ||
-    sftpPort !== "2022" ||
-    uploadLimitMb !== "250" ||
-    maintenanceMode;
+  const dirty = isDirty(
+    {
+      name,
+      description,
+      isPublic,
+      fqdn,
+      scheme,
+      behindProxy,
+      daemonBase,
+      memoryGiB,
+      cpuCores,
+      memoryOverallocate,
+      diskGiB,
+      diskOverallocate,
+      daemonPort,
+      sftpPort,
+      uploadLimitMb,
+      maintenanceMode,
+    },
+    {
+      name: "",
+      description: "",
+      isPublic: true,
+      fqdn: "",
+      scheme: "https",
+      behindProxy: false,
+      daemonBase: "/var/lib/flutter/volumes",
+      memoryGiB: "64",
+      cpuCores: "8",
+      memoryOverallocate: "0",
+      diskGiB: "1024",
+      diskOverallocate: "0",
+      daemonPort: "8080",
+      sftpPort: "2022",
+      uploadLimitMb: "250",
+      maintenanceMode: false,
+    },
+  );
 
   async function copy(value: string, key: "token" | "configure" | "start") {
     await navigator.clipboard.writeText(value);
     setCopied(key);
     window.setTimeout(() => setCopied(null), 1500);
+  }
+
+  function onCancel() {
+    setName("");
+    setLocationId("");
+    setDescription("");
+    setIsPublic(true);
+    setFqdn("");
+    setScheme("https");
+    setBehindProxy(false);
+    setDaemonBase("/var/lib/flutter/volumes");
+    setMemoryGiB("64");
+    setCpuCores("8");
+    setMemoryOverallocate("0");
+    setDiskGiB("1024");
+    setDiskOverallocate("0");
+    setDaemonPort("8080");
+    setSftpPort("2022");
+    setUploadLimitMb("250");
+    setMaintenanceMode(false);
+    setError(null);
   }
 
   async function onCreate(event: FormEvent<HTMLFormElement>) {
@@ -385,9 +427,9 @@ export default function CreateNodePage() {
         </Section>
       </div>
 
-      <AdminCreateFooter
-        visible={dirty}
-        cancelHref="/admin/nodes"
+      <SaveIsland
+        visible={dirty || pending}
+        onCancel={onCancel}
         submitLabel="Create node"
         pending={pending}
         pendingLabel="Creating…"

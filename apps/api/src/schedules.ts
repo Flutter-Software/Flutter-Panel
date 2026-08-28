@@ -204,6 +204,7 @@ async function executeTasks(serverId: string, tasks: TaskDoc[]) {
 
 async function claimSchedule(scheduleId: string) {
   const stale = new Date(Date.now() - 15 * 60 * 1000);
+  // Atomic. Two API processes (or a stacked tick) can't both run the same row.
   return Schedule.findOneAndUpdate(
     {
       _id: scheduleId,
@@ -261,6 +262,7 @@ export async function runDueSchedules() {
   const due = await Schedule.find({
     enabled: true,
     nextRunAt: { $lte: now },
+    // runningAt older than 15m = previous tick died mid-run. Steal it.
     $or: [{ runningAt: null }, { runningAt: { $lt: stale } }],
   }).limit(25);
 
@@ -278,6 +280,7 @@ let ticking = false;
 
 export function startScheduleRunner() {
   const tick = async () => {
+    // One tick at a time. A slow Minecraft backup shouldn't stack intervals.
     if (ticking) return;
     ticking = true;
     try {

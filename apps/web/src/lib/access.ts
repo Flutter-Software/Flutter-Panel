@@ -12,6 +12,7 @@ export function can(server: ServerRecord | null | undefined, permission: ServerP
 }
 
 export function canOpenSettings(server: ServerRecord | null | undefined) {
+  // Settings nav is a combined page. Show it if they can rename or reinstall.
   return can(server, "settings.rename") || can(server, "settings.reinstall");
 }
 

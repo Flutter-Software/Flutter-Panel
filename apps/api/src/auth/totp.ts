@@ -48,6 +48,8 @@ export function verifyTotpCode(secret: string, code: string, at = Date.now()) {
   }
   if (!key.length) return false;
   const counter = Math.floor(at / PERIOD_MS);
+  // ±30s for phone clock skew. Loop every window even after a hit so valid
+  // and invalid codes take the same number of HMAC compares.
   let matched = false;
   for (const window of WINDOWS) {
     if (tokenEquals(hotp(key, counter + window), code)) matched = true;

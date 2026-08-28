@@ -191,6 +191,8 @@ const panelSettingsSchema = new Schema(
 );
 
 function modelOf(name: string, schema: Schema): Model<any> {
+  // tsx/node --watch re-imports this file. mongoose throws on a second
+  // model(name) for the same connection, so drop the cached one first.
   if (mongoose.models[name]) mongoose.deleteModel(name);
   return mongoose.model(name, schema);
 }

@@ -8,7 +8,6 @@ import {
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
-  type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
 
@@ -173,9 +172,8 @@ export function selectClass(className?: string) {
   );
 }
 
-export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select className={selectClass(className)} {...props} />;
-}
+export { SearchSelect, Select } from "./select";
+export type { SelectOption } from "./select";
 
 export function EmptyState({
   title,

@@ -351,6 +351,9 @@ export async function importEgg(body: unknown) {
 }
 
 export async function seedDefaults() {
+  // Idempotent. If someone renamed Generic we leave it; we only insert when
+  // the well-known names are missing so a wipe-and-reinstall still has a
+  // working test egg.
   let generic = await Nest.findOne({ name: "Generic" });
   if (!generic) {
     generic = await Nest.create({

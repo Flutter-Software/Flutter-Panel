@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Shield, UserRound } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import {
-  AdminCreateFooter,
   AdminCreateHeader,
   AdminSection,
+  SaveIsland,
   Segmented,
+  isDirty,
 } from "@/components/admin-create";
 import { Button, Field, Input } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -32,12 +33,26 @@ export function UserForm({
   const [showPassword, setShowPassword] = useState(false);
 
   const creating = mode === "create";
-  const dirty =
-    username !== (initial?.username ?? "") ||
-    email !== (initial?.email ?? "") ||
-    password !== "" ||
-    confirm !== "" ||
-    role !== (initial?.role ?? "user");
+  const dirty = isDirty(
+    { username, email, password, confirm, role },
+    {
+      username: initial?.username ?? "",
+      email: initial?.email ?? "",
+      password: "",
+      confirm: "",
+      role: initial?.role ?? "user",
+    },
+  );
+
+  function onCancel() {
+    setUsername(initial?.username ?? "");
+    setEmail(initial?.email ?? "");
+    setPassword("");
+    setConfirm("");
+    setRole(initial?.role ?? "user");
+    setShowPassword(false);
+    setError(null);
+  }
 
   function generatePassword() {
     const chars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
@@ -207,9 +222,9 @@ export function UserForm({
         </AdminSection>
       </div>
 
-      <AdminCreateFooter
-        visible={creating || dirty || pending}
-        cancelHref="/admin/users"
+      <SaveIsland
+        visible={dirty || pending}
+        onCancel={onCancel}
         submitLabel={creating ? "Create user" : "Save changes"}
         pendingLabel={creating ? "Creating…" : "Saving…"}
         pending={pending}

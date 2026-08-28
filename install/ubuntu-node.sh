@@ -110,8 +110,8 @@ if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "24.04" ]]; then
   [[ "$FORCE" -eq 1 ]] || die "Re-run with --force to skip this check."
 fi
 
-if [[ -d /opt/flutter/apps/web || -f /etc/systemd/system/flutter-api.service ]]; then
-  die "This host already has the Flutter panel. Use that install's flutter-daemon, or pick a different machine."
+if [[ -f /etc/systemd/system/flutter-api.service ]] && systemctl is-enabled --quiet flutter-api.service 2>/dev/null; then
+  die "This host is already running the Flutter panel (flutter-api). Use a different machine for a remote node."
 fi
 
 PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -163,7 +163,10 @@ if ! command -v docker >/dev/null 2>&1; then
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
   fi
 fi
-systemctl enable --now docker
+systemctl enable --now docker 2>/dev/null || true
+if ! docker info >/dev/null 2>&1; then
+  die "Docker is not running. On WSL, enable Docker Desktop → Settings → Resources → WSL integration, then retry."
+fi
 
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -p 'process.versions.node.split(".")[0]')" -lt "$NODE_MAJOR" ]]; then
   log "Installing Node.js ${NODE_MAJOR}"
@@ -197,11 +200,25 @@ if [[ -z "$SOURCE" ]]; then
   fi
 fi
 
-[[ -f "$SOURCE/install/systemd/flutter-node.service" ]] || die "Missing install/systemd/flutter-node.service in ${SOURCE}"
+UNIT_FILE=""
+for candidate in \
+  "$SCRIPT_DIR/systemd/flutter-node.service" \
+  "$SCRIPT_DIR/install/systemd/flutter-node.service" \
+  "$SOURCE/install/systemd/flutter-node.service"
+do
+  if [[ -f "$candidate" ]]; then
+    UNIT_FILE="$candidate"
+    break
+  fi
+done
+[[ -n "$UNIT_FILE" ]] || die "Missing flutter-node.service (copy install/systemd/flutter-node.service next to ubuntu-node.sh)"
 [[ -f "$SOURCE/scripts/link-shared.mjs" ]] || die "Missing scripts/link-shared.mjs in ${SOURCE}"
 
 log "Installing daemon files to ${PREFIX}"
-mkdir -p "$PREFIX" "$DATA_DIR" "$PREFIX/apps/daemon/data" "$PREFIX/scripts"
+mkdir -p "$PREFIX" "$DATA_DIR" \
+  "$PREFIX/apps/daemon/data" \
+  "$PREFIX/packages/shared" \
+  "$PREFIX/scripts"
 rsync -a --delete \
   --exclude 'node_modules/' \
   --exclude 'data/config.json' \
@@ -232,7 +249,11 @@ as_flutter() {
 }
 
 log "Installing npm packages (daemon + shared only)"
-as_flutter bash -lc "cd $(printf '%q' "$PREFIX") && npm install --omit=dev"
+if ! as_flutter bash -lc "cd $(printf '%q' "$PREFIX") && npm install --omit=dev"; then
+  warn "npm as ${SERVICE_USER} failed; retrying as root"
+  bash -lc "cd $(printf '%q' "$PREFIX") && npm install --omit=dev"
+  chown -R "$SERVICE_USER:$SERVICE_USER" "$PREFIX"
+fi
 as_flutter bash -lc "cd $(printf '%q' "$PREFIX") && node scripts/link-shared.mjs"
 
 sed \
@@ -240,7 +261,7 @@ sed \
   -e "s|/var/lib/flutter|${DATA_DIR}|g" \
   -e "s/^User=flutter$/User=${SERVICE_USER}/" \
   -e "s/^Group=flutter$/Group=${SERVICE_USER}/" \
-  "$SOURCE/install/systemd/flutter-node.service" > /etc/systemd/system/flutter-daemon.service
+  "$UNIT_FILE" > /etc/systemd/system/flutter-daemon.service
 
 cat > /usr/local/sbin/flutter-node-configure <<EOF
 #!/usr/bin/env bash
@@ -263,12 +284,16 @@ if [[ "$SKIP_CONFIGURE" -eq 0 ]]; then
     --config $(printf '%q' "$PREFIX/apps/daemon/data/config.json")"
 fi
 
-systemctl daemon-reload
-systemctl enable flutter-daemon.service
-if [[ "$SKIP_CONFIGURE" -eq 0 ]]; then
-  systemctl restart flutter-daemon.service
+if command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1; then
+  systemctl daemon-reload
+  systemctl enable flutter-daemon.service
+  if [[ "$SKIP_CONFIGURE" -eq 0 ]]; then
+    systemctl restart flutter-daemon.service
+  else
+    log "Config skipped. Run flutter-node-configure then: systemctl enable --now flutter-daemon"
+  fi
 else
-  log "Config skipped. Run flutter-node-configure then: systemctl enable --now flutter-daemon"
+  warn "systemd is not running; skip enabling flutter-daemon. Start it after configure with: systemctl enable --now flutter-daemon"
 fi
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
@@ -276,11 +301,13 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
   ufw allow "${DAEMON_PORT}/tcp" >/dev/null
 fi
 
-sleep 2
-if systemctl is-active --quiet flutter-daemon; then
-  log "Daemon is running"
-else
-  warn "Daemon is not active yet. Check: journalctl -u flutter-daemon -e"
+if [[ "$SKIP_CONFIGURE" -eq 0 ]]; then
+  sleep 2
+  if systemctl is-active --quiet flutter-daemon 2>/dev/null; then
+    log "Daemon is running"
+  else
+    warn "Daemon is not active yet. Check: journalctl -u flutter-daemon -e"
+  fi
 fi
 
 cat <<EOF

@@ -27,11 +27,13 @@ import {
 import { createBackup, deleteBackup, listBackups, restoreBackup } from "./backups";
 
 function unixNewlines(value: string) {
+  // Windows editors + egg JSON paste will otherwise break bash install scripts.
   return value.replace(/\r/g, "");
 }
 
 function asInstallSpec(body: Record<string, unknown>, uuid: string): InstallSpec {
   const allocation = (body.allocation ?? {}) as { ip?: string; port?: number };
+  const extras = Array.isArray(body.allocations) ? body.allocations : [];
   const limits = (body.limits ?? {}) as {
     memoryBytes?: number;
     diskBytes?: number;
@@ -65,6 +67,12 @@ function asInstallSpec(body: Record<string, unknown>, uuid: string): InstallSpec
       ip: String(allocation.ip ?? "0.0.0.0"),
       port: Number(allocation.port ?? 0),
     },
+    allocations: extras
+      .filter((row): row is { ip?: string; port?: number } => Boolean(row) && typeof row === "object")
+      .map((row) => ({
+        ip: String(row.ip ?? "0.0.0.0"),
+        port: Number(row.port ?? 0),
+      })),
   };
 }
 

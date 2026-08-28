@@ -97,27 +97,31 @@ sudo systemctl restart flutter-daemon
 
 `--panel-url http://127.0.0.1:4000` is correct **only when the daemon runs on the same host as the API**. systemd already points at `/opt/flutter/apps/daemon/data/config.json` and `/var/lib/flutter`.
 
-**Remote node** (another Ubuntu 24.04 host with a public IP). Do **not** run the panel installer there. Create the node in Admin, copy the `flt_` token, then:
+**Second machine (game node only):** do **not** run the panel installer there. Full walkthrough (VPS, home/WSL, flags, troubleshooting): [`install/REMOTE_NODE.md`](install/REMOTE_NODE.md). Script index: [`install/README.md`](install/README.md).
+
+Public IP on the game host:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Flutter-Software/Flutter-Panel/main/install/ubuntu-node.sh \
-  | sudo bash -s -- \
-    --panel-url https://panel.example.com \
-    --token <flt_token> \
-    --node <nodeId> \
-    --listen-url http://<this-server-public-ip>:8080
+git clone https://github.com/Flutter-Software/Flutter-Panel.git /usr/local/src/flutter-panel
+sudo bash /usr/local/src/flutter-panel/install/ubuntu-node.sh --yes \
+  --panel-url https://panel.example.com \
+  --token <flt_token> \
+  --node <nodeId> \
+  --listen-url http://<this-server-public-ip>:8080
 ```
 
-That installs Docker, Node.js, and the daemon under `/opt/flutter-node` (data in `/var/lib/flutter`) and starts `flutter-daemon`. It does not install MongoDB, Redis, nginx, or the web UI.
+`--listen-url` must be reachable from the panel host (not `127.0.0.1`). Allow **8080/tcp** from the panel, plus game allocation ports on the node.
 
-`--listen-url` must be reachable from the **panel API host**, not `127.0.0.1`. Allow **8080/tcp** from the panel, plus each game allocation port on the node.
+No public IP (home LAN, CGNAT, WSL):
 
 ```bash
-sudo systemctl status flutter-daemon
-sudo journalctl -u flutter-daemon -f
+sudo bash install/connect-home-node.sh \
+  --panel-url https://panel.example.com \
+  --token <flt_token> \
+  --node <nodeId>
 ```
 
-To rewrite config later: `sudo flutter-node-configure --panel-url https://panel.example.com --token … --node … --listen-url http://<ip>:8080`
+That installs the same daemon and publishes 8080 through a Cloudflare quick tunnel. Re-run the script after a reboot if the node goes Offline (quick-tunnel URLs change).
 
 ### 5. Updates and maintenance
 

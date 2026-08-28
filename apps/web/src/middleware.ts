@@ -22,6 +22,8 @@ function publicOrigin(request: NextRequest) {
   const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
   const appUrl = process.env.APP_URL?.replace(/\/+$/, "");
 
+  // Prefer the hostname the browser actually used. APP_URL is a fallback for
+  // when Next only sees 127.0.0.1 behind nginx.
   if (host && !isLoopbackHost(host)) {
     const proto =
       forwardedProto ||
@@ -47,6 +49,8 @@ function redirectTo(request: NextRequest, path: string, nextPath?: string) {
   if (origin && !isLoopbackHost(new URL(origin).host)) {
     return NextResponse.redirect(new URL(location, `${origin}/`));
   }
+  // Relative Location on loopback so local `next dev` doesn't bounce you to
+  // whatever APP_URL is (often the public hostname).
   return new NextResponse(null, {
     status: 307,
     headers: { Location: location },

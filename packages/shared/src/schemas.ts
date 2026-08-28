@@ -78,6 +78,11 @@ export const changePasswordSchema = z
     path: ["confirmPassword"],
   });
 
+export const updateProfileSchema = z.object({
+  username: registerSchema.shape.username,
+  email: z.string().email(),
+});
+
 export const totpCodeSchema = z
   .string()
   .transform((value) => value.replace(/\D/g, ""))
@@ -274,6 +279,7 @@ export const serverCreateSchema = z.object({
   eggId: objectIdSchema,
   nodeId: objectIdSchema,
   allocationId: objectIdSchema,
+  allocationIds: z.array(objectIdSchema).max(50).optional().default([]),
   ownerId: objectIdSchema.optional(),
   memoryMb: z.number().int().min(0).max(16_777_216),
   diskMb: z.number().int().min(0).max(16_777_216),
@@ -289,6 +295,7 @@ export const serverUpdateSchema = z.object({
   description: z.string().max(240).optional(),
   ownerId: objectIdSchema.optional(),
   allocationId: objectIdSchema.optional(),
+  allocationIds: z.array(objectIdSchema).max(50).optional(),
   memoryMb: z.number().int().min(0).max(16_777_216).optional(),
   diskMb: z.number().int().min(0).max(16_777_216).optional(),
   cpuPercent: z.number().int().min(0).max(800).optional(),

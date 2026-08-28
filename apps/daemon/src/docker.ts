@@ -16,6 +16,7 @@ export type InstallSpec = {
   environment: Record<string, string>;
   limits: { memoryBytes: number; diskBytes: number; cpuPercent: number; cpuPinning?: number };
   allocation: { ip: string; port: number };
+  allocations?: { ip: string; port: number }[];
 };
 
 export type PowerAction = "start" | "stop" | "restart" | "kill";
@@ -267,10 +268,26 @@ function specFingerprint(spec: InstallSpec) {
         cpuPinning: spec.limits.cpuPinning ?? 0,
         ip: spec.allocation.ip,
         port: spec.allocation.port,
+        allocations: spec.allocations ?? [],
       }),
     )
     .digest("hex")
     .slice(0, 16);
+}
+
+function dockerPortMap(spec: InstallSpec) {
+  const exposed: Record<string, object> = {};
+  const bindings: Record<string, { HostIp: string; HostPort: string }[]> = {};
+  for (const row of [spec.allocation, ...(spec.allocations ?? [])]) {
+    const port = Number(row.port) || 0;
+    if (port <= 0) continue;
+    const key = `${port}/tcp`;
+    const ip = row.ip?.trim() || "0.0.0.0";
+    const hostIp = ip === "0.0.0.0" || ip === "*" || ip === "::" ? "" : ip;
+    exposed[key] = {};
+    bindings[key] = [{ HostIp: hostIp, HostPort: String(port) }];
+  }
+  return { exposed, bindings };
 }
 
 async function applyCompute(containerId: string, spec: InstallSpec) {
@@ -318,7 +335,7 @@ export function runtimeEnvironment(spec: InstallSpec): Record<string, string> {
     SERVER_IP: ip,
     SERVER_PORT: port,
     P_SERVER_UUID: spec.uuid,
-    P_SERVER_ALLOCATION_LIMIT: "0",
+    P_SERVER_ALLOCATION_LIMIT: String(spec.allocations?.length ?? 0),
   };
   for (const [key, value] of Object.entries(merged)) {
     merged[key] = value.replace(/\r/g, "");
@@ -363,6 +380,7 @@ export function mergeSpec(base: InstallSpec | null, incoming: InstallSpec): Inst
       ip: incoming.allocation.ip || base.allocation.ip,
       port: incoming.allocation.port || base.allocation.port,
     },
+    allocations: incoming.allocations ?? base.allocations ?? [],
   };
 }
 
@@ -777,9 +795,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
     const env = runtimeEnvironment(merged);
     const startup = env.STARTUP?.trim() || merged.startup?.trim() || DEFAULT_STARTUP;
     const command = startup.startsWith("exec ") ? startup : `exec ${startup}`;
-    const port = merged.allocation.port;
-    const ip = merged.allocation.ip?.trim() || "0.0.0.0";
-    const hostIp = ip === "0.0.0.0" || ip === "*" || ip === "::" ? "" : ip;
+    const ports = dockerPortMap(merged);
     const compute = cpuLayout(merged.limits.cpuPercent, merged.limits.cpuPinning ?? 0, uuid);
 
     const container = await docker.createContainer({
@@ -794,7 +810,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       AttachStderr: true,
       WorkingDir: "/home/container",
       Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
-      ExposedPorts: { [`${port}/tcp`]: {} },
+      ExposedPorts: ports.exposed,
       HostConfig: {
         Init: true,
         Binds: [`${bindPath(root)}:/home/container`],
@@ -802,9 +818,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
         ...(compute.nanoCpus ? { NanoCpus: compute.nanoCpus } : {}),
         ...(compute.cpuShares ? { CpuShares: compute.cpuShares } : {}),
         ...(compute.cpuset ? { CpusetCpus: compute.cpuset } : {}),
-        PortBindings: {
-          [`${port}/tcp`]: [{ HostIp: hostIp, HostPort: String(port) }],
-        },
+        PortBindings: ports.bindings,
         RestartPolicy: { Name: "no" },
       },
       Labels: { "flutter.server": uuid, "flutter.spec": fingerprint },

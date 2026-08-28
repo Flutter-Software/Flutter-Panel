@@ -18,6 +18,8 @@ export function signConsoleTicket(
   input: Omit<ConsoleTicket, "v" | "expiresAt">,
   ttlMs = 5 * 60_000,
 ): string {
+  // Short-lived on purpose. The WS stays up after this expires; the ticket
+  // only authorizes the upgrade.
   const payload: ConsoleTicket = {
     v: 1,
     ...input,

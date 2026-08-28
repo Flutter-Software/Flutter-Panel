@@ -5,6 +5,7 @@ import {
   adminUserCreateSchema,
   adminUserUpdateSchema,
   changePasswordSchema,
+  updateProfileSchema,
   loginSchema,
   registerSchema,
   resendVerifySchema,
@@ -25,7 +26,14 @@ import {
   validatePassword,
   verifyPassword,
 } from "./crypto";
-import { createSession, destroyOtherSessions, destroySession, getSessionUser } from "./session";
+import {
+  createSession,
+  destroyOtherSessions,
+  destroySession,
+  getSessionUser,
+  listUserSessions,
+  revokeUserSession,
+} from "./session";
 import { resolveSmtp, sendVerificationEmail } from "../mail";
 import { attachPendingSubusers } from "../subusers";
 import { env } from "../env";
@@ -75,6 +83,7 @@ async function issueVerificationCode(
   options?: { force?: boolean },
 ) {
   const remaining = (user.emailVerifyExpiresAt?.getTime() ?? 0) - Date.now();
+  // Don't burn SMTP on refresh-spam. 45s is "they clicked resend immediately".
   const recentlyIssued = remaining > EMAIL_VERIFY_TTL_MS - 45_000;
   if (!options?.force && recentlyIssued && user.emailVerifyHash) {
     return;
@@ -112,6 +121,8 @@ export async function register(c: Context, body: unknown): Promise<AuthPayload> 
   if (passwordError) throw FlutterError.validation(passwordError);
 
   const setup = await setupStatus();
+  // Empty panel → first account is the admin, no email required. After that we
+  // refuse to create users if SMTP isn't up so we don't leave orphan rows.
   const role = setup.initialized ? "user" : "admin";
   const email = parsed.data.email.toLowerCase();
 
@@ -164,6 +175,8 @@ export async function login(c: Context, body: unknown): Promise<AuthPayload> {
   });
 
   if (!user) {
+    // Same argon2 work as a real password check so usernames aren't enumerable
+    // from response timing.
     await verifyPassword(await dummyPasswordHash(), parsed.data.password);
     throw FlutterError.unauthorized("Invalid login or password");
   }
@@ -182,6 +195,8 @@ export async function login(c: Context, body: unknown): Promise<AuthPayload> {
     if (!user.totpSecret) {
       throw FlutterError.unauthorized("Two-factor authentication is misconfigured for this account");
     }
+    // Don't create a session yet. The signed totpToken is a 5-minute ticket
+    // that only proves they already passed the password step.
     return {
       user: null,
       needsVerification: false,
@@ -274,7 +289,47 @@ export async function changePassword(c: Context, body: unknown) {
 
   row.passwordHash = await hashPassword(parsed.data.password);
   await row.save();
+  // Keep this browser's cookie; everything else is dead after a password change.
   await destroyOtherSessions(row._id.toString(), session.sessionId);
+  return { ok: true };
+}
+
+export async function updateProfile(c: Context, body: unknown) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  const parsed = updateProfileSchema.safeParse(body);
+  if (!parsed.success) {
+    throw FlutterError.validation("Invalid profile", parsed.error.flatten());
+  }
+
+  const row = await User.findById(session.user.id);
+  if (!row) throw FlutterError.unauthorized();
+
+  const email = parsed.data.email.toLowerCase();
+  const clash = await User.findOne({
+    _id: { $ne: row._id },
+    $or: [{ username: parsed.data.username }, { email }],
+  });
+  if (clash) {
+    throw FlutterError.conflict("Username or email is already taken");
+  }
+
+  row.username = parsed.data.username;
+  row.email = email;
+  await row.save();
+  return { user: publicUser(row) };
+}
+
+export async function listSessions(c: Context) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  return { sessions: await listUserSessions(session.user.id, session.sessionId) };
+}
+
+export async function revokeSession(c: Context, sessionId: string) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  await revokeUserSession(session.user.id, sessionId, session.sessionId);
   return { ok: true };
 }
 
@@ -320,6 +375,8 @@ export async function setupTotp(c: Context, body: unknown) {
   }
 
   const secret = generateTotpSecret();
+  // Persist before we show the QR so a refresh doesn't mint a second secret
+  // the authenticator never saw. totpEnabled stays false until /enable.
   row.totpSecret = secret;
   row.totpEnabled = false;
   await row.save();

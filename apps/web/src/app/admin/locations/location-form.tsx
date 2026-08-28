@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, Trash2 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { AdminCreateFooter, AdminCreateHeader, AdminSection } from "@/components/admin-create";
+import { AdminCreateHeader, AdminSection, SaveIsland, isDirty } from "@/components/admin-create";
 import { Button, Field, Input, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 
@@ -29,6 +29,16 @@ export function LocationForm({
   const [deleting, setDeleting] = useState(false);
   const [shortCode, setShortCode] = useState(initial?.shortCode ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
+  const dirty = isDirty(
+    { shortCode, description },
+    { shortCode: initial?.shortCode ?? "", description: initial?.description ?? "" },
+  );
+
+  function onCancel() {
+    setShortCode(initial?.shortCode ?? "");
+    setDescription(initial?.description ?? "");
+    setError(null);
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -143,8 +153,9 @@ export function LocationForm({
         </AdminSection>
       )}
 
-      <AdminCreateFooter
-        cancelHref="/admin/locations"
+      <SaveIsland
+        visible={dirty || pending}
+        onCancel={onCancel}
         submitLabel={creating ? "Create location" : "Save changes"}
         pendingLabel={creating ? "Creating…" : "Saving…"}
         pending={pending}

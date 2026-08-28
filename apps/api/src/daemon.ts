@@ -22,6 +22,7 @@ export type InstallSpec = {
   environment: Record<string, string>;
   limits: { memoryBytes: number; diskBytes: number; cpuPercent: number; cpuPinning?: number };
   allocation: { ip: string; port: number };
+  allocations?: { ip: string; port: number }[];
 };
 
 export async function configuration(c: Context) {
@@ -39,6 +40,8 @@ export async function configuration(c: Context) {
     nodeId: node._id.toString(),
     listenHost: "0.0.0.0",
     listenPort: 8080,
+    // Template for `daemon:configure`. The real listenUrl is whatever the
+    // operator passed (--listen-url / tunnel); heartbeat overwrites the node row.
     listenUrl: `http://127.0.0.1:8080`,
     dataDir: "./data",
     requestSecret: env().DAEMON_REQUEST_SECRET,
@@ -133,6 +136,9 @@ export async function installOnNode(nodeId: string, spec: InstallSpec) {
     body: spec,
     timeoutMs: 30_000,
   });
+  // Daemon returns as soon as the job is queued. This request stays open and
+  // polls — Paper image pulls on a cold host have taken hours. The UI already
+  // flipped the server to `installing` from createServer.
   const deadline = Date.now() + 6 * 60 * 60 * 1000;
   while (Date.now() < deadline) {
     const data = (await daemonFetch(node, {

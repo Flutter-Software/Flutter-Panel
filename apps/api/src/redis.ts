@@ -1,7 +1,9 @@
 import { createClient } from "redis";
 import { env } from "./env";
 
-export const redis = createClient({ url: env().REDIS_URL });
+// Sessions live in Mongo. Redis is installed with the panel and pinged from
+// /health; nothing in the API uses it as a cache yet. Boot continues if it's down.
+const redis = createClient({ url: env().REDIS_URL });
 
 export async function connectRedis() {
   if (!redis.isOpen) {

@@ -16,6 +16,8 @@ export async function authenticateNodeToken(token: string, nodeId: string) {
     );
   }
 
+  // Copy-to-clipboard needs the plaintext. We also keep an argon2 hash so
+  // older rows (hash only) still authenticate, then backfill daemonToken.
   const stored = node.daemonToken ? String(node.daemonToken) : "";
   if (stored && tokenEquals(stored, token)) {
     if (!node.tokenHash) {

@@ -17,6 +17,8 @@ function csrfToken() {
 }
 
 function seedListCache(path: string, json: unknown) {
+  // List endpoints carry enough of each row to hydrate /:id. Stops the edit
+  // page from flashing empty while the detail request is in flight.
   if (!json || typeof json !== "object" || !("data" in json)) return;
   const data = (json as { data: Record<string, unknown> }).data;
   if (!data || typeof data !== "object") return;

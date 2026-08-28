@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { Button, ButtonLink, Card } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
 export function AdminCreateHeader({
@@ -142,17 +142,21 @@ export function Switch({
   );
 }
 
-export function AdminCreateFooter({
+export function isDirty(current: unknown, baseline: unknown) {
+  return JSON.stringify(current) !== JSON.stringify(baseline);
+}
+
+export function SaveIsland({
   summary,
-  cancelHref,
+  onCancel,
   submitLabel,
   pending,
   pendingLabel,
   disabled,
-  visible = true,
+  visible = false,
 }: {
   summary: ReactNode;
-  cancelHref: string;
+  onCancel: () => void;
   submitLabel: string;
   pending?: boolean;
   pendingLabel?: string;
@@ -161,21 +165,18 @@ export function AdminCreateFooter({
 }) {
   if (!visible) return null;
   return (
-    <>
-      <div className="h-16 shrink-0" aria-hidden />
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background/90 px-4 py-3 backdrop-blur md:left-20 sm:px-6">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm text-muted-foreground">{summary}</div>
-          <div className="flex items-center gap-2">
-            <ButtonLink href={cancelHref} variant="ghost">
-              Cancel
-            </ButtonLink>
-            <Button type="submit" disabled={pending || disabled}>
-              {pending ? pendingLabel ?? "Creating…" : submitLabel}
-            </Button>
-          </div>
+    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-20 flex justify-center px-4 md:left-20">
+      <div className="pointer-events-auto flex w-full max-w-6xl flex-col gap-3 rounded-2xl border border-border/60 bg-background/40 px-5 py-3 shadow-lg ring-1 ring-white/10 backdrop-blur-xl transition duration-200 starting:translate-y-3 starting:opacity-0 sm:w-fit sm:min-w-[36rem] sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+        <div className="text-sm text-muted-foreground">{summary}</div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button type="button" variant="ghost" disabled={pending} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={pending || disabled}>
+            {pending ? pendingLabel ?? "Creating…" : submitLabel}
+          </Button>
         </div>
       </div>
-    </>
+    </div>
   );
 }

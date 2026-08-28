@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Box, Cpu, HardDrive, MemoryStick, Network, Server, Trash2, UserRound } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { AdminCreateFooter, AdminCreateHeader, AdminSection, Switch } from "@/components/admin-create";
-import { Button, Field, Input, Select, Textarea } from "@/components/ui";
+import { AdminCreateHeader, AdminSection, SaveIsland, Switch, isDirty } from "@/components/admin-create";
+import { Button, Field, Input, SearchSelect, Select, Textarea } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
@@ -14,7 +14,7 @@ import type { PublicUser } from "@flutter-software/shared";
 
 type Nest = { id: string; name: string; eggs: { id: string; name: string }[] };
 type Node = { id: string; name: string; online: boolean; location?: string };
-type Allocation = { id: string; ip: string; port: number; assigned: boolean };
+type Allocation = { id: string; ip: string; port: number; assigned: boolean; serverId?: string | null };
 
 export function ServerForm({
   mode,
@@ -43,12 +43,47 @@ export function ServerForm({
   const [eggId, setEggId] = useState(initial?.eggId ?? "");
   const [nodeId, setNodeId] = useState(initial?.nodeId ?? "");
   const [allocationId, setAllocationId] = useState(initial?.allocationId ?? "");
+  const [extraAllocationIds, setExtraAllocationIds] = useState<string[]>([]);
+  const [initialExtraIds, setInitialExtraIds] = useState<string[]>([]);
+  const extrasReady = useRef(false);
   const [memoryMb, setMemoryMb] = useState(String(initial?.memory.limitMb ?? 1024));
   const [diskMb, setDiskMb] = useState(String(initial?.disk.limitMb ?? 4096));
   const [cpuPercent, setCpuPercent] = useState(String(initial?.cpu.limit ?? 100));
   const [cpuPinning, setCpuPinning] = useState(String(initial?.cpuPinning ?? 0));
   const [databaseLimit, setDatabaseLimit] = useState(String(initial?.databaseLimit ?? 0));
   const [backupsEnabled, setBackupsEnabled] = useState(initial?.backupsEnabled !== false);
+  const dirty = isDirty(
+    {
+      name,
+      description,
+      ownerId: ownerId || (creating ? (user?.id ?? "") : ""),
+      eggId,
+      nodeId,
+      allocationId,
+      extraAllocationIds: [...extraAllocationIds].sort(),
+      memoryMb,
+      diskMb,
+      cpuPercent,
+      cpuPinning,
+      databaseLimit,
+      backupsEnabled,
+    },
+    {
+      name: initial?.name ?? "",
+      description: initial?.description ?? "",
+      ownerId: initial?.ownerId ?? (creating ? (user?.id ?? "") : ""),
+      eggId: initial?.eggId ?? "",
+      nodeId: initial?.nodeId ?? "",
+      allocationId: initial?.allocationId ?? "",
+      extraAllocationIds: [...initialExtraIds].sort(),
+      memoryMb: String(initial?.memory.limitMb ?? 1024),
+      diskMb: String(initial?.disk.limitMb ?? 4096),
+      cpuPercent: String(initial?.cpu.limit ?? 100),
+      cpuPinning: String(initial?.cpuPinning ?? 0),
+      databaseLimit: String(initial?.databaseLimit ?? 0),
+      backupsEnabled: initial?.backupsEnabled !== false,
+    },
+  );
 
   const eggs = useMemo(
     () => nests.flatMap((nest) => nest.eggs.map((egg) => ({ ...egg, nest: nest.name }))),
@@ -58,8 +93,25 @@ export function ServerForm({
   const selectedNode = nodes.find((node) => node.id === nodeId);
   const selectedAllocation = allocations.find((row) => row.id === allocationId);
   const allocationOptions = allocations.filter(
-    (row) => !row.assigned || row.id === initial?.allocationId,
+    (row) => !row.assigned || row.id === initial?.allocationId || row.serverId === initial?.id,
   );
+
+  function onCancel() {
+    setName(initial?.name ?? "");
+    setDescription(initial?.description ?? "");
+    setOwnerId(initial?.ownerId ?? "");
+    setEggId(initial?.eggId ?? "");
+    setNodeId(initial?.nodeId ?? "");
+    setAllocationId(initial?.allocationId ?? "");
+    setExtraAllocationIds(initialExtraIds);
+    setMemoryMb(String(initial?.memory.limitMb ?? 1024));
+    setDiskMb(String(initial?.disk.limitMb ?? 4096));
+    setCpuPercent(String(initial?.cpu.limit ?? 100));
+    setCpuPinning(String(initial?.cpuPinning ?? 0));
+    setDatabaseLimit(String(initial?.databaseLimit ?? 0));
+    setBackupsEnabled(initial?.backupsEnabled !== false);
+    setError(null);
+  }
 
   useEffect(() => {
     if (!ownerId && user?.id && creating) setOwnerId(user.id);
@@ -71,9 +123,20 @@ export function ServerForm({
       return;
     }
     api<{ data: { allocations: Allocation[] } }>(`/api/v1/admin/nodes/${nodeId}/allocations`)
-      .then((result) => setAllocations(result.data.allocations))
+      .then((result) => {
+        const rows = result.data.allocations;
+        setAllocations(rows);
+        if (!extrasReady.current && initial) {
+          extrasReady.current = true;
+          const extras = rows
+            .filter((row) => row.serverId === initial.id && row.id !== initial.allocationId)
+            .map((row) => row.id);
+          setExtraAllocationIds(extras);
+          setInitialExtraIds(extras);
+        }
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load allocations"));
-  }, [nodeId]);
+  }, [nodeId, initial]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -84,6 +147,7 @@ export function ServerForm({
       description,
       ownerId,
       allocationId,
+      allocationIds: extraAllocationIds.filter((id) => id !== allocationId),
       memoryMb: Number(memoryMb),
       diskMb: Number(diskMb),
       cpuPercent: Number(cpuPercent),
@@ -235,6 +299,7 @@ export function ServerForm({
                 onChange={(event) => {
                   setNodeId(event.target.value);
                   setAllocationId("");
+                  setExtraAllocationIds([]);
                 }}
                 required
               >
@@ -255,10 +320,14 @@ export function ServerForm({
               />
             )}
           </Field>
-          <Field label="Allocation" required hint="IP and port the game process binds to.">
+          <Field label="Primary allocation" required hint="IP and port the game process binds to.">
             <Select
               value={allocationId}
-              onChange={(event) => setAllocationId(event.target.value)}
+              onChange={(event) => {
+                const next = event.target.value;
+                setAllocationId(next);
+                setExtraAllocationIds((current) => current.filter((id) => id !== next));
+              }}
               required
               disabled={!nodeId}
               className="font-mono"
@@ -271,6 +340,29 @@ export function ServerForm({
                 </option>
               ))}
             </Select>
+          </Field>
+          <Field
+            label="Additional allocations"
+            hint="Optional extra ports assigned to this server. Applied on the next start."
+          >
+            <SearchSelect
+              multiple
+              disabled={!nodeId}
+              className="font-mono"
+              placeholder={nodeId ? "Search ports…" : "Select a node first"}
+              value={extraAllocationIds}
+              onChange={(next) => setExtraAllocationIds(Array.isArray(next) ? next.filter((id) => id !== allocationId) : [])}
+              options={allocations
+                .filter(
+                  (row) =>
+                    row.id !== allocationId &&
+                    (!row.assigned || row.serverId === initial?.id),
+                )
+                .map((row) => ({
+                  value: row.id,
+                  label: `${row.ip}:${row.port}`,
+                }))}
+            />
           </Field>
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label="Memory (MB)" required hint="0 = unlimited">
@@ -373,8 +465,9 @@ export function ServerForm({
         </AdminSection>
       )}
 
-      <AdminCreateFooter
-        cancelHref="/admin/servers"
+      <SaveIsland
+        visible={dirty || pending}
+        onCancel={onCancel}
         submitLabel={creating ? "Create server" : "Save changes"}
         pendingLabel={creating ? "Creating…" : "Saving…"}
         pending={pending}

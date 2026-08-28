@@ -2,6 +2,8 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@flutter-software/shared";
 
+// OWASP's current argon2id recommendation. Don't drop memoryCost without
+// rehashing existing passwords — verify() passes these options through.
 const HASH_OPTIONS = {
   memoryCost: 19_456,
   timeCost: 2,
@@ -32,6 +34,8 @@ export async function verifyPassword(passwordHash: string, password: string) {
 
 let dummyHash: Promise<string> | null = null;
 
+// Cached argon2 of a dummy secret so unknown-user logins take about as long
+// as a real verify. Hashing on every miss would still leak via a cold start.
 export function dummyPasswordHash() {
   dummyHash ??= hash("flutter-invalid-password", HASH_OPTIONS);
   return dummyHash;

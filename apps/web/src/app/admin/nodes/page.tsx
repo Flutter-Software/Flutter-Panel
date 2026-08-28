@@ -11,6 +11,60 @@ import { prefetchQuery, useQuery } from "@/lib/query";
 import { formatGiB } from "@/lib/types";
 
 type Allocation = { id: string; ip: string; port: number; assigned: boolean };
+
+const ALLOCATION_PREVIEW = 6;
+
+function AllocationChip({ row }: { row: Allocation }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-xs",
+        row.assigned
+          ? "border-primary/40 text-primary"
+          : "border-border text-muted-foreground",
+      )}
+    >
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          row.assigned ? "bg-primary" : "bg-status-running",
+        )}
+      />
+      {row.ip}:{row.port}
+      {row.assigned ? null : <span className="font-sans text-[10px]">free</span>}
+    </span>
+  );
+}
+
+function NodeAllocationChips({ allocations }: { allocations: Allocation[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const sorted = [...allocations].sort((a, b) => Number(b.assigned) - Number(a.assigned));
+  const extra = Math.max(0, sorted.length - ALLOCATION_PREVIEW);
+  const visible = extra && !expanded ? sorted.slice(0, ALLOCATION_PREVIEW) : sorted;
+
+  if (!allocations.length) {
+    return <p className="mt-2 text-sm text-muted-foreground">No allocations yet.</p>;
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {visible.map((row) => (
+        <AllocationChip key={row.id} row={row} />
+      ))}
+      {extra ? (
+        <button
+          type="button"
+          className="inline-flex items-center rounded-md border border-dashed border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          {expanded ? "Show less" : `${extra} more...`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 type Node = {
   id: string;
   name: string;
@@ -19,7 +73,6 @@ type Node = {
   location: string;
   memoryMb: number;
   memoryCommittedMb: number;
-  cpuCores?: number;
   tokenPrefix: string | null;
   online: boolean;
   allocations: Allocation[];
@@ -192,32 +245,7 @@ export default function AdminNodesPage() {
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Allocations ({node.allocations.length})
                   </p>
-                  {node.allocations.length ? (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {node.allocations.map((row) => (
-                        <span
-                          key={row.id}
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-xs",
-                            row.assigned
-                              ? "border-primary/40 text-primary"
-                              : "border-border text-muted-foreground",
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              row.assigned ? "bg-primary" : "bg-status-running",
-                            )}
-                          />
-                          {row.ip}:{row.port}
-                          {row.assigned ? null : <span className="font-sans text-[10px]">free</span>}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-muted-foreground">No allocations yet.</p>
-                  )}
+                  <NodeAllocationChips allocations={node.allocations} />
                 </div>
               </Card>
             );

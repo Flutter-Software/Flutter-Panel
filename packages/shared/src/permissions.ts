@@ -143,6 +143,7 @@ export function normalizePermissions(raw: unknown): ServerPermission[] {
 
 export function hasServerPermission(granted: readonly string[] | undefined, need: ServerPermission) {
   if (!granted || granted.length === 0) return false;
+  // Owners and admins get ["*"] from the API. Don't store that on subuser rows.
   if (granted.includes("*")) return true;
   return granted.includes(need);
 }

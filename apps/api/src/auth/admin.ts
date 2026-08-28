@@ -430,6 +430,6 @@ export async function revealDaemonToken(id: string) {
     };
   }
   throw FlutterError.conflict(
-    "This node's token was shown at create and is not stored. Copy will work after the next successful heartbeat — do not reissue while the daemon is online.",
+    "No daemon token stored on this node. Recreate the node or wait for the daemon to heartbeat once.",
   );
 }

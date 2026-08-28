@@ -60,6 +60,8 @@ export async function loadConfig(): Promise<DaemonConfig> {
   const file = await readDaemonConfigFile();
   const fileUrl = (file?.panelUrl || "").replace(/\/+$/, "");
   const appUrl = env("APP_URL").replace(/\/+$/, "");
+  // systemd unit env wins over config.json so a tunnel URL can change without
+  // rewriting the file the installer generated.
   const panelUrl = (
     env("PANEL_URL") ||
     fileUrl ||

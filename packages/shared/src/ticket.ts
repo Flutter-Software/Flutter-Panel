@@ -32,6 +32,7 @@ export function signDaemonRequest(
     op: input.op,
     issuedAt,
     expiresAt: issuedAt + (input.ttlMs ?? DAEMON_REQUEST_TTL_MS),
+    // Stops a captured ticket from being a stable replay even inside the TTL.
     nonce: randomBytes(8).toString("hex"),
   };
   const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");

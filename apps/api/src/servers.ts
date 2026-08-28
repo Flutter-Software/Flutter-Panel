@@ -226,6 +226,7 @@ function toSpec(
     variables?: unknown;
   },
   allocation: { ip: string; port: number },
+  extraAllocations: { ip: string; port: number }[] = [],
 ): InstallSpec {
   return {
     uuid: server.uuid,
@@ -235,6 +236,7 @@ function toSpec(
     stopCommand: egg.stopCommand,
     installScript: egg.installScript,
     installImage: egg.installImage,
+    // Egg defaults first; the server's saved env wins on conflict.
     environment: { ...eggDefaults(egg), ...envRecord(server.environment) },
     limits: {
       memoryBytes: Math.max(0, server.memoryMb) * 1024 * 1024,
@@ -243,13 +245,59 @@ function toSpec(
       cpuPinning: Math.max(0, Number(server.cpuPinning) || 0),
     },
     allocation: { ip: allocation.ip, port: allocation.port },
+    allocations: extraAllocations.map((row) => ({ ip: row.ip, port: row.port })),
   };
+}
+
+async function extraAllocationsFor(serverId: string, primaryId: string) {
+  const rows = await Allocation.find({ serverId, _id: { $ne: primaryId } }).sort({ port: 1 });
+  return rows.map((row) => ({ ip: row.ip, port: row.port }));
+}
+
+async function specFor(
+  server: Parameters<typeof toSpec>[0] & { _id: { toString(): string }; allocationId: { toString(): string } },
+  egg: Parameters<typeof toSpec>[1],
+  allocation: Parameters<typeof toSpec>[2],
+) {
+  return toSpec(
+    server,
+    egg,
+    allocation,
+    await extraAllocationsFor(server._id.toString(), server.allocationId.toString()),
+  );
+}
+
+async function assignExtraAllocations(
+  serverId: string,
+  nodeId: string,
+  primaryId: string,
+  extraIds: string[],
+) {
+  const unique = [...new Set(extraIds)].filter((id) => id !== primaryId);
+  const rows = unique.length ? await Allocation.find({ _id: { $in: unique } }) : [];
+  if (rows.length !== unique.length) throw FlutterError.notFound("Allocation not found");
+  for (const row of rows) {
+    if (row.nodeId.toString() !== nodeId) {
+      throw FlutterError.validation("Allocation does not belong to this node");
+    }
+    if (row.serverId && row.serverId.toString() !== serverId) {
+      throw FlutterError.conflict("Allocation is already assigned");
+    }
+  }
+  await Allocation.updateMany(
+    { serverId, _id: { $nin: [primaryId, ...unique] } },
+    { $set: { serverId: null } },
+  );
+  if (unique.length) {
+    await Allocation.updateMany({ _id: { $in: unique } }, { $set: { serverId } });
+  }
 }
 
 export async function listClientServers(viewerId: string, admin: boolean) {
   const subs = admin ? [] : await Subuser.find({ userId: viewerId });
   const sharedIds = subs.map((row) => row.serverId);
   const permByServer = new Map(subs.map((row) => [row.serverId.toString(), row.permissions.map(String)]));
+  // Admin dashboard reuses the client payload. Empty query = every server.
   const query = admin ? {} : { $or: [{ ownerId: viewerId }, { _id: { $in: sharedIds } }] };
   const rows = await Server.find(query).sort({ name: 1 });
   const relatedDocs = await relatedMany(rows);
@@ -330,6 +378,12 @@ export async function createServer(body: unknown, actorId: string) {
     environment,
   });
   await Allocation.updateOne({ _id: allocation._id }, { $set: { serverId: row._id } });
+  await assignExtraAllocations(
+    row._id.toString(),
+    node._id.toString(),
+    allocation._id.toString(),
+    parsed.data.allocationIds ?? [],
+  );
   void runInstall(row._id.toString());
   return toClientServer(row, await related(row), actorId, ["*"]);
 }
@@ -373,6 +427,15 @@ export async function updateServer(serverId: string, body: unknown, actorId: str
     await Allocation.updateOne({ _id: server.allocationId }, { $set: { serverId: null } });
     await Allocation.updateOne({ _id: next._id }, { $set: { serverId: server._id } });
     server.allocationId = next._id;
+  }
+
+  if (parsed.data.allocationIds) {
+    await assignExtraAllocations(
+      server._id.toString(),
+      server.nodeId.toString(),
+      server.allocationId.toString(),
+      parsed.data.allocationIds,
+    );
   }
 
   await server.save();
@@ -420,7 +483,7 @@ export async function powerServer(
 
   server.status = action === "start" || action === "restart" ? "starting" : "stopping";
   await server.save();
-  const spec = toSpec(server, docs.egg, docs.allocation);
+  const spec = await specFor(server, docs.egg, docs.allocation);
   const nodeId = server.nodeId.toString();
   const id = server._id.toString();
   void finishPower(id, nodeId, spec, action);
@@ -478,7 +541,7 @@ async function runInstall(serverId: string) {
     }
     server.status = "installing";
     await server.save();
-    await installOnNode(server.nodeId.toString(), toSpec(server, docs.egg, docs.allocation));
+    await installOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation));
     server.status = "offline";
     await server.save();
   } catch (error) {
@@ -601,7 +664,7 @@ export async function serverBackups(
     const docs = await related(server);
     if (docs.egg && docs.allocation) {
       try {
-        await powerOnNode(server.nodeId.toString(), toSpec(server, docs.egg, docs.allocation), "stop");
+        await powerOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation), "stop");
       } catch {
         /* already offline */
       }
@@ -657,7 +720,7 @@ export async function applyPowerDirect(serverId: string, action: PowerAction) {
   server.status = action === "start" || action === "restart" ? "starting" : "stopping";
   await server.save();
   try {
-    const result = await powerOnNode(server.nodeId.toString(), toSpec(server, docs.egg, docs.allocation), action);
+    const result = await powerOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation), action);
     const row = await Server.findById(serverId);
     if (!row || row.status === "installing") return;
     row.status = result?.status === "running" ? "running" : "offline";

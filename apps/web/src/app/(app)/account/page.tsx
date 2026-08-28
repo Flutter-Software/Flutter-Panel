@@ -1,178 +1,106 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { Check, X } from "lucide-react";
-import { Box, Center, Group, PasswordInput, Progress, Text } from "@mantine/core";
-import { PASSWORD_MIN_LENGTH } from "@flutter-software/shared";
+import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/auth-provider";
-import { TwoFactorCard } from "@/components/two-factor-card";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Field, Input } from "@/components/ui";
 import { api } from "@/lib/api";
+import type { PublicUser } from "@flutter-software/shared";
+import { SettingsSection } from "./settings-nav";
 
-function PasswordRequirement({ meets, label }: { meets: boolean; label: string }) {
-  return (
-    <Text component="div" c={meets ? "teal" : "red"} mt={5} size="sm">
-      <Center inline>
-        {meets ? <Check size={14} strokeWidth={1.5} /> : <X size={14} strokeWidth={1.5} />}
-        <Box ml={7}>{label}</Box>
-      </Center>
-    </Text>
-  );
+function initialsFromEmail(email: string) {
+  const local = (email.split("@")[0] ?? "").replace(/[^a-zA-Z]/g, "");
+  return (local.slice(0, 2) || "??").toUpperCase();
 }
 
-const requirements = [
-  { re: /[0-9]/, label: "Includes number" },
-  { re: /[a-z]/, label: "Includes lowercase letter" },
-  { re: /[A-Z]/, label: "Includes uppercase letter" },
-  { re: /[$&+,:;=?@#|'<>.^*()%!-]/, label: "Includes special symbol" },
-];
-
-function getStrength(password: string) {
-  let multiplier = password.length >= PASSWORD_MIN_LENGTH ? 0 : 1;
-  for (const requirement of requirements) {
-    if (!requirement.re.test(password)) multiplier += 1;
-  }
-  return Math.max(100 - (100 / (requirements.length + 1)) * multiplier, 0);
-}
-
-export default function AccountPage() {
+export default function AccountProfilePage() {
   const { user, setUser } = useAuth();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [username, setUsername] = useState(user?.username ?? "");
+  const [email, setEmail] = useState(user?.email ?? "");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const strength = getStrength(password);
-  const strengthColor = strength > 80 ? "teal" : strength > 50 ? "yellow" : "red";
+  useEffect(() => {
+    if (!user) return;
+    setUsername(user.username);
+    setEmail(user.email);
+  }, [user]);
 
-  async function onResetPassword(event: FormEvent<HTMLFormElement>) {
+  async function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSuccess(null);
-    if (password !== confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
     setPending(true);
     try {
-      await api("/api/v1/auth/password", {
-        method: "POST",
-        body: JSON.stringify({ currentPassword, password, confirmPassword }),
+      const result = await api<{ data: { user: PublicUser } }>("/api/v1/auth/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ username, email }),
       });
-      setCurrentPassword("");
-      setPassword("");
-      setConfirmPassword("");
-      setSuccess("Password updated. Other signed-in sessions have been signed out.");
+      setUser(result.data.user);
+      setSuccess("Profile saved.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reset password");
+      setError(err instanceof Error ? err.message : "Could not save profile");
     } finally {
       setPending(false);
     }
   }
 
+  const initials = initialsFromEmail(user?.email ?? email);
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Account</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Profile for the signed-in panel user.
-        </p>
-      </div>
-      <div className="grid items-start gap-4 md:grid-cols-2">
-        <Card className="p-5">
-          <h2 className="text-sm font-semibold">Profile</h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Username</dt>
-              <dd>{user?.username ?? "—"}</dd>
+    <SettingsSection title="Profile" description="Manage the identity attached to your Flutter account.">
+      <Card className="p-5 sm:p-6">
+        <h3 className="text-sm font-semibold">Identity</h3>
+        <div className="mt-5 flex items-center gap-4">
+          <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary text-lg font-semibold text-primary-foreground">
+            {initials}
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="truncate font-medium text-primary">{user?.email ?? "—"}</p>
+              {user?.role === "admin" ? (
+                <span className="rounded-md bg-primary px-1.5 py-0.5 text-[11px] font-semibold text-primary-foreground">
+                  admin
+                </span>
+              ) : null}
             </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Email</dt>
-              <dd>{user?.email ?? "—"}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Role</dt>
-              <dd className="capitalize">{user?.role ?? "—"}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">2FA</dt>
-              <dd>{user?.totpEnabled ? "On" : "Off"}</dd>
-            </div>
-          </dl>
-        </Card>
-        <Card className="p-5">
-          <h2 className="text-sm font-semibold">Reset password</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Choose a new password for this account. You will stay signed in here.
-          </p>
-          <form className="mt-4 space-y-4" onSubmit={(event) => void onResetPassword(event)}>
-            <PasswordInput
-              label="Current password"
-              required
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(event) => setCurrentPassword(event.currentTarget.value)}
-            />
-            <div>
-              <PasswordInput
-                label="New password"
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Avatars are generated from your email initials.
+            </p>
+          </div>
+        </div>
+        <form className="mt-6 space-y-5" onSubmit={(event) => void onSave(event)}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Display name">
+              <Input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="Your name"
+                autoComplete="username"
                 required
-                autoComplete="new-password"
-                value={password}
-                onChange={(event) => setPassword(event.currentTarget.value)}
-                minLength={PASSWORD_MIN_LENGTH}
+                minLength={3}
+                maxLength={32}
               />
-              <Group gap={5} grow mt="xs" mb="md">
-                {Array(4)
-                  .fill(0)
-                  .map((_, index) => (
-                    <Progress
-                      styles={{ section: { transitionDuration: "0ms" } }}
-                      value={
-                        password.length > 0 && index === 0
-                          ? 100
-                          : strength >= ((index + 1) / 4) * 100
-                            ? 100
-                            : 0
-                      }
-                      color={strengthColor}
-                      key={index}
-                      size={4}
-                      aria-label={`Password strength segment ${index + 1}`}
-                    />
-                  ))}
-              </Group>
-              <PasswordRequirement
-                label={`Has at least ${PASSWORD_MIN_LENGTH} characters`}
-                meets={password.length >= PASSWORD_MIN_LENGTH}
+            </Field>
+            <Field label="Email">
+              <Input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
+                required
               />
-              {requirements.map((requirement) => (
-                <PasswordRequirement
-                  key={requirement.label}
-                  label={requirement.label}
-                  meets={requirement.re.test(password)}
-                />
-              ))}
-            </div>
-            <PasswordInput
-              label="Confirm new password"
-              required
-              autoComplete="new-password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.currentTarget.value)}
-              minLength={PASSWORD_MIN_LENGTH}
-            />
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-            {success ? <p className="text-sm text-status-running">{success}</p> : null}
+            </Field>
+          </div>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {success ? <p className="text-sm text-status-running">{success}</p> : null}
+          <div className="flex justify-end">
             <Button type="submit" disabled={pending}>
-              {pending ? "Updating…" : "Reset password"}
+              {pending ? "Saving…" : "Save changes"}
             </Button>
-          </form>
-        </Card>
-        <TwoFactorCard enabled={Boolean(user?.totpEnabled)} onUser={setUser} />
-      </div>
-    </div>
+          </div>
+        </form>
+      </Card>
+    </SettingsSection>
   );
 }

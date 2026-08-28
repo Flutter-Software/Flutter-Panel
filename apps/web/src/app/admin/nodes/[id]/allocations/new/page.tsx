@@ -6,9 +6,10 @@ import { Globe, HardDrive, Layers, MemoryStick, Network, Plug } from "lucide-rea
 import { parsePortSpec } from "@flutter-software/shared";
 import { AdminError } from "@/components/admin-table";
 import {
-  AdminCreateFooter,
   AdminCreateHeader,
   AdminSection,
+  SaveIsland,
+  isDirty,
 } from "@/components/admin-create";
 import { Card, Field, Input, Textarea } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -38,6 +39,18 @@ export default function CreateAllocationsPage() {
   const [alias, setAlias] = useState("");
   const [ports, setPorts] = useState("");
   const [notes, setNotes] = useState("");
+  const dirty = isDirty(
+    { ip, alias, ports, notes },
+    { ip: "0.0.0.0", alias: "", ports: "", notes: "" },
+  );
+
+  function onCancel() {
+    setIp("0.0.0.0");
+    setAlias("");
+    setPorts("");
+    setNotes("");
+    setActionError(null);
+  }
 
   const preview = useMemo(() => {
     const parsed = parsePortSpec(ports);
@@ -189,8 +202,9 @@ export default function CreateAllocationsPage() {
         </AdminSection>
       </div>
 
-      <AdminCreateFooter
-        cancelHref={backHref}
+      <SaveIsland
+        visible={dirty || pending}
+        onCancel={onCancel}
         submitLabel="Add allocations"
         pendingLabel="Adding…"
         pending={pending}

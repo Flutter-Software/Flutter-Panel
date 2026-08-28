@@ -25,6 +25,8 @@ const envSchema = z.object({
   COOKIE_SECURE: z
     .enum(["true", "false"])
     .optional()
+    // z.enum optional + transform: missing stays undefined, "false" must not
+    // become true. Empty string is stripped earlier.
     .transform((value) => value === "true"),
   SMTP_HOST: z.preprocess(emptyToUndef, z.string().min(1).optional()),
   SMTP_PORT: z.preprocess(emptyToUndef, z.coerce.number().int().min(1).max(65535).optional()),
@@ -46,10 +48,6 @@ export function env(): Env {
   }
   cached = parsed.data;
   return cached;
-}
-
-export function isProduction() {
-  return env().NODE_ENV === "production";
 }
 
 export function isLoopbackHost(hostname: string) {

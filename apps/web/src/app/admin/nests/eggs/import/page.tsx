@@ -4,7 +4,7 @@ import { Suspense, useMemo, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FileJson, Upload } from "lucide-react";
 import { AdminError, AdminFormPage, ListSkeleton } from "@/components/admin-table";
-import { AdminCreateFooter, AdminCreateHeader, AdminSection } from "@/components/admin-create";
+import { AdminCreateHeader, AdminSection, SaveIsland, isDirty } from "@/components/admin-create";
 import { Field, Input, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
@@ -23,10 +23,21 @@ function ImportEggInner() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const resolvedNestId = nestId || nests[0]?.id || "";
+  const dirty = isDirty(
+    { nestId, jsonText },
+    { nestId: search.get("nestId") ?? "", jsonText: "" },
+  );
 
   const parsed = useMemo(() => parseEggJson(jsonText), [jsonText]);
 
   const selectedNest = nests.find((nest) => nest.id === resolvedNestId);
+
+  function onCancel() {
+    setNestId(search.get("nestId") ?? "");
+    setJsonText("");
+    setFileName(null);
+    setError(null);
+  }
 
   async function onFile(file: File | undefined) {
     if (!file) return;
@@ -133,8 +144,9 @@ function ImportEggInner() {
         </AdminSection>
       </div>
 
-      <AdminCreateFooter
-        cancelHref="/admin/nests"
+      <SaveIsland
+        visible={dirty || pending}
+        onCancel={onCancel}
         submitLabel="Import egg"
         pendingLabel="Importing…"
         pending={pending}
