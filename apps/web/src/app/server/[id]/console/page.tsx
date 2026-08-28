@@ -1,7 +1,7 @@
 "use client";
 
-import { use, useEffect, useRef, useState, type FormEvent, type UIEvent } from "react";
-import { Play, RotateCcw, Square } from "lucide-react";
+import { use, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type UIEvent } from "react";
+import { ChevronDown, Play, RotateCcw, Square } from "lucide-react";
 import { Button, Card } from "@/components/ui";
 import { StatGraph } from "@/components/status";
 import { useServerRecord } from "@/components/server-frame";
@@ -163,6 +163,7 @@ export default function ConsolePage({
   const [, setTick] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  const ignoreScroll = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const lastNet = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const liveGraphs = useRef(false);
@@ -422,15 +423,36 @@ export default function ConsolePage({
     };
   }, [id]);
 
-  useEffect(() => {
+  function scrollToBottom(behavior: ScrollBehavior = "auto") {
     const el = scroller.current;
-    if (!el || !stickToBottom.current) return;
-    el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    ignoreScroll.current = true;
+    stickToBottom.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    if (behavior === "smooth") {
+      window.setTimeout(() => {
+        ignoreScroll.current = false;
+      }, 400);
+      return;
+    }
+    requestAnimationFrame(() => {
+      if (scroller.current && stickToBottom.current) {
+        scroller.current.scrollTop = scroller.current.scrollHeight;
+      }
+      ignoreScroll.current = false;
+    });
+  }
+
+  useLayoutEffect(() => {
+    if (!stickToBottom.current) return;
+    scrollToBottom();
   }, [lines]);
 
   function onScroll(event: UIEvent<HTMLDivElement>) {
+    if (ignoreScroll.current) return;
     const el = event.currentTarget;
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    stickToBottom.current = pinned;
   }
 
   function applyStatus(status: ServerStatus) {
@@ -563,24 +585,35 @@ export default function ConsolePage({
           <div className="border-b border-border px-3 py-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Console</p>
           </div>
-          <div
-            ref={scroller}
-            onScroll={onScroll}
-            className="terminal-scroll h-[32rem] overflow-y-auto bg-background p-4 font-mono text-[13px] leading-6 text-foreground"
-          >
-            {lines.length === 0 ? (
-              <div className="text-muted-foreground">
-                {running || starting
-                  ? "Waiting for output…"
-                  : installing
-                    ? "Install is running on the daemon. Output appears here after the container starts."
-                    : "Server is offline. Press Start to boot the container."}
-              </div>
-            ) : (
-              lines.map((line, index) => (
-                <ConsoleLine key={`${index}-${line.slice(0, 24)}`} line={line} />
-              ))
-            )}
+          <div className="relative">
+            <div
+              ref={scroller}
+              onScroll={onScroll}
+              className="terminal-scroll h-[32rem] overflow-y-auto bg-background p-4 font-mono text-[13px] leading-6 text-foreground"
+            >
+              {lines.length === 0 ? (
+                <div className="text-muted-foreground">
+                  {running || starting
+                    ? "Waiting for output…"
+                    : installing
+                      ? "Install is running on the daemon. Output appears here after the container starts."
+                      : "Server is offline. Press Start to boot the container."}
+                </div>
+              ) : (
+                lines.map((line, index) => (
+                  <ConsoleLine key={`${index}-${line.slice(0, 24)}`} line={line} />
+                ))
+              )}
+            </div>
+            <button
+              type="button"
+              className="absolute bottom-3 right-3 z-10 flex size-8 items-center justify-center rounded-md bg-transparent text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Scroll to latest log"
+              title="Scroll to latest"
+              onClick={() => scrollToBottom("smooth")}
+            >
+              <ChevronDown className="size-4" />
+            </button>
           </div>
           <form className="flex items-center border-t border-border" onSubmit={(event) => void sendCommand(event)}>
             <span className="pl-4 font-mono text-sm font-semibold text-primary" aria-hidden>
