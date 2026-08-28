@@ -195,6 +195,7 @@ async function promoteStaging(sha) {
     await copyDirReplace(join(staging, "apps/web/.next"), join(root, "apps/web/.next"));
     await run("git", ["reset", "--hard", sha || "FETCH_HEAD"]);
     await run("git", ["submodule", "update", "--init", "--recursive"]).catch(() => undefined);
+    await run("node", ["scripts/link-shared.mjs"]);
     return;
   }
   await cp(staging, root, {
@@ -202,6 +203,7 @@ async function promoteStaging(sha) {
     force: true,
     filter: (from) => !preserveLive(relative(staging, from).split(sep).join("/")),
   });
+  await run("node", ["scripts/link-shared.mjs"]);
 }
 
 async function restartPanel() {

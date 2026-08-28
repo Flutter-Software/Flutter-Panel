@@ -1,20 +1,30 @@
-import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { lstatSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const target = join(root, "packages", "shared");
-const apps = ["web", "api", "daemon"];
+const dests = [
+  join(root, "node_modules", "@flutter-software", "shared"),
+  ...["web", "api", "daemon"].map((app) =>
+    join(root, "apps", app, "node_modules", "@flutter-software", "shared"),
+  ),
+];
 
-for (const app of apps) {
-  const appDir = join(root, "apps", app);
-  if (!existsSync(appDir)) continue;
-  const dest = join(appDir, "node_modules", "@flutter-software", "shared");
-  mkdirSync(dirname(dest), { recursive: true });
-  if (existsSync(dest)) {
-    rmSync(dest, { recursive: true, force: true });
+function present(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
   }
-  symlinkSync(target, dest, "junction");
 }
 
-console.log("Linked @flutter-software/shared into app node_modules");
+for (const dest of dests) {
+  mkdirSync(dirname(dest), { recursive: true });
+  if (present(dest)) rmSync(dest, { recursive: true, force: true });
+  const win = process.platform === "win32";
+  symlinkSync(win ? target : relative(dirname(dest), target), dest, win ? "junction" : undefined);
+}
+
+console.log("Linked @flutter-software/shared into app and root node_modules");

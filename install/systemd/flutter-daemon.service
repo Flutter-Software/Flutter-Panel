@@ -16,6 +16,7 @@ Environment=DAEMON_CONFIG=/opt/flutter/apps/daemon/data/config.json
 Environment=DAEMON_DATA_DIR=/var/lib/flutter
 Environment=NO_PROXY=127.0.0.1,localhost,::1
 Environment=no_proxy=127.0.0.1,localhost,::1
+ExecStartPre=/usr/bin/node /opt/flutter/scripts/link-shared.mjs
 ExecStart=/usr/bin/npm run start -w @flutter-software/daemon
 Restart=on-failure
 RestartSec=3
