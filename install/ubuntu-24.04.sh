@@ -20,6 +20,7 @@
 #
 # Remote game nodes: run install/ubuntu-node.sh on those hosts (no panel).
 # Wipe a test install: sudo bash install/wipe-local.sh --yes
+# Coming from Pterodactyl: sudo bash install/wipe-pterodactyl.sh --yes
 set -euo pipefail
 
 FLUTTER_REPO="${FLUTTER_REPO:-https://github.com/Flutter-Software/Flutter-Panel.git}"
@@ -182,6 +183,13 @@ if [[ "$INSTALL_DAEMON" -eq 1 && "$YES" -eq 0 ]]; then
   if ! confirm "Install the game-node daemon on this machine?" "y"; then
     INSTALL_DAEMON=0
   fi
+fi
+
+if systemctl is-active --quiet wings 2>/dev/null || pgrep -x wings >/dev/null 2>&1; then
+  die "Pterodactyl Wings is running (it binds :8080). Remove it first: sudo bash ${SCRIPT_DIR}/wipe-pterodactyl.sh --yes"
+fi
+if [[ -d /etc/pterodactyl || -d /var/www/pterodactyl || -x /usr/local/bin/wings ]]; then
+  warn "Pterodactyl files are still on this host. Recommended: sudo bash ${SCRIPT_DIR}/wipe-pterodactyl.sh --yes"
 fi
 
 log "Installing Flutter to ${PREFIX}"

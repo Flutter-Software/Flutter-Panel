@@ -2,6 +2,8 @@
 
 Self-hosted game-server control panel. **Flutter is the product name** — this is not Google Flutter / Dart, and it is not a fork of Pterodactyl or Pelican.
 
+Install walkthrough: [https://docs.flutter.software](https://docs.flutter.software).
+
 Stack: Next.js 15 dashboard, Hono API, MongoDB (Mongoose + Prisma), Redis, TypeScript daemon talking to the Docker Engine API.
 
 ## Install on Ubuntu 24.04
@@ -25,6 +27,12 @@ sudo bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh
 ```
 
 The script asks for the public panel URL, whether to issue a Let's Encrypt certificate, and whether to install the game-node daemon on this machine. It then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`.
+
+If this machine already ran **Pterodactyl or Pelican**, Wings still binds **8080** and Docker game ports. Remove it first:
+
+```bash
+sudo bash /usr/local/src/flutter-panel/install/wipe-pterodactyl.sh --yes
+```
 
 Non-interactive HTTPS example:
 

@@ -8,6 +8,7 @@ Run these as **root** on Ubuntu. Pick one script — do not stack the panel inst
 | [`ubuntu-node.sh`](ubuntu-node.sh) | A second machine **with a public IP** | Docker + daemon only (`/opt/flutter-node`) |
 | [`connect-home-node.sh`](connect-home-node.sh) | A home PC, WSL, or anything **without** a public IP | Same daemon, plus a Cloudflare quick tunnel so the panel can reach port 8080 |
 | [`wipe-local.sh`](wipe-local.sh) | A test box you want to reset | Full wipe, or `--daemon-only` to remove the game node on this Linux host |
+| [`wipe-pterodactyl.sh`](wipe-pterodactyl.sh) | A host that still has Pterodactyl or Pelican | Force-remove Wings, panel, Docker game containers, and port bindings (8080 / 2022) |
 
 **Panel walkthrough** (DNS, Let's Encrypt, first admin): [../README.md](../README.md).
 
@@ -53,3 +54,21 @@ To remove the daemon from this Linux host and start over:
 ```bash
 sudo bash install/wipe-local.sh --yes --daemon-only
 ```
+
+## Coming from Pterodactyl
+
+Wings owns **8080** (same port as the Flutter daemon) and Docker game-port bindings. Wipe it before installing Flutter:
+
+```bash
+sudo bash install/wipe-pterodactyl.sh --yes
+```
+
+That stops Wings and `pteroq`, force-deletes Pterodactyl/Pelican containers and the `pterodactyl_nw` network, removes nginx panel sites, and deletes `/var/www/pterodactyl` and `/etc/pterodactyl`. Docker Engine and nginx stay installed.
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--wings-only` | Remove Wings + game containers; leave the PHP panel files |
+| `--keep-data` | Leave `/var/lib/pterodactyl` (server files) |
+| `--drop-db` | Drop the panel MySQL/MariaDB database and user |
+| `--purge-php` | `apt-get purge` PHP and composer |
+| `--wipe-certs` | Delete Let's Encrypt certs whose name contains ptero/pelican |

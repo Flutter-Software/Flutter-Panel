@@ -6,6 +6,7 @@ import {
   nestCreateSchema,
   nestUpdateSchema,
 } from "@flutter-software/shared";
+import { PROJECT_ZOMBOID_EGG, PROJECT_ZOMBOID_NEST } from "./catalog/project-zomboid";
 import { Egg, Nest, Server } from "./db/models";
 
 function asString(value: unknown, fallback = "") {
@@ -398,6 +399,18 @@ export async function seedDefaults() {
         { key: "VERSION", default: "LATEST", description: "Minecraft version" },
         { key: "MEMORY", default: "2G", description: "JVM memory" },
       ],
+    });
+  }
+
+  let zomboid = await Nest.findOne({ name: PROJECT_ZOMBOID_NEST.name });
+  if (!zomboid) {
+    zomboid = await Nest.create(PROJECT_ZOMBOID_NEST);
+  }
+  if (!(await Egg.findOne({ nestId: zomboid._id, name: PROJECT_ZOMBOID_EGG.name }))) {
+    await Egg.create({
+      nestId: zomboid._id,
+      ...PROJECT_ZOMBOID_EGG,
+      installScript: unixNewlines(PROJECT_ZOMBOID_EGG.installScript),
     });
   }
 }

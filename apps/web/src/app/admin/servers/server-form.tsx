@@ -343,7 +343,7 @@ export function ServerForm({
           </Field>
           <Field
             label="Additional allocations"
-            hint="Optional extra ports assigned to this server. Applied on the next start."
+            hint="Optional extra ports (TCP and UDP) assigned to this server. Applied on the next start."
           >
             <SearchSelect
               multiple

@@ -257,7 +257,8 @@ function specFingerprint(spec: InstallSpec) {
       JSON.stringify({
         restart: "no",
         cpuPolicy: 2,
-        init: true,
+        // 3 = Docker --init as the only tini; image ENTRYPOINT (often tini) is stripped.
+        init: 3,
         userBind: 2,
         image: spec.dockerImage,
         startup: spec.startup,
@@ -281,11 +282,13 @@ function dockerPortMap(spec: InstallSpec) {
   for (const row of [spec.allocation, ...(spec.allocations ?? [])]) {
     const port = Number(row.port) || 0;
     if (port <= 0) continue;
-    const key = `${port}/tcp`;
     const ip = row.ip?.trim() || "0.0.0.0";
     const hostIp = ip === "0.0.0.0" || ip === "*" || ip === "::" ? "" : ip;
-    exposed[key] = {};
-    bindings[key] = [{ HostIp: hostIp, HostPort: String(port) }];
+    for (const proto of ["tcp", "udp"] as const) {
+      const key = `${port}/${proto}`;
+      exposed[key] = {};
+      bindings[key] = [{ HostIp: hostIp, HostPort: String(port) }];
+    }
   }
   return { exposed, bindings };
 }
@@ -337,6 +340,10 @@ export function runtimeEnvironment(spec: InstallSpec): Record<string, string> {
     P_SERVER_UUID: spec.uuid,
     P_SERVER_ALLOCATION_LIMIT: String(spec.allocations?.length ?? 0),
   };
+  (spec.allocations ?? []).forEach((row, index) => {
+    const extra = Number(row.port) || 0;
+    if (extra > 0) merged[`SERVER_PORT_${index + 1}`] = String(extra);
+  });
   for (const [key, value] of Object.entries(merged)) {
     merged[key] = value.replace(/\r/g, "");
   }
@@ -756,8 +763,11 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       const after = await inspectContainer(uuid, true);
       if (after?.State.Running) return done("running");
       const code = after?.State.ExitCode ?? 0;
+      const dockerError = after?.State.Error?.trim();
       if (after?.State.OOMKilled) notice(uuid, "Server ran out of memory");
+      else if (dockerError) notice(uuid, dockerError);
       else if (code !== 0) notice(uuid, `Server crashed (exit ${code})`);
+      else notice(uuid, "Server process exited immediately.");
       return done("offline");
     };
 
@@ -795,6 +805,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
     const env = runtimeEnvironment(merged);
     const startup = env.STARTUP?.trim() || merged.startup?.trim() || DEFAULT_STARTUP;
     const command = startup.startsWith("exec ") ? startup : `exec ${startup}`;
+    const hasStartup = Boolean(merged.startup?.trim() || env.STARTUP?.trim());
     const ports = dockerPortMap(merged);
     const compute = cpuLayout(merged.limits.cpuPercent, merged.limits.cpuPinning ?? 0, uuid);
 
@@ -802,7 +813,11 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       name,
       Image: image,
       User: identity.user,
-      ...(merged.startup?.trim() || env.STARTUP?.trim() ? { Cmd: ["sh", "-c", command] } : {}),
+      // Yolk images (steamcmd, java, …) ENTRYPOINT tini. Docker Init is PID 1;
+      // leaving that entrypoint nests a second tini which warns and can exit
+      // before the startup command runs. Images with an empty startup (itzg)
+      // keep their own entrypoint.
+      ...(hasStartup ? { Entrypoint: ["/bin/sh", "-c"], Cmd: [command] } : {}),
       Tty: true,
       OpenStdin: true,
       AttachStdin: true,

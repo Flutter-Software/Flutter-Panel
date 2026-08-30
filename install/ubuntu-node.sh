@@ -136,6 +136,13 @@ if [[ "$LISTEN_URL" == *127.0.0.1* || "$LISTEN_URL" == *localhost* ]]; then
   warn "listen-url is loopback. The panel on another host cannot reach this daemon."
 fi
 
+if systemctl is-active --quiet wings 2>/dev/null || pgrep -x wings >/dev/null 2>&1; then
+  die "Pterodactyl Wings is running (it binds :8080). Remove it first: sudo bash install/wipe-pterodactyl.sh --yes"
+fi
+if [[ -d /etc/pterodactyl || -x /usr/local/bin/wings ]]; then
+  warn "Pterodactyl/Wings files are still on this host. Recommended: sudo bash install/wipe-pterodactyl.sh --yes --wings-only"
+fi
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y --no-install-recommends \

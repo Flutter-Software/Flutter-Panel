@@ -1,0 +1,152 @@
+{
+  "_comment": "Flutter Panel egg. Import via Admin → Nests → Import egg.",
+  "meta": {
+    "version": "PTDL_v2",
+    "update_url": null
+  },
+  "exported_at": "2026-08-30T15:30:00-04:00",
+  "name": "Project Zomboid",
+  "author": "flutter.software",
+  "description": "SteamCMD dedicated server. Primary allocation is DefaultPort (UDP 16261); add UDPPort (16262) as an extra allocation. Give the JVM 4-8 GB.",
+  "features": [],
+  "docker_images": {
+    "ghcr.io/parkervcp/steamcmd:debian": "ghcr.io/parkervcp/steamcmd:debian"
+  },
+  "file_denylist": [],
+  "startup": "bash ./zomboid-start.sh",
+  "config": {
+    "files": "{}",
+    "startup": "{\"done\":\"SERVER STARTED\"}",
+    "logs": "{}",
+    "stop": "quit"
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\nset -euo pipefail\n\n# Flutter mounts this directory as /home/container when the server runs.\nAPP_ID=\"${SRCDS_APPID:-380870}\"\nSTEAM_USER=\"${STEAM_USER:-}\"\nSTEAM_PASS=\"${STEAM_PASS:-}\"\nSTEAM_AUTH=\"${STEAM_AUTH:-}\"\n\nif [[ -z \"${STEAM_USER}\" || -z \"${STEAM_PASS}\" ]]; then\n  echo \"[flutter] SteamCMD anonymous login (dedicated server app ${APP_ID})\"\n  LOGIN=(+login anonymous)\nelse\n  echo \"[flutter] SteamCMD login as ${STEAM_USER}\"\n  LOGIN=(+login \"${STEAM_USER}\" \"${STEAM_PASS}\" \"${STEAM_AUTH}\")\nfi\n\ncd /tmp\nmkdir -p /mnt/server/steamcmd /mnt/server/steamapps\ncurl -fsSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\ntar -xzf steamcmd.tar.gz -C /mnt/server/steamcmd\nrm -f steamcmd.tar.gz\n\nexport HOME=/mnt/server\ncd /mnt/server/steamcmd\n\nBETA_ARGS=()\nif [[ -n \"${SRCDS_BETAID:-}\" ]]; then\n  BETA_ARGS+=(-beta \"${SRCDS_BETAID}\")\nfi\nif [[ -n \"${SRCDS_BETAPASS:-}\" ]]; then\n  BETA_ARGS+=(-betapassword \"${SRCDS_BETAPASS}\")\nfi\n\nset +u\n./steamcmd.sh +@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 \\\n  +force_install_dir /mnt/server \\\n  \"${LOGIN[@]}\" \\\n  +app_update \"${APP_ID}\" \"${BETA_ARGS[@]}\" validate +quit\nset -u\n\nmkdir -p /mnt/server/.steam/sdk32 /mnt/server/.steam/sdk64\nif [[ -f linux32/steamclient.so ]]; then\n  cp -f linux32/steamclient.so /mnt/server/.steam/sdk32/steamclient.so\nfi\nif [[ -f linux64/steamclient.so ]]; then\n  cp -f linux64/steamclient.so /mnt/server/.steam/sdk64/steamclient.so\nfi\n\nchmod +x /mnt/server/ProjectZomboid64 /mnt/server/start-server.sh 2>/dev/null || true\nmkdir -p /mnt/server/.cache/Server /mnt/server/.cache/tmp\n\n# Runtime launcher reads Flutter env vars on each start (ports, memory, workshop).\ncat > /mnt/server/zomboid-start.sh << 'LAUNCH'\n#!/bin/bash\nset -e\ncd /home/container\nexport HOME=/home/container\nexport PATH=\"./jre64/bin:$PATH\"\nexport LD_LIBRARY_PATH=\"./linux64:./natives:.:./jre64/lib/amd64:${LD_LIBRARY_PATH}\"\nexport TMPDIR=\"/home/container/.cache/tmp\"\nmkdir -p \"$TMPDIR\" .cache/Server .steam/sdk64\n\nif [ ! -f ./ProjectZomboid64 ]; then\n  echo \"[flutter] ProjectZomboid64 is missing. Reinstall this server.\"\n  exit 1\nfi\nchmod +x ./ProjectZomboid64 2>/dev/null || true\n\nAPP_ID=\"${SRCDS_APPID:-380870}\"\nif [ \"${AUTO_UPDATE}\" = \"1\" ] && [ -x ./steamcmd/steamcmd.sh ]; then\n  echo \"[flutter] Updating Project Zomboid (app ${APP_ID})…\"\n  BETA_ARGS=()\n  [ -n \"${SRCDS_BETAID}\" ] && BETA_ARGS+=(-beta \"${SRCDS_BETAID}\")\n  [ -n \"${SRCDS_BETAPASS}\" ] && BETA_ARGS+=(-betapassword \"${SRCDS_BETAPASS}\")\n  ./steamcmd/steamcmd.sh +@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 \\\n    +force_install_dir /home/container +login anonymous \\\n    +app_update \"${APP_ID}\" \"${BETA_ARGS[@]}\" +quit\nfi\n\nUDP_PORT=\"${STEAM_PORT:-${SERVER_PORT_1:-}}\"\nif [ -z \"${UDP_PORT}\" ]; then\n  UDP_PORT=$((SERVER_PORT + 1))\nfi\n\nSERVER_NAME=\"${SERVER_NAME:-Flutter}\"\nPUBLIC_NAME=\"${PUBLIC_NAME:-$SERVER_NAME}\"\nINI=\".cache/Server/${SERVER_NAME}.ini\"\ntouch \"$INI\"\n\nupsert_ini() {\n  local key=\"$1\" value=\"$2\" file=\"$3\"\n  if grep -q \"^${key}=\" \"$file\" 2>/dev/null; then\n    sed -i \"s|^${key}=.*|${key}=${value}|\" \"$file\"\n  else\n    printf '%s=%s\\n' \"$key\" \"$value\" >> \"$file\"\n  fi\n}\n\nupsert_ini MaxPlayers \"${MAX_PLAYERS:-16}\" \"$INI\"\nupsert_ini PublicName \"${PUBLIC_NAME}\" \"$INI\"\nupsert_ini Password \"${SERVER_PASSWORD:-}\" \"$INI\"\nupsert_ini DefaultPort \"${SERVER_PORT}\" \"$INI\"\nupsert_ini UDPPort \"${UDP_PORT}\" \"$INI\"\nupsert_ini BackupsOnStart \"false\" \"$INI\"\nupsert_ini WorkshopItems \"${WORKSHOP_ITEMS:-}\" \"$INI\"\nupsert_ini Mods \"${MODS:-}\" \"$INI\"\n\nHEAP=\"${SERVER_MEMORY:-4096}\"\nif [ -z \"$HEAP\" ] || [ \"$HEAP\" = \"0\" ]; then HEAP=4096; fi\n\necho \"[flutter] Project Zomboid query ${SERVER_PORT}/udp  direct ${UDP_PORT}/udp  heap ${HEAP}m\"\nexport LD_PRELOAD=\"${LD_PRELOAD}:libjsig.so\"\nexec ./ProjectZomboid64 \\\n  -Xmx\"${HEAP}\"m \\\n  -port \"${SERVER_PORT}\" \\\n  -udpport \"${UDP_PORT}\" \\\n  -cachedir /home/container/.cache \\\n  -servername \"${SERVER_NAME}\" \\\n  -adminusername \"${ADMIN_USER:-admin}\" \\\n  -adminpassword \"${ADMIN_PASSWORD:-changeme}\"\nLAUNCH\nchmod +x /mnt/server/zomboid-start.sh\n\necho \"[flutter] Project Zomboid install finished.\"\n",
+      "container": "ghcr.io/parkervcp/installers:debian",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Server Name",
+      "description": "Internal world / config name (no spaces)",
+      "env_variable": "SERVER_NAME",
+      "default_value": "Flutter",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|alpha_num|max:64",
+      "field_type": "text"
+    },
+    {
+      "name": "Public Name",
+      "description": "Name shown in the server browser",
+      "env_variable": "PUBLIC_NAME",
+      "default_value": "Flutter Zomboid",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:64",
+      "field_type": "text"
+    },
+    {
+      "name": "Admin Username",
+      "description": "In-game admin username",
+      "env_variable": "ADMIN_USER",
+      "default_value": "admin",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:20",
+      "field_type": "text"
+    },
+    {
+      "name": "Admin Password",
+      "description": "In-game admin password. Change this before going public.",
+      "env_variable": "ADMIN_PASSWORD",
+      "default_value": "changeme",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:32",
+      "field_type": "text"
+    },
+    {
+      "name": "Join Password",
+      "description": "Join password (empty = public)",
+      "env_variable": "SERVER_PASSWORD",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:64",
+      "field_type": "text"
+    },
+    {
+      "name": "UDP Port",
+      "description": "UDPPort. Empty uses the first extra allocation, or query port + 1",
+      "env_variable": "STEAM_PORT",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:20",
+      "field_type": "text"
+    },
+    {
+      "name": "Max Players",
+      "description": "Max players (needs extra UDP ports above UDPPort)",
+      "env_variable": "MAX_PLAYERS",
+      "default_value": "16",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:20",
+      "field_type": "text"
+    },
+    {
+      "name": "Workshop Items",
+      "description": "Comma-separated Steam Workshop IDs",
+      "env_variable": "WORKSHOP_ITEMS",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:512",
+      "field_type": "text"
+    },
+    {
+      "name": "Mods",
+      "description": "Comma-separated mod IDs from those workshop items",
+      "env_variable": "MODS",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:512",
+      "field_type": "text"
+    },
+    {
+      "name": "Steam App ID",
+      "description": "Steam dedicated-server app ID",
+      "env_variable": "SRCDS_APPID",
+      "default_value": "380870",
+      "user_viewable": false,
+      "user_editable": false,
+      "rules": "required|string|max:20",
+      "field_type": "text"
+    },
+    {
+      "name": "Steam Beta Branch",
+      "description": "Steam beta branch (blank = default). Reinstall after change",
+      "env_variable": "SRCDS_BETAID",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:64",
+      "field_type": "text"
+    },
+    {
+      "name": "Auto Update",
+      "description": "Set to 1 to run SteamCMD before each start",
+      "env_variable": "AUTO_UPDATE",
+      "default_value": "0",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:20",
+      "field_type": "text"
+    }
+  ]
+}
