@@ -24,6 +24,19 @@ export type PowerAction = "start" | "stop" | "restart" | "kill";
 const DEFAULT_STARTUP =
   'while true; do echo "[flutter] $(date -u +%H:%M:%S) running"; sleep 5; done';
 
+/** Image tini is skipped (Docker Init is PID 1). Yolks then run /entrypoint.sh,
+ *  which evals $STARTUP. Generic images eval $STARTUP directly. */
+function startupWrapper() {
+  return [
+    "cd /home/container || exit 1",
+    "if [ -f /entrypoint.sh ]; then",
+    "  if command -v bash >/dev/null 2>&1; then exec bash /entrypoint.sh; fi",
+    "  exec sh /entrypoint.sh",
+    "fi",
+    'eval "$(printf \'%s\\n\' "$STARTUP" | sed -e \'s/{{/${/g\' -e \'s/}}/}/g\')"',
+  ].join("\n");
+}
+
 let notifyConsole: ((uuid: string, message: string) => void) | null = null;
 let resetConsole: ((uuid: string) => void) | null = null;
 
@@ -257,8 +270,8 @@ function specFingerprint(spec: InstallSpec) {
       JSON.stringify({
         restart: "no",
         cpuPolicy: 2,
-        // 3 = Docker --init as the only tini; image ENTRYPOINT (often tini) is stripped.
-        init: 3,
+        // 4 = run /entrypoint.sh under Docker init (skip nested image tini).
+        init: 4,
         userBind: 2,
         image: spec.dockerImage,
         startup: spec.startup,
@@ -347,7 +360,8 @@ export function runtimeEnvironment(spec: InstallSpec): Record<string, string> {
   for (const [key, value] of Object.entries(merged)) {
     merged[key] = value.replace(/\r/g, "");
   }
-  merged.STARTUP = substitute(merged.STARTUP || "", merged);
+  // Keep {{placeholders}} in STARTUP. Yolk entrypoint.sh converts them after it
+  // sets runtime vars (Arma CLIENT_MODS, etc.). Wings does the same.
   const layout = cpuLayout(spec.limits.cpuPercent, spec.limits.cpuPinning ?? 0, spec.uuid);
   return withCpuRuntimeEnv(merged, layout.cores);
 }
@@ -768,6 +782,7 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       else if (dockerError) notice(uuid, dockerError);
       else if (code !== 0) notice(uuid, `Server crashed (exit ${code})`);
       else notice(uuid, "Server process exited immediately.");
+      await noticeRecentLogs(uuid);
       return done("offline");
     };
 
@@ -803,9 +818,8 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
     if (existing) await removeContainer(uuid);
 
     const env = runtimeEnvironment(merged);
-    const startup = env.STARTUP?.trim() || merged.startup?.trim() || DEFAULT_STARTUP;
-    const command = startup.startsWith("exec ") ? startup : `exec ${startup}`;
-    const hasStartup = Boolean(merged.startup?.trim() || env.STARTUP?.trim());
+    const hasStartup = Boolean(merged.startup?.trim());
+    if (hasStartup && !env.STARTUP?.trim()) env.STARTUP = DEFAULT_STARTUP;
     const ports = dockerPortMap(merged);
     const compute = cpuLayout(merged.limits.cpuPercent, merged.limits.cpuPinning ?? 0, uuid);
 
@@ -813,11 +827,11 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
       name,
       Image: image,
       User: identity.user,
-      // Yolk images (steamcmd, java, …) ENTRYPOINT tini. Docker Init is PID 1;
-      // leaving that entrypoint nests a second tini which warns and can exit
-      // before the startup command runs. Images with an empty startup (itzg)
-      // keep their own entrypoint.
-      ...(hasStartup ? { Entrypoint: ["/bin/sh", "-c"], Cmd: [command] } : {}),
+      // Yolks ENTRYPOINT tini and CMD /entrypoint.sh. Docker Init is PID 1;
+      // run /entrypoint.sh ourselves so Arma/SteamCMD eggs can set runtime
+      // vars and eval $STARTUP. Images with an empty startup (itzg) keep
+      // their own entrypoint.
+      ...(hasStartup ? { Entrypoint: ["/bin/sh", "-c"], Cmd: [startupWrapper()] } : {}),
       Tty: true,
       OpenStdin: true,
       AttachStdin: true,
@@ -1257,6 +1271,19 @@ export async function getLogs(uuid: string, tail = 200, since?: number) {
     .map((line) => formatDockerLogLine(line))
     .filter((line) => line.length > 0);
   return { running: Boolean(info.State.Running), lines };
+}
+
+async function noticeRecentLogs(uuid: string) {
+  try {
+    const { lines } = await getLogs(uuid, 40);
+    for (const line of lines.slice(-20)) {
+      const body = line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, "").trim();
+      if (!body || body.startsWith("[Flutter]")) continue;
+      notice(uuid, body.slice(0, 500));
+    }
+  } catch {
+    /* container may already be gone */
+  }
 }
 
 export async function followLogs(
