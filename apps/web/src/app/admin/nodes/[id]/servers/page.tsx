@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useAdminNode } from "@/components/node-frame";
 import { Card } from "@/components/ui";
 import { statusMeta } from "@/components/status";
+import { LimitMb } from "@/components/unlimited";
 import { cn } from "@/lib/cn";
-import { formatLimitMb, type ServerStatus } from "@/lib/types";
+import type { ServerStatus } from "@/lib/types";
 
 const STATUS_PILL: Record<string, string> = {
   running: "bg-status-running/15 text-status-running",
@@ -50,8 +51,8 @@ export default function NodeServersPage() {
                 </div>
                 <p className="mt-1 font-mono text-xs text-muted-foreground">{server.allocation}</p>
               </Link>
-              <p className="text-sm text-muted-foreground">
-                {formatLimitMb(server.memoryMb)} RAM · {formatLimitMb(server.diskMb)} disk
+              <p className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                <LimitMb value={server.memoryMb} /> RAM · <LimitMb value={server.diskMb} /> disk
               </p>
             </div>
           </Card>

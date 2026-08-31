@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type UIEvent } from "react";
+import { use, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type UIEvent } from "react";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { Card } from "@/components/ui";
 import { StatGraph } from "@/components/status";
@@ -11,6 +11,7 @@ import { browserConsoleSocketUrl } from "@/lib/console-socket";
 import { formatLimitMb, formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/access";
+import { UnlimitedStat } from "@/components/unlimited";
 
 const MAX_LINES = 400;
 const HISTORY = 60;
@@ -158,7 +159,7 @@ function SideStat({
   barMax,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   detail?: string;
   barValue?: number;
   barMax?: number;
@@ -870,20 +871,26 @@ export default function ConsolePage({
           <SideStat label="Uptime" value={formatUptime(startedAt, Boolean(running))} />
           <SideStat
             label="CPU load"
-            value={cpuLimit > 0 ? `${cpuUsed.toFixed(1)}/${cpuLimit}%` : `${cpuUsed.toFixed(1)}% / ∞`}
+            value={
+              cpuLimit > 0 ? `${cpuUsed.toFixed(1)}/${cpuLimit}%` : <UnlimitedStat used={`${cpuUsed.toFixed(1)}%`} />
+            }
             barValue={cpuUsed}
             barMax={cpuLimit > 0 ? cpuLimit : 100}
           />
           <SideStat
             label="Memory"
-            value={memLimit > 0 ? `${memPct.toFixed(1)}/${100}%` : "∞"}
+            value={
+              memLimit > 0 ? `${memPct.toFixed(1)}/${100}%` : <UnlimitedStat used={formatMb(memUsed)} />
+            }
             detail={memLimit > 0 ? `${formatMb(memUsed)} / ${formatLimitMb(memLimit)}` : undefined}
             barValue={memLimit > 0 ? memUsed : undefined}
             barMax={memLimit > 0 ? memLimit : undefined}
           />
           <SideStat
             label="Disk"
-            value={diskLimit > 0 ? `${diskPct.toFixed(1)}/${100}%` : "∞"}
+            value={
+              diskLimit > 0 ? `${diskPct.toFixed(1)}/${100}%` : <UnlimitedStat used={formatMb(diskUsed)} />
+            }
             detail={diskLimit > 0 ? `${formatMb(diskUsed)} / ${formatLimitMb(diskLimit)}` : undefined}
             barValue={diskLimit > 0 ? diskUsed : undefined}
             barMax={diskLimit > 0 ? diskLimit : undefined}
@@ -898,7 +905,13 @@ export default function ConsolePage({
             label="CPU"
             value={cpuUsed}
             max={cpuLimit > 0 ? cpuLimit : 100}
-            display={`${cpuUsed.toFixed(1)}% / ${cpuLimit > 0 ? `${cpuLimit}%` : "∞"}`}
+            display={
+              cpuLimit > 0 ? (
+                `${cpuUsed.toFixed(1)}% / ${cpuLimit}%`
+              ) : (
+                <UnlimitedStat used={`${cpuUsed.toFixed(1)}%`} />
+              )
+            }
             series={series.cpu}
             className="text-primary"
           />
@@ -909,7 +922,13 @@ export default function ConsolePage({
             label="Memory"
             value={memUsed}
             max={memLimit > 0 ? memLimit : Math.max(memUsed, 1)}
-            display={memLimit > 0 ? `${formatMb(memUsed)} / ${formatLimitMb(memLimit)}` : "∞"}
+            display={
+              memLimit > 0 ? (
+                `${formatMb(memUsed)} / ${formatLimitMb(memLimit)}`
+              ) : (
+                <UnlimitedStat used={formatMb(memUsed)} />
+              )
+            }
             series={series.memory}
             className="text-status-running"
             warn={memLimit > 0}

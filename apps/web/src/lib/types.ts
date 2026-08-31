@@ -58,11 +58,11 @@ export function formatMb(value: number) {
 }
 
 export function formatLimitMb(value: number) {
-  return value > 0 ? formatMb(value) : "∞";
+  return value > 0 ? formatMb(value) : "";
 }
 
 export function formatCpuLimit(value: number) {
-  return value > 0 ? `${value}%` : "∞";
+  return value > 0 ? `${value}%` : "";
 }
 
 export function formatGiB(mb: number) {

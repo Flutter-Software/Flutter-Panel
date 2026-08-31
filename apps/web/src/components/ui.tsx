@@ -141,7 +141,7 @@ export function Field({
       <span className="flex items-center justify-between text-sm">
         <span>
           {label}
-          {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+          {required ? <span className="ml-0.5 text-muted-foreground">*</span> : null}
         </span>
         {extra}
       </span>

@@ -36,6 +36,18 @@ function envRecord(value: unknown): Record<string, string> {
   );
 }
 
+function processFrom(
+  server: { dockerImage?: string; startup?: string; stopCommand?: string },
+  egg: { dockerImage?: string; startup?: string; stopCommand?: string } | null,
+) {
+  const snapshotted = Boolean(server.dockerImage);
+  return {
+    dockerImage: snapshotted ? server.dockerImage ?? "" : (egg?.dockerImage ?? ""),
+    startup: snapshotted ? (server.startup ?? "") : (egg?.startup ?? ""),
+    stopCommand: snapshotted ? (server.stopCommand || "stop") : (egg?.stopCommand || "stop"),
+  };
+}
+
 function eggDefaults(egg: { variables?: unknown }): Record<string, string> {
   const variables = Array.isArray(egg.variables) ? egg.variables : [];
   const out: Record<string, string> = {};
@@ -109,6 +121,9 @@ export function toClientServer(
     cpuPinning?: number;
     databaseLimit?: number;
     backupsEnabled?: boolean;
+    dockerImage?: string;
+    startup?: string;
+    stopCommand?: string;
     status: string;
     environment: unknown;
   },
@@ -117,6 +132,7 @@ export function toClientServer(
   permissions: string[],
 ) {
   const { egg, node, allocation, owner, location } = relatedDocs;
+  const process = processFrom(server, egg);
   const status = (server.status as ServerStatus) || "offline";
   return {
     id: server._id.toString(),
@@ -142,9 +158,9 @@ export function toClientServer(
     cpuPinning: Number(server.cpuPinning) || 0,
     databaseLimit: Number(server.databaseLimit) || 0,
     backupsEnabled: server.backupsEnabled !== false,
-    dockerImage: egg?.dockerImage ?? "",
-    startup: egg?.startup ?? "",
-    stopCommand: egg?.stopCommand ?? "",
+    dockerImage: process.dockerImage,
+    startup: process.startup,
+    stopCommand: process.stopCommand,
     environment: envRecord(server.environment),
     eggVariables: Array.isArray(egg?.variables)
       ? (egg.variables as { key?: string; default?: string; description?: string }[]).map((variable) => ({
@@ -215,6 +231,9 @@ function toSpec(
     diskMb: number;
     cpuPercent: number;
     cpuPinning?: number;
+    dockerImage?: string;
+    startup?: string;
+    stopCommand?: string;
     environment: unknown;
   },
   egg: {
@@ -228,12 +247,13 @@ function toSpec(
   allocation: { ip: string; port: number },
   extraAllocations: { ip: string; port: number }[] = [],
 ): InstallSpec {
+  const process = processFrom(server, egg);
   return {
     uuid: server.uuid,
     name: server.name,
-    dockerImage: egg.dockerImage,
-    startup: egg.startup,
-    stopCommand: egg.stopCommand,
+    dockerImage: process.dockerImage,
+    startup: process.startup,
+    stopCommand: process.stopCommand,
     installScript: egg.installScript,
     installImage: egg.installImage,
     // Egg defaults first; the server's saved env wins on conflict.
@@ -375,6 +395,9 @@ export async function createServer(body: unknown, actorId: string) {
     cpuPinning: parsed.data.cpuPinning ?? 0,
     databaseLimit: parsed.data.databaseLimit ?? 0,
     backupsEnabled: parsed.data.backupsEnabled ?? true,
+    dockerImage: parsed.data.dockerImage?.trim() || egg.dockerImage,
+    startup: parsed.data.startup !== undefined ? parsed.data.startup : egg.startup,
+    stopCommand: parsed.data.stopCommand?.trim() || egg.stopCommand || "stop",
     status: "installing",
     environment,
   });

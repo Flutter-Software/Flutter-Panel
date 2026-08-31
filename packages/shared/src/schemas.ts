@@ -287,6 +287,9 @@ export const serverCreateSchema = z.object({
   cpuPinning: z.number().int().min(0).max(256).optional().default(0),
   databaseLimit: z.number().int().min(0).max(50).optional().default(0),
   backupsEnabled: z.boolean().optional().default(true),
+  dockerImage: z.string().min(1).max(255).optional(),
+  startup: z.string().max(2000).optional(),
+  stopCommand: z.string().max(120).optional(),
   environment: z.record(z.string()).optional().default({}),
 });
 

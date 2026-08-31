@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, Pencil, Plus, Search, Server, Trash2, X } from "lucide-react";
@@ -8,10 +9,11 @@ import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card, EmptyState, Input, Select } from "@/components/ui";
 import { statusMeta } from "@/components/status";
+import { CpuLimit, LimitMb } from "@/components/unlimited";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
-import { formatCpuLimit, formatLimitMb, type ServerRecord, type ServerStatus } from "@/lib/types";
+import type { ServerRecord, ServerStatus } from "@/lib/types";
 
 const STATUS_PILL: Record<ServerStatus, string> = {
   running: "bg-status-running/15 text-status-running",
@@ -295,7 +297,17 @@ export default function AdminServersPage() {
                     <Meta label="Owner" value={server.ownerName ?? "—"} />
                     <Meta
                       label="Limits"
-                      value={`${formatLimitMb(server.memory.limitMb)} · ${formatLimitMb(server.disk.limitMb)} · ${formatCpuLimit(server.cpu.limit)} CPU`}
+                      value={
+                        <span className="inline-flex items-center gap-1">
+                          <LimitMb value={server.memory.limitMb} />
+                          <span className="text-muted-foreground">·</span>
+                          <LimitMb value={server.disk.limitMb} />
+                          <span className="text-muted-foreground">·</span>
+                          <span className="inline-flex items-center gap-0.5">
+                            <CpuLimit value={server.cpu.limit} /> CPU
+                          </span>
+                        </span>
+                      }
                     />
                   </div>
                 </Card>
@@ -308,7 +320,7 @@ export default function AdminServersPage() {
   );
 }
 
-function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Meta({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
   return (
     <div>
       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import type { ServerStatus } from "@/lib/types";
 
@@ -117,7 +118,7 @@ export function StatGraph({
   label: string;
   value: number;
   max: number;
-  display: string;
+  display: ReactNode;
   series: number[];
   className?: string;
   tall?: boolean;

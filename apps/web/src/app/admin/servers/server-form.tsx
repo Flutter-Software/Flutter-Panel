@@ -1,21 +1,76 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Box, Cpu, HardDrive, MemoryStick, Network, Server, Trash2, UserRound } from "lucide-react";
+import {
+  ChevronDown,
+  Cpu,
+  Gauge,
+  GitBranch,
+  HardDrive,
+  MemoryStick,
+  Plus,
+  Server,
+  SlidersHorizontal,
+  Terminal,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { AdminCreateHeader, AdminSection, SaveIsland, Switch, isDirty } from "@/components/admin-create";
 import { confirm } from "@/components/confirm-dialog";
-import { Button, Field, Input, SearchSelect, Select, Textarea } from "@/components/ui";
+import { Button, Card, Field, Input, SearchSelect, Select, Textarea } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
 import type { ServerRecord } from "@/lib/types";
+import { cn } from "@/lib/cn";
+import { UnlimitedIcon } from "@/components/unlimited";
 import type { PublicUser } from "@flutter-software/shared";
 
-type Nest = { id: string; name: string; eggs: { id: string; name: string }[] };
+type EggVariable = { key: string; default: string; description: string };
+type EggOption = {
+  id: string;
+  name: string;
+  dockerImage?: string;
+  startup?: string;
+  stopCommand?: string;
+  variables?: EggVariable[];
+};
+type Nest = { id: string; name: string; eggs: EggOption[] };
 type Node = { id: string; name: string; online: boolean; location?: string };
 type Allocation = { id: string; ip: string; port: number; assigned: boolean; serverId?: string | null };
+
+function envFromEgg(egg?: EggOption | null): Record<string, string> {
+  return Object.fromEntries(
+    (egg?.variables ?? []).filter((variable) => variable.key).map((variable) => [variable.key, variable.default ?? ""]),
+  );
+}
+
+function Panel({
+  icon,
+  title,
+  aside,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  aside?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Card className="flex h-full flex-col p-5 sm:p-6">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {icon}
+          {title}
+        </h2>
+        {aside ? <p className="text-xs text-muted-foreground">{aside}</p> : null}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+    </Card>
+  );
+}
 
 export function ServerForm({
   mode,
@@ -47,12 +102,19 @@ export function ServerForm({
   const [extraAllocationIds, setExtraAllocationIds] = useState<string[]>([]);
   const [initialExtraIds, setInitialExtraIds] = useState<string[]>([]);
   const extrasReady = useRef(false);
+  const appliedEggId = useRef("");
   const [memoryMb, setMemoryMb] = useState(String(initial?.memory.limitMb ?? 1024));
   const [diskMb, setDiskMb] = useState(String(initial?.disk.limitMb ?? 4096));
   const [cpuPercent, setCpuPercent] = useState(String(initial?.cpu.limit ?? 100));
   const [cpuPinning, setCpuPinning] = useState(String(initial?.cpuPinning ?? 0));
   const [databaseLimit, setDatabaseLimit] = useState(String(initial?.databaseLimit ?? 0));
   const [backupsEnabled, setBackupsEnabled] = useState(initial?.backupsEnabled !== false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [addingPorts, setAddingPorts] = useState(false);
+  const [dockerImage, setDockerImage] = useState("");
+  const [startup, setStartup] = useState("");
+  const [stopCommand, setStopCommand] = useState("stop");
+  const [envValues, setEnvValues] = useState<Record<string, string>>({});
   const dirty = isDirty(
     {
       name,
@@ -68,6 +130,10 @@ export function ServerForm({
       cpuPinning,
       databaseLimit,
       backupsEnabled,
+      dockerImage,
+      startup,
+      stopCommand,
+      envValues,
     },
     {
       name: initial?.name ?? "",
@@ -83,6 +149,10 @@ export function ServerForm({
       cpuPinning: String(initial?.cpuPinning ?? 0),
       databaseLimit: String(initial?.databaseLimit ?? 0),
       backupsEnabled: initial?.backupsEnabled !== false,
+      dockerImage: "",
+      startup: "",
+      stopCommand: "stop",
+      envValues: {},
     },
   );
 
@@ -91,8 +161,6 @@ export function ServerForm({
     [nests],
   );
   const selectedEgg = eggs.find((egg) => egg.id === eggId);
-  const selectedNode = nodes.find((node) => node.id === nodeId);
-  const selectedAllocation = allocations.find((row) => row.id === allocationId);
   const allocationOptions = allocations.filter(
     (row) => !row.assigned || row.id === initial?.allocationId || row.serverId === initial?.id,
   );
@@ -105,12 +173,19 @@ export function ServerForm({
     setNodeId(initial?.nodeId ?? "");
     setAllocationId(initial?.allocationId ?? "");
     setExtraAllocationIds(initialExtraIds);
+    setAddingPorts(false);
     setMemoryMb(String(initial?.memory.limitMb ?? 1024));
     setDiskMb(String(initial?.disk.limitMb ?? 4096));
     setCpuPercent(String(initial?.cpu.limit ?? 100));
     setCpuPinning(String(initial?.cpuPinning ?? 0));
     setDatabaseLimit(String(initial?.databaseLimit ?? 0));
     setBackupsEnabled(initial?.backupsEnabled !== false);
+    appliedEggId.current = "";
+    setAdvancedOpen(false);
+    setDockerImage("");
+    setStartup("");
+    setStopCommand("stop");
+    setEnvValues({});
     setError(null);
   }
 
@@ -134,10 +209,32 @@ export function ServerForm({
             .map((row) => row.id);
           setExtraAllocationIds(extras);
           setInitialExtraIds(extras);
+          if (extras.length) setAddingPorts(true);
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load allocations"));
   }, [nodeId, initial]);
+
+  useEffect(() => {
+    if (!creating) return;
+    const egg = eggs.find((item) => item.id === eggId);
+    if (!eggId || !egg) {
+      if (!appliedEggId.current) return;
+      appliedEggId.current = "";
+      setAdvancedOpen(false);
+      setDockerImage("");
+      setStartup("");
+      setStopCommand("stop");
+      setEnvValues({});
+      return;
+    }
+    if (appliedEggId.current === egg.id) return;
+    appliedEggId.current = egg.id;
+    setDockerImage(egg.dockerImage ?? "");
+    setStartup(egg.startup ?? "");
+    setStopCommand(egg.stopCommand || "stop");
+    setEnvValues(envFromEgg(egg));
+  }, [creating, eggId, eggs]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -155,7 +252,20 @@ export function ServerForm({
       cpuPinning: Number(cpuPinning),
       databaseLimit: Number(databaseLimit),
       backupsEnabled,
-      ...(creating ? { eggId, nodeId } : {}),
+      ...(creating
+        ? {
+            eggId,
+            nodeId,
+            dockerImage: dockerImage.trim() || undefined,
+            startup,
+            stopCommand: stopCommand.trim() || undefined,
+            environment: Object.fromEntries(
+              (selectedEgg?.variables ?? [])
+                .filter((variable) => variable.key)
+                .map((variable) => [variable.key, envValues[variable.key] ?? variable.default ?? ""]),
+            ),
+          }
+        : {}),
     };
     try {
       if (creating) {
@@ -218,7 +328,7 @@ export function ServerForm({
     Number(databaseLimit) >= 0;
 
   return (
-    <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-6">
+    <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-6">
       <AdminCreateHeader
         backHref="/admin/servers"
         backLabel="Back to servers"
@@ -229,244 +339,302 @@ export function ServerForm({
         ]}
         icon={<Server className="size-4" />}
         title={creating ? "New server" : `Edit ${initial?.name ?? "server"}`}
-        description={
-          creating
-            ? "Place a game server on a node. Install requires an online daemon."
-            : "Update identity, owner, allocation, and resource limits. Egg and node stay with this server."
-        }
       />
       <AdminError message={error ?? nestsQuery.error ?? nodesQuery.error ?? usersQuery.error} />
 
-      <div className="grid items-start gap-4 xl:grid-cols-2">
-        <AdminSection
-          icon={<Box className="size-4" />}
-          title="Server details"
-          description="What this instance is called and which egg it runs."
-        >
-          <Field label="Name" required hint="Shown to the owner on the dashboard.">
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Survival"
-              required
-              maxLength={64}
-            />
-          </Field>
-          <Field label="Description" hint="Optional. Keep it short.">
-            <Textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Paper 1.21 public hub"
-              className="min-h-[72px]"
-              maxLength={240}
-            />
-          </Field>
-          <Field label="Owner" required hint="This account sees the server on their dashboard.">
-            <Select value={ownerId} onChange={(event) => setOwnerId(event.target.value)} required>
-              <option value="">Select owner</option>
-              {users.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.username}
-                  {account.role === "admin" ? " (admin)" : ""}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field
-            label="Egg"
-            required
-            hint={creating ? "Defines the Docker image, install script, and startup." : "Egg cannot be changed after create."}
-          >
-            {creating ? (
-              <Select value={eggId} onChange={(event) => setEggId(event.target.value)} required>
-                <option value="">Select egg</option>
-                {eggs.map((egg) => (
-                  <option key={egg.id} value={egg.id}>
-                    {egg.nest} / {egg.name}
+      <div className="grid items-stretch gap-4 xl:grid-cols-3">
+        <div className="h-full xl:col-span-2">
+          <Panel icon={<Server className="size-3.5" />} title="Server">
+            <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Name" required>
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Survival"
+                required
+                maxLength={64}
+              />
+            </Field>
+            <Field label="Owner" required>
+              <Select value={ownerId} onChange={(event) => setOwnerId(event.target.value)} required>
+                <option value="">Select owner</option>
+                {users.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.username}
+                    {account.role === "admin" ? " (admin)" : ""}
                   </option>
                 ))}
               </Select>
-            ) : (
-              <Input value={initial?.egg ?? selectedEgg?.name ?? ""} disabled />
-            )}
-          </Field>
-        </AdminSection>
+            </Field>
+            <Field label="Egg" required hint={creating ? undefined : "Cannot be changed"}>
+              {creating ? (
+                <Select value={eggId} onChange={(event) => setEggId(event.target.value)} required>
+                  <option value="">Select egg</option>
+                  {eggs.map((egg) => (
+                    <option key={egg.id} value={egg.id}>
+                      {egg.nest} / {egg.name}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input value={initial?.egg ?? selectedEgg?.name ?? ""} disabled />
+              )}
+            </Field>
+            <Field label="Description">
+              <Textarea
+                rows={1}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="Optional"
+                maxLength={240}
+                className="h-10 min-h-10 resize-y"
+              />
+            </Field>
+            </div>
+          </Panel>
+        </div>
 
-        <AdminSection
-          icon={<Network className="size-4" />}
-          title="Placement & limits"
-          description="Where it listens, how much of the node it may use, and which features are enabled. 0 for memory, disk, or CPU means unlimited."
-        >
-          <Field
-            label="Node"
-            required
-            hint={creating ? "Must be online for install to succeed." : "Node cannot be changed after create."}
-          >
-            {creating ? (
+        <Panel icon={<GitBranch className="size-3.5" />} title="Network">
+          <div className="space-y-4">
+            <Field label="Node" required hint={creating ? undefined : "Cannot be changed"}>
+              {creating ? (
+                <Select
+                  value={nodeId}
+                  onChange={(event) => {
+                    setNodeId(event.target.value);
+                    setAllocationId("");
+                    setExtraAllocationIds([]);
+                    setAddingPorts(false);
+                  }}
+                  required
+                >
+                  <option value="">Select node</option>
+                  {nodes.map((node) => (
+                    <option key={node.id} value={node.id}>
+                      {node.name}
+                      {node.online ? "" : " (offline)"}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Input
+                  value={
+                    initial?.nodeLocation ? `${initial.node} · ${initial.nodeLocation}` : (initial?.node ?? "")
+                  }
+                  disabled
+                />
+              )}
+            </Field>
+            <Field label="Allocation" required>
               <Select
-                value={nodeId}
+                value={allocationId}
                 onChange={(event) => {
-                  setNodeId(event.target.value);
-                  setAllocationId("");
-                  setExtraAllocationIds([]);
+                  const next = event.target.value;
+                  setAllocationId(next);
+                  setExtraAllocationIds((current) => current.filter((id) => id !== next));
                 }}
                 required
+                disabled={!nodeId}
+                className="font-mono"
               >
-                <option value="">Select node</option>
-                {nodes.map((node) => (
-                  <option key={node.id} value={node.id}>
-                    {node.name}
-                    {node.online ? "" : " (offline)"}
+                <option value="">{nodeId ? "Select allocation" : "Select a node first"}</option>
+                {allocationOptions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.ip}:{row.port}
+                    {row.id === initial?.allocationId ? " (current)" : ""}
                   </option>
                 ))}
               </Select>
-            ) : (
-              <Input
-                value={
-                  initial?.nodeLocation ? `${initial.node} · ${initial.nodeLocation}` : (initial?.node ?? "")
-                }
-                disabled
-              />
-            )}
-          </Field>
-          <Field label="Primary allocation" required hint="IP and port the game process binds to.">
-            <Select
-              value={allocationId}
-              onChange={(event) => {
-                const next = event.target.value;
-                setAllocationId(next);
-                setExtraAllocationIds((current) => current.filter((id) => id !== next));
-              }}
-              required
-              disabled={!nodeId}
-              className="font-mono"
-            >
-              <option value="">{nodeId ? "Select allocation" : "Select a node first"}</option>
-              {allocationOptions.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.ip}:{row.port}
-                  {row.id === initial?.allocationId ? " (current)" : ""}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field
-            label="Additional allocations"
-            hint="Optional extra ports (TCP and UDP) assigned to this server. Applied on the next start."
-          >
-            <SearchSelect
-              multiple
-              disabled={!nodeId}
-              className="font-mono"
-              placeholder={nodeId ? "Search ports…" : "Select a node first"}
-              value={extraAllocationIds}
-              onChange={(next) => setExtraAllocationIds(Array.isArray(next) ? next.filter((id) => id !== allocationId) : [])}
-              options={allocations
-                .filter(
-                  (row) =>
-                    row.id !== allocationId &&
-                    (!row.assigned || row.serverId === initial?.id),
-                )
-                .map((row) => ({
-                  value: row.id,
-                  label: `${row.ip}:${row.port}`,
-                }))}
-            />
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Memory (MB)" required hint="0 = unlimited">
-              <Input
-                type="number"
-                min={0}
-                required
-                value={memoryMb}
-                onChange={(event) => setMemoryMb(event.target.value)}
-              />
             </Field>
-            <Field label="Disk (MB)" required hint="0 = unlimited">
-              <Input
-                type="number"
-                min={0}
-                required
-                value={diskMb}
-                onChange={(event) => setDiskMb(event.target.value)}
-              />
-            </Field>
-            <Field label="CPU (%)" required hint="0 = unlimited. 100 = one core.">
-              <Input
-                type="number"
-                min={0}
-                max={800}
-                required
-                value={cpuPercent}
-                onChange={(event) => setCpuPercent(event.target.value)}
-              />
+            <Field label="Extra ports">
+              {extraAllocationIds.length || addingPorts ? (
+                <SearchSelect
+                  multiple
+                  disabled={!nodeId}
+                  className="font-mono"
+                  placeholder={nodeId ? "Add another" : "Select a node first"}
+                  value={extraAllocationIds}
+                  onChange={(next) =>
+                    setExtraAllocationIds(Array.isArray(next) ? next.filter((id) => id !== allocationId) : [])
+                  }
+                  options={allocations
+                    .filter(
+                      (row) =>
+                        row.id !== allocationId &&
+                        (!row.assigned || row.serverId === initial?.id),
+                    )
+                    .map((row) => ({
+                      value: row.id,
+                      label: `${row.ip}:${row.port}`,
+                    }))}
+                />
+              ) : (
+                <button
+                  type="button"
+                  disabled={!nodeId}
+                  onClick={() => setAddingPorts(true)}
+                  className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <Plus className="size-3.5" />
+                  Add another
+                </button>
+              )}
             </Field>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="CPU pinning"
-              hint="Number of cores to pin. 0 disables pinning and the process may run on any core."
-            >
-              <Input
-                type="number"
-                min={0}
-                max={256}
-                value={cpuPinning}
-                onChange={(event) => setCpuPinning(event.target.value)}
-              />
-            </Field>
-            <Field label="Databases" hint="How many databases this server may have. 0 means none.">
-              <Input
-                type="number"
-                min={0}
-                max={50}
-                value={databaseLimit}
-                onChange={(event) => setDatabaseLimit(event.target.value)}
-              />
-            </Field>
-          </div>
-          <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-            <span>
-              <span className="block text-sm font-medium">Backups</span>
-              <span className="text-xs text-muted-foreground">
-                Allow this server to create and restore backups
-              </span>
-            </span>
-            <Switch checked={backupsEnabled} onChange={setBackupsEnabled} />
-          </label>
-          <div className="rounded-lg border border-border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
-            <p className="inline-flex items-center gap-2 font-medium text-foreground">
-              <Cpu className="size-4 text-primary" />
-              Summary
-            </p>
-            <p className="mt-1 text-xs">
-              {selectedEgg?.name ?? "Egg"} on {selectedNode?.name ?? "node"}
-              {selectedAllocation ? (
-                <>
-                  {" "}
-                  at{" "}
-                  <span className="font-mono text-foreground">
-                    {selectedAllocation.ip}:{selectedAllocation.port}
-                  </span>
-                </>
-              ) : null}
-              .
-            </p>
-          </div>
-        </AdminSection>
+        </Panel>
       </div>
 
+      <Panel icon={<Gauge className="size-3.5" />} title="Limits" aside="0 = unlimited · 100% CPU = 1 core">
+        <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
+          <Field label="Memory (MB)" required>
+            <Input
+              type="number"
+              min={0}
+              required
+              value={memoryMb}
+              onChange={(event) => setMemoryMb(event.target.value)}
+            />
+          </Field>
+          <Field label="Disk (MB)" required>
+            <Input
+              type="number"
+              min={0}
+              required
+              value={diskMb}
+              onChange={(event) => setDiskMb(event.target.value)}
+            />
+          </Field>
+          <Field label="CPU (%)" required>
+            <Input
+              type="number"
+              min={0}
+              max={800}
+              required
+              value={cpuPercent}
+              onChange={(event) => setCpuPercent(event.target.value)}
+            />
+          </Field>
+          <Field label="CPU pinning">
+            <Input
+              type="number"
+              min={0}
+              max={256}
+              value={cpuPinning}
+              onChange={(event) => setCpuPinning(event.target.value)}
+            />
+          </Field>
+          <Field label="Databases">
+            <Input
+              type="number"
+              min={0}
+              max={50}
+              value={databaseLimit}
+              onChange={(event) => setDatabaseLimit(event.target.value)}
+            />
+          </Field>
+          <div className="space-y-1.5">
+            <span className="block text-sm">Backups</span>
+            <div className="flex h-10 items-center gap-2.5">
+              <Switch checked={backupsEnabled} onChange={setBackupsEnabled} />
+              <span className="text-sm text-muted-foreground">{backupsEnabled ? "Enabled" : "Disabled"}</span>
+            </div>
+          </div>
+        </div>
+      </Panel>
+
+      {creating && selectedEgg ? (
+        <Card>
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((open) => !open)}
+            className="flex w-full items-center gap-3 px-5 py-4 text-left sm:px-6"
+            aria-expanded={advancedOpen}
+          >
+            <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Advanced setup
+            </span>
+            <span className="hidden text-xs text-muted-foreground sm:inline">
+              {selectedEgg.nest} · {selectedEgg.name}
+            </span>
+            <ChevronDown
+              className={cn(
+                "size-4 shrink-0 text-muted-foreground transition-transform",
+                advancedOpen && "rotate-180",
+              )}
+            />
+          </button>
+          {advancedOpen ? (
+            <div className="grid gap-6 border-t border-border px-5 py-5 sm:px-6 xl:grid-cols-2">
+              <div className="space-y-4">
+                <p className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Terminal className="size-3.5" />
+                  Startup
+                </p>
+                <Field label="Docker image">
+                  <Input
+                    value={dockerImage}
+                    onChange={(event) => setDockerImage(event.target.value)}
+                    placeholder={selectedEgg.dockerImage || "image:tag"}
+                    className="font-mono"
+                    maxLength={255}
+                  />
+                </Field>
+                <Field label="Startup command">
+                  <Textarea
+                    value={startup}
+                    onChange={(event) => setStartup(event.target.value)}
+                    placeholder={selectedEgg.startup || "Leave blank for the image entrypoint"}
+                    className="min-h-[72px] font-mono"
+                    maxLength={2000}
+                  />
+                </Field>
+                <Field label="Stop command">
+                  <Input
+                    value={stopCommand}
+                    onChange={(event) => setStopCommand(event.target.value)}
+                    placeholder="stop"
+                    className="font-mono"
+                    maxLength={120}
+                  />
+                </Field>
+              </div>
+              <div className="space-y-4">
+                <p className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <SlidersHorizontal className="size-3.5" />
+                  Variables
+                </p>
+                {(selectedEgg.variables ?? []).filter((variable) => variable.key).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">This egg has no variables.</p>
+                ) : (
+                  (selectedEgg.variables ?? [])
+                    .filter((variable) => variable.key)
+                    .map((variable) => (
+                      <Field key={variable.key} label={variable.key} hint={variable.description || undefined}>
+                        <Input
+                          value={envValues[variable.key] ?? ""}
+                          onChange={(event) =>
+                            setEnvValues((current) => ({
+                              ...current,
+                              [variable.key]: event.target.value,
+                            }))
+                          }
+                          className="font-mono"
+                          maxLength={512}
+                        />
+                      </Field>
+                    ))
+                )}
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
       {creating ? null : (
-        <AdminSection
-          icon={<Trash2 className="size-4" />}
-          title="Danger zone"
-          description="Destroy the container and remove this server from the panel."
-        >
+        <AdminSection icon={<Trash2 className="size-4" />} title="Danger zone" description="Deletes the container and files.">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">
-              Files on the node are deleted. This cannot be undone.
-            </p>
+            <p className="text-sm text-muted-foreground">This cannot be undone.</p>
             <Button type="button" variant="danger" disabled={deleting} onClick={onDelete}>
               {deleting ? "Deleting…" : "Delete server"}
             </Button>
@@ -482,25 +650,26 @@ export function ServerForm({
         pending={pending}
         disabled={!ready}
         summary={
-          <span className="inline-flex items-center gap-2">
-            <Server className="size-4 text-primary" />
-            {creating ? "Creating" : "Saving"}{" "}
-            <span className="font-medium text-foreground">{name || "server"}</span>
-            {selectedNode ? (
-              <>
-                {" "}
-                on <span className="font-medium text-foreground">{selectedNode.name}</span>
-              </>
-            ) : null}
-            <span className="hidden items-center gap-1 sm:inline-flex">
-              <MemoryStick className="size-3.5" />
-              {Number(memoryMb) === 0 ? "∞" : `${memoryMb} MB`}
-              <HardDrive className="size-3.5" />
-              {Number(diskMb) === 0 ? "∞" : `${diskMb} MB`}
-              <Cpu className="size-3.5" />
-              {Number(cpuPercent) === 0 ? "∞" : `${cpuPercent}%`}
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="inline-flex items-center gap-1.5">
+              <Server className="size-4 text-primary" />
+              <span className="font-medium text-foreground">{name || "server"}</span>
             </span>
-            <span className="hidden items-center gap-1 sm:inline-flex">
+            <span className="inline-flex items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1">
+                <MemoryStick className="size-3.5" />
+                {Number(memoryMb) === 0 ? <UnlimitedIcon className="size-3.5" /> : `${memoryMb} MB`}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <HardDrive className="size-3.5" />
+                {Number(diskMb) === 0 ? <UnlimitedIcon className="size-3.5" /> : `${diskMb} MB`}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Cpu className="size-3.5" />
+                {Number(cpuPercent) === 0 ? <UnlimitedIcon className="size-3.5" /> : `${cpuPercent}%`}
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1">
               <UserRound className="size-3.5" />
               {users.find((account) => account.id === ownerId)?.username ?? "owner"}
             </span>
