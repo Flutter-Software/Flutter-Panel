@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   useEffect,
-  type ButtonHTMLAttributes,
+  type ComponentPropsWithRef,
   type InputHTMLAttributes,
   type ReactNode,
   type TextareaHTMLAttributes,
@@ -41,12 +41,13 @@ export function Button({
   className,
   variant = "primary",
   size = "md",
+  ref,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
+}: ComponentPropsWithRef<"button"> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
 }) {
-  return <button className={buttonClass({ variant, size, className })} {...props} />;
+  return <button ref={ref} className={buttonClass({ variant, size, className })} {...props} />;
 }
 
 export function ButtonLink({

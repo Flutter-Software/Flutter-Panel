@@ -62,6 +62,7 @@ export function SearchSelect({
   name,
   className,
   multiple = false,
+  compact = false,
 }: {
   options: SelectOption[];
   value: string | string[];
@@ -72,6 +73,7 @@ export function SearchSelect({
   name?: string;
   className?: string;
   multiple?: boolean;
+  compact?: boolean;
 }) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -89,7 +91,9 @@ export function SearchSelect({
   const selected = options.find((option) => option.value === selectedValue && option.value !== "");
   const selectedRows = options.filter((option) => selectedValues.includes(option.value));
   const placeholderOption = options.find((option) => option.value === "");
-  const searchable = options.filter((option) => option.value !== "");
+  const searchable = options.filter(
+    (option) => option.value !== "" || (!multiple && selectedValue !== ""),
+  );
   const filtered = searchable.filter((option) => matches(option, query));
 
   useEffect(() => {
@@ -117,7 +121,7 @@ export function SearchSelect({
       const below = window.innerHeight - rect.bottom;
       const flip = below < 180 && rect.top > below;
       const maxHeight = Math.min(280, (flip ? rect.top : below) - 8);
-      const width = rect.width;
+      const width = Math.max(rect.width, compact ? 176 : rect.width);
       const left = Math.min(rect.left, Math.max(8, window.innerWidth - width - 8));
       setMenuStyle({
         position: "fixed",
@@ -138,7 +142,7 @@ export function SearchSelect({
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [open, filtered.length, selectedRows.length]);
+  }, [open, filtered.length, selectedRows.length, compact]);
 
   useEffect(() => {
     setActive(0);
@@ -212,7 +216,8 @@ export function SearchSelect({
       ) : null}
       <div
         className={cn(
-          "flex min-h-10 w-full flex-wrap items-center gap-1.5 rounded-lg border border-input bg-input/60 px-2.5 py-1 text-sm outline-none ring-offset-background",
+          "flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-input bg-input/60 outline-none ring-offset-background",
+          compact ? "min-h-8 px-2 py-0.5 text-xs" : "min-h-10 px-2.5 py-1 text-sm",
           open && "border-primary ring-2 ring-primary/30",
           disabled && "pointer-events-none opacity-50",
         )}
@@ -243,8 +248,8 @@ export function SearchSelect({
               </span>
             ))
           : null}
-        <span className="flex min-w-[8rem] flex-1 items-center gap-1.5">
-          <Search className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className={cn("flex flex-1 items-center gap-1.5", compact ? "min-w-0" : "min-w-[8rem]")}>
+          <Search className={cn("shrink-0 text-muted-foreground", compact ? "size-3" : "size-3.5")} />
           <input
             ref={inputRef}
             value={inputValue}
@@ -257,7 +262,8 @@ export function SearchSelect({
             aria-controls={listId}
             aria-autocomplete="list"
             className={cn(
-              "h-8 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground",
+              "min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground",
+              compact ? "h-6 text-xs" : "h-8 text-sm",
               className?.includes("font-mono") && "font-mono",
             )}
             onChange={(event) => {
@@ -278,7 +284,7 @@ export function SearchSelect({
             onKeyDown={onKeyDown}
           />
         </span>
-        <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+        <ChevronsUpDown className={cn("shrink-0 text-muted-foreground", compact ? "size-3" : "size-3.5")} />
       </div>
       {open && menuStyle && typeof document !== "undefined"
         ? createPortal(
@@ -334,7 +340,8 @@ export function Select({
   required,
   name,
   multiple,
-}: SelectHTMLAttributes<HTMLSelectElement> & { multiple?: boolean }) {
+  compact,
+}: SelectHTMLAttributes<HTMLSelectElement> & { multiple?: boolean; compact?: boolean }) {
   const options = useMemo(() => optionsFromChildren(children), [children]);
   const current = value == null ? (multiple ? [] : "") : multiple && typeof value === "string" && value.includes(",")
     ? value.split(",").filter(Boolean)
@@ -348,6 +355,7 @@ export function Select({
       disabled={disabled}
       required={required}
       name={name}
+      compact={compact}
       className={className}
       placeholder={options.find((option) => option.value === "")?.label || "Select…"}
       onChange={(next) => {

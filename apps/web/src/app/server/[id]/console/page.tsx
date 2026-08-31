@@ -1,10 +1,11 @@
 "use client";
 
-import { use, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type UIEvent } from "react";
-import { ChevronDown, Play, RotateCcw, Square } from "lucide-react";
-import { Button, Card } from "@/components/ui";
+import { use, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type UIEvent } from "react";
+import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
+import { Card } from "@/components/ui";
 import { StatGraph } from "@/components/status";
-import { useServerRecord } from "@/components/server-frame";
+import { PowerButtons } from "@/components/power-buttons";
+import { useLiveServerStatus, usePolledServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { browserConsoleSocketUrl } from "@/lib/console-socket";
 import { formatLimitMb, formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
@@ -49,7 +50,40 @@ function displayConsoleText(value: string) {
     .replace(/\u001b./g, "");
 }
 
-function ConsoleLine({ line }: { line: string }) {
+function HighlightedText({ text, query, active }: { text: string; query: string; active: boolean }) {
+  const needle = query.trim();
+  if (!needle) return text;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escaped})`, "gi"));
+  if (parts.length === 1) return text;
+  let used = false;
+  return parts.map((part, index) => {
+    if (part.toLowerCase() !== needle.toLowerCase()) return <span key={index}>{part}</span>;
+    const current = active && !used;
+    used = true;
+    return (
+      <mark
+        key={index}
+        className={cn(
+          "rounded-sm px-0.5",
+          current ? "bg-primary text-primary-foreground" : "bg-primary/25 text-foreground",
+        )}
+      >
+        {part}
+      </mark>
+    );
+  });
+}
+
+function ConsoleLine({
+  line,
+  query = "",
+  active = false,
+}: {
+  line: string;
+  query?: string;
+  active?: boolean;
+}) {
   const cleaned = displayConsoleText(line);
   const flutter = /^\[(\d{2}:\d{2}:\d{2})\] \[Flutter\] (.*)$/.exec(cleaned);
   if (flutter) {
@@ -57,7 +91,9 @@ function ConsoleLine({ line }: { line: string }) {
       <div className="whitespace-pre-wrap break-all">
         <span className="text-muted-foreground">[{flutter[1]}]</span>{" "}
         <span className="font-medium text-primary">[Flutter]</span>{" "}
-        <span>{flutter[2]}</span>
+        <span>
+          <HighlightedText text={flutter[2]} query={query} active={active} />
+        </span>
       </div>
     );
   }
@@ -65,12 +101,17 @@ function ConsoleLine({ line }: { line: string }) {
   if (stamped) {
     return (
       <div className="whitespace-pre-wrap break-all">
-        <span className="text-muted-foreground">[{stamped[1]}]</span> {stamped[2]}
+        <span className="text-muted-foreground">[{stamped[1]}]</span>{" "}
+        <HighlightedText text={stamped[2]} query={query} active={active} />
       </div>
     );
   }
   if (!cleaned.trim()) return null;
-  return <div className="whitespace-pre-wrap break-all">{cleaned}</div>;
+  return (
+    <div className="whitespace-pre-wrap break-all">
+      <HighlightedText text={cleaned} query={query} active={active} />
+    </div>
+  );
 }
 
 function trimLines(current: string[], incoming: string[]) {
@@ -146,13 +187,26 @@ function SideStat({
   );
 }
 
+function asProcessStatus(value?: string): ServerStatus | null {
+  if (value === "offline" || value === "starting" || value === "running" || value === "stopping") {
+    return value;
+  }
+  return null;
+}
+
+function graphsLive(status?: ServerStatus | null, startedAt?: string | null) {
+  if (status === "running" || status === "starting" || status === "stopping") return true;
+  return Boolean(startedAt);
+}
+
 export default function ConsolePage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const framed = useServerRecord();
+  const framed = usePolledServerRecord();
+  const { setLiveStatus } = useLiveServerStatus();
   const [server, setServer] = useState<ServerRecord | null>(framed);
   const [command, setCommand] = useState("");
   const [lines, setLines] = useState<string[]>([]);
@@ -164,73 +218,59 @@ export default function ConsolePage({
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const ignoreScroll = useRef(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const jumpToMatch = useRef(false);
+  const [atBottom, setAtBottom] = useState(true);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const lastNet = useRef<{ rx: number; tx: number; at: number } | null>(null);
-  const liveGraphs = useRef(false);
-  const crashedUntilStart = useRef(false);
-  const startGraceUntil = useRef(0);
+  const statusRef = useRef(server?.status);
+  const ignoreHistoryUntil = useRef(0);
   const [series, setSeries] = useState<StatSeries>(emptySeries);
 
-  function inStartGrace() {
-    return Date.now() < startGraceUntil.current;
+  statusRef.current = server?.status;
+
+  function applyStatus(status: ServerStatus) {
+    setLiveStatus(status);
+    setServer((current) => (current ? { ...current, status } : current));
   }
 
-  async function loadServer() {
-    const result = await api<{ data: { server: ServerRecord } }>(`/api/v1/client/servers/${id}`);
+  useEffect(() => {
+    return () => setLiveStatus(null);
+  }, [setLiveStatus]);
+
+  useEffect(() => {
+    if (!framed) return;
     setServer((current) => {
-      const next = result.data.server;
-      if (!current) return next;
-      if (current.status === "installing" && (next.status === "running" || next.status === "starting" || next.status === "stopping")) {
-        return { ...next, status: "installing" };
-      }
-      if (crashedUntilStart.current && next.status !== "installing" && next.status !== "install_failed") {
-        return { ...next, status: "offline" };
-      }
-      if (current.status === "starting" && next.status === "offline" && inStartGrace()) {
-        return { ...next, status: "starting" };
-      }
-      if (current.status === "stopping" && next.status === "running" && inStartGrace()) {
-        return { ...next, status: "stopping" };
-      }
-      const emptyLive =
-        next.cpu.used === 0 &&
-        next.memory.usedMb === 0 &&
-        (current.cpu.used > 0 || current.memory.usedMb > 0);
-      if (emptyLive) {
-        return {
-          ...next,
-          cpu: current.cpu,
-          memory: current.memory,
-          disk: next.disk.usedMb > 0 ? next.disk : current.disk,
-        };
-      }
-      return next;
+      if (!current) return framed;
+      const status =
+        current.status === "installing" &&
+        (framed.status === "offline" || framed.status === "install_failed")
+          ? framed.status
+          : current.status;
+      return {
+        ...framed,
+        status,
+        cpu: current.cpu,
+        memory: current.memory,
+        disk: current.disk.usedMb > 0 ? current.disk : framed.disk,
+      };
     });
-    return result.data.server;
-  }
-
-  useEffect(() => {
-    if (framed) {
-      setServer((current) => current ?? framed);
+    if (
+      statusRef.current === "installing" &&
+      (framed.status === "offline" || framed.status === "install_failed")
+    ) {
+      setLiveStatus(framed.status);
     }
-  }, [framed]);
-
-  useEffect(() => {
-    liveGraphs.current = server?.status === "running" || server?.status === "starting";
-  }, [server?.status]);
+  }, [framed, setLiveStatus]);
 
   useEffect(() => {
     setSeries(emptySeries());
     lastNet.current = null;
-    loadServer().catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
-    const poll = window.setInterval(() => {
-      loadServer().catch(() => undefined);
-    }, 2000);
     const tick = window.setInterval(() => setTick((value) => value + 1), 1000);
-    return () => {
-      window.clearInterval(poll);
-      window.clearInterval(tick);
-    };
+    return () => window.clearInterval(tick);
   }, [id]);
 
   useEffect(() => {
@@ -267,6 +307,7 @@ export default function ConsolePage({
           try {
             const parsed = JSON.parse(String(event.data)) as { event?: string; data?: string };
             if (parsed.event === "cleared") {
+              ignoreHistoryUntil.current = Date.now() + 1_500;
               setLines([]);
               setSeries(emptySeries());
               lastNet.current = null;
@@ -274,6 +315,7 @@ export default function ConsolePage({
               return;
             }
             if (parsed.event === "history" && parsed.data) {
+              if (Date.now() < ignoreHistoryUntil.current) return;
               try {
                 const rows = JSON.parse(parsed.data) as string[];
                 if (Array.isArray(rows)) {
@@ -307,12 +349,17 @@ export default function ConsolePage({
                   txBytes?: number;
                   startedAt?: string | null;
                 };
-                const started = parseStarted(stats.startedAt);
-                setStartedAt(started);
-                if (stats.memoryBytes || stats.cpuPercent || stats.startedAt) {
-                  liveGraphs.current = true;
+                const diskMb =
+                  typeof stats.diskBytes === "number"
+                    ? Math.max(0, Math.round((stats.diskBytes / 1024 / 1024) * 10) / 10)
+                    : null;
+                if (diskMb !== null) {
+                  setServer((current) =>
+                    current ? { ...current, disk: { ...current.disk, usedMb: diskMb } } : current,
+                  );
                 }
-                if (!liveGraphs.current) return;
+                if (!graphsLive(statusRef.current, stats.startedAt)) return;
+                setStartedAt(parseStarted(stats.startedAt));
                 const now = Date.now();
                 let network = 0;
                 if (typeof stats.rxBytes === "number" && typeof stats.txBytes === "number") {
@@ -361,31 +408,33 @@ export default function ConsolePage({
               return;
             }
             if (parsed.event === "status") {
-              const status = parsed.data === "running" ? "running" : parsed.data === "offline" ? "offline" : null;
+              const status = asProcessStatus(parsed.data);
               if (!status) return;
+              if (statusRef.current === "installing" || statusRef.current === "install_failed") return;
               if (status === "offline") {
                 setStartedAt(null);
                 lastNet.current = null;
               }
-              setServer((current) => {
-                if (!current) return current;
-                if (current.status === "installing" || current.status === "install_failed") return current;
-                if (status === "offline" && current.status === "starting" && inStartGrace()) return current;
-                if (status === "running" && current.status === "stopping") return current;
-                if (status === "running" && crashedUntilStart.current) return { ...current, status: "offline" };
-                return { ...current, status };
-              });
+              applyStatus(status);
+              return;
+            }
+            if (parsed.event === "install started") {
+              applyStatus("installing");
+              return;
+            }
+            if (parsed.event === "install completed") {
+              applyStatus(parsed.data === "false" ? "install_failed" : "offline");
               return;
             }
             if (parsed.event === "error" && parsed.data) {
               if (/crashed \(exit|out of memory/i.test(parsed.data)) {
-                crashedUntilStart.current = true;
-                startGraceUntil.current = 0;
-                setServer((current) =>
-                  current && current.status !== "installing" && current.status !== "install_failed"
-                    ? { ...current, status: "offline" }
-                    : current,
-                );
+                setServer((current) => {
+                  if (!current || current.status === "installing" || current.status === "install_failed") {
+                    return current;
+                  }
+                  return { ...current, status: "offline" };
+                });
+                setLiveStatus("offline");
               }
               setError(parsed.data);
             }
@@ -423,11 +472,26 @@ export default function ConsolePage({
     };
   }, [id]);
 
+  const needle = searchQuery.trim();
+  const matchIndexes = useMemo(() => {
+    if (!needle) return [];
+    const lower = needle.toLowerCase();
+    const indexes: number[] = [];
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
+      if (line && displayConsoleText(line).toLowerCase().includes(lower)) {
+        indexes.push(index);
+      }
+    }
+    return indexes;
+  }, [lines, needle]);
+
   function scrollToBottom(behavior: ScrollBehavior = "auto") {
     const el = scroller.current;
     if (!el) return;
     ignoreScroll.current = true;
     stickToBottom.current = true;
+    setAtBottom(true);
     el.scrollTo({ top: el.scrollHeight, behavior });
     if (behavior === "smooth") {
       window.setTimeout(() => {
@@ -443,44 +507,114 @@ export default function ConsolePage({
     });
   }
 
+  function scrollToMatch(lineIndex: number) {
+    const node = scroller.current?.querySelector(`[data-console-line="${lineIndex}"]`);
+    if (!(node instanceof HTMLElement)) return;
+    ignoreScroll.current = true;
+    stickToBottom.current = false;
+    node.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    window.setTimeout(() => {
+      ignoreScroll.current = false;
+      const el = scroller.current;
+      if (!el) return;
+      const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+      stickToBottom.current = pinned;
+      setAtBottom(pinned);
+    }, 400);
+  }
+
+  function goToMatch(direction: 1 | -1) {
+    if (matchIndexes.length === 0) return;
+    jumpToMatch.current = true;
+    setMatchIndex((current) => (current + direction + matchIndexes.length) % matchIndexes.length);
+  }
+
+  function onSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setSearchOpen(false);
+      return;
+    }
+    if (event.key !== "Enter" || matchIndexes.length === 0) return;
+    event.preventDefault();
+    goToMatch(event.shiftKey ? -1 : 1);
+  }
+
   useLayoutEffect(() => {
     if (!stickToBottom.current) return;
     scrollToBottom();
   }, [lines]);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      searchInput.current?.blur();
+      return;
+    }
+    const timer = window.setTimeout(() => searchInput.current?.focus(), 120);
+    return () => window.clearTimeout(timer);
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (matchIndexes.length === 0) {
+      if (matchIndex !== 0) setMatchIndex(0);
+      return;
+    }
+    if (matchIndex >= matchIndexes.length) setMatchIndex(0);
+  }, [matchIndexes, matchIndex]);
+
+  useEffect(() => {
+    if (!searchOpen || !jumpToMatch.current) return;
+    jumpToMatch.current = false;
+    if (matchIndexes.length === 0) return;
+    const lineIndex = matchIndexes[Math.min(matchIndex, matchIndexes.length - 1)];
+    if (lineIndex !== undefined) scrollToMatch(lineIndex);
+  }, [searchOpen, searchQuery, matchIndex, matchIndexes]);
 
   function onScroll(event: UIEvent<HTMLDivElement>) {
     if (ignoreScroll.current) return;
     const el = event.currentTarget;
     const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
     stickToBottom.current = pinned;
+    setAtBottom(pinned);
   }
 
-  function applyStatus(status: ServerStatus) {
-    setServer((current) => (current ? { ...current, status } : current));
-  }
-
-  async function power(action: "start" | "stop" | "restart") {
+  async function power(action: "start" | "stop" | "restart" | "kill") {
     setError(null);
     if (action === "start" || action === "restart") {
+      ignoreHistoryUntil.current = Date.now() + 1_500;
       setLines([]);
       setSeries(emptySeries());
       lastNet.current = null;
       setNetRate(0);
     }
-    applyStatus(action === "stop" ? "stopping" : "starting");
-    if (action === "start" || action === "restart") {
-      crashedUntilStart.current = false;
-      startGraceUntil.current = Date.now() + 2_500;
-    }
+    applyStatus(
+      action === "start" ||
+        (action === "restart" && (server?.status === "offline" || server?.status === "install_failed"))
+        ? "starting"
+        : "stopping",
+    );
     try {
       const result = await api<{ data: { server: ServerRecord } }>(`/api/v1/client/servers/${id}/power`, {
         method: "POST",
         body: JSON.stringify({ action }),
       });
-      setServer(result.data.server);
+      const next = result.data.server.status;
+      if (next === "installing" || next === "install_failed") {
+        applyStatus(next);
+        setServer(result.data.server);
+        return;
+      }
+      setServer((current) => {
+        if (!current) return result.data.server;
+        return {
+          ...result.data.server,
+          status: current.status,
+          cpu: current.cpu,
+          memory: current.memory,
+        };
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Power action failed");
-      await loadServer().catch(() => undefined);
     }
   }
 
@@ -489,17 +623,22 @@ export default function ConsolePage({
     const value = command.trim();
     if (!value || !server || server.status === "installing") return;
     setCommand("");
+    setError(null);
     setLines((current) => trimLines(current, [`> ${value}`]));
+    const live =
+      server.status === "running" || server.status === "starting" || server.status === "stopping";
     try {
       await api(`/api/v1/client/servers/${id}/command`, {
         method: "POST",
-        body: JSON.stringify({ command: value }),
+        body: JSON.stringify({ command: value, shell: !live }),
       });
     } catch (err) {
-      const socket = socketRef.current;
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ event: "command", data: value }));
-        return;
+      if (live) {
+        const socket = socketRef.current;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ event: "command", data: value }));
+          return;
+        }
       }
       setError(err instanceof Error ? err.message : "Could not send command");
     }
@@ -542,41 +681,13 @@ export default function ConsolePage({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-2">
-          {canStart ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={installing || starting || running}
-              onClick={() => void power("start")}
-            >
-              <Play className="size-3.5" />
-              {starting ? "Starting…" : "Start"}
-            </Button>
-          ) : null}
-          {canRestart ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={installing || starting || stopping || !running}
-              onClick={() => void power("restart")}
-            >
-              <RotateCcw className="size-3.5" />
-              Restart
-            </Button>
-          ) : null}
-          {canStop ? (
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={installing || stopping || (!running && !starting)}
-              onClick={() => void power("stop")}
-            >
-              <Square className="size-3.5" />
-              {stopping ? "Stopping…" : "Stop"}
-            </Button>
-          ) : null}
-        </div>
+        <PowerButtons
+          status={server?.status}
+          canStart={canStart}
+          canRestart={canRestart}
+          canStop={canStop}
+          onPower={(action) => void power(action)}
+        />
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
@@ -589,31 +700,139 @@ export default function ConsolePage({
             <div
               ref={scroller}
               onScroll={onScroll}
-              className="terminal-scroll h-[32rem] overflow-y-auto bg-background p-4 font-mono text-[13px] leading-6 text-foreground"
-            >
-              {lines.length === 0 ? (
-                <div className="text-muted-foreground">
-                  {running || starting
-                    ? "Waiting for output…"
-                    : installing
-                      ? "Install is running on the daemon. Output appears here after the container starts."
-                      : "Server is offline. Press Start to boot the container."}
-                </div>
-              ) : (
-                lines.map((line, index) => (
-                  <ConsoleLine key={`${index}-${line.slice(0, 24)}`} line={line} />
-                ))
+              className={cn(
+                "terminal-scroll relative h-[32rem] overflow-y-auto bg-background p-4 font-mono text-[13px] leading-6 text-foreground transition-[padding] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                searchOpen && "pb-14",
               )}
-            </div>
-            <button
-              type="button"
-              className="absolute bottom-3 right-3 z-10 flex size-8 items-center justify-center rounded-md bg-transparent text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Scroll to latest log"
-              title="Scroll to latest"
-              onClick={() => scrollToBottom("smooth")}
             >
-              <ChevronDown className="size-4" />
-            </button>
+              {lines.map((line, index) => (
+                <div
+                  key={`${index}-${line.slice(0, 24)}`}
+                  data-console-line={index}
+                  className={cn(
+                    searchOpen &&
+                      needle &&
+                      matchIndexes[matchIndex] === index &&
+                      "rounded-sm bg-primary/10",
+                  )}
+                >
+                  <ConsoleLine
+                    line={line}
+                    query={searchOpen ? searchQuery : ""}
+                    active={searchOpen && matchIndexes[matchIndex] === index}
+                  />
+                </div>
+              ))}
+            </div>
+            {lines.length === 0 ? (
+              <div className="pointer-events-none absolute inset-0 p-4 font-mono text-[13px] leading-6 text-muted-foreground">
+                {running || starting || stopping
+                  ? "Waiting for output…"
+                  : installing
+                    ? "Install is running on the daemon. Output appears here after the container starts."
+                    : "Server is offline. Press Start to boot the container."}
+              </div>
+            ) : null}
+            <div
+              className={cn(
+                "absolute bottom-3 right-3 z-20 flex h-8 max-w-[calc(100%-1.5rem)] items-center rounded-md",
+                "transition-[background-color,border-color,box-shadow,backdrop-filter] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                searchOpen
+                  ? "border border-border bg-card/95 shadow-sm backdrop-blur-sm"
+                  : "border border-transparent bg-transparent",
+              )}
+            >
+              <button
+                type="button"
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-md bg-transparent text-muted-foreground",
+                  searchOpen
+                    ? "pointer-events-none"
+                    : "hover:bg-muted hover:text-foreground",
+                )}
+                tabIndex={searchOpen ? -1 : 0}
+                aria-hidden={searchOpen}
+                aria-label={atBottom ? "Search console" : "Scroll to latest log"}
+                title={atBottom ? "Search console" : "Scroll to latest"}
+                onClick={() => {
+                  if (atBottom) {
+                    setSearchOpen(true);
+                    return;
+                  }
+                  scrollToBottom("smooth");
+                }}
+              >
+                {atBottom || searchOpen ? <Search className="size-4" /> : <ChevronDown className="size-4" />}
+              </button>
+              <div
+                className={cn(
+                  "grid min-w-0 transition-[grid-template-columns] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                  searchOpen ? "grid-cols-[1fr]" : "grid-cols-[0fr]",
+                )}
+              >
+                <div className="min-w-0 overflow-hidden" inert={searchOpen ? undefined : true}>
+                  <div
+                    className={cn(
+                      "flex items-center gap-0.5 pr-0.5 transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                      searchOpen ? "translate-x-0 opacity-100 delay-75" : "translate-x-1.5 opacity-0",
+                    )}
+                  >
+                    <input
+                      ref={searchInput}
+                      type="text"
+                      value={searchQuery}
+                      onChange={(event) => {
+                        jumpToMatch.current = true;
+                        setMatchIndex(0);
+                        setSearchQuery(event.target.value);
+                      }}
+                      onKeyDown={onSearchKeyDown}
+                      placeholder="Find in console"
+                      className="h-7 w-36 min-w-0 bg-transparent px-1.5 text-xs outline-none sm:w-44"
+                      autoComplete="off"
+                      spellCheck={false}
+                      tabIndex={searchOpen ? 0 : -1}
+                      aria-label="Find in console"
+                    />
+                    <span className="min-w-10 px-1 text-center text-[11px] tabular-nums text-muted-foreground">
+                      {needle ? `${matchIndexes.length ? matchIndex + 1 : 0}/${matchIndexes.length}` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                      aria-label="Previous match"
+                      title="Previous match"
+                      tabIndex={searchOpen ? 0 : -1}
+                      disabled={!searchOpen || matchIndexes.length === 0}
+                      onClick={() => goToMatch(-1)}
+                    >
+                      <ChevronUp className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                      aria-label="Next match"
+                      title="Next match"
+                      tabIndex={searchOpen ? 0 : -1}
+                      disabled={!searchOpen || matchIndexes.length === 0}
+                      onClick={() => goToMatch(1)}
+                    >
+                      <ChevronDown className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                      aria-label="Close search"
+                      title="Close search"
+                      tabIndex={searchOpen ? 0 : -1}
+                      onClick={() => setSearchOpen(false)}
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <form className="flex items-center border-t border-border" onSubmit={(event) => void sendCommand(event)}>
             <span className="pl-4 font-mono text-sm font-semibold text-primary" aria-hidden>
@@ -623,7 +842,13 @@ export default function ConsolePage({
               value={command}
               onChange={(event) => setCommand(event.target.value)}
               className="h-11 flex-1 bg-transparent px-3 font-mono text-sm outline-none"
-              placeholder={canType ? "Type a command and press Enter…" : "Unavailable while installing"}
+              placeholder={
+                !canType
+                  ? "Unavailable while installing"
+                  : running || starting
+                    ? "Type a command and press Enter…"
+                    : "Run a command in the server image…"
+              }
               disabled={!canType}
               autoComplete="off"
               spellCheck={false}

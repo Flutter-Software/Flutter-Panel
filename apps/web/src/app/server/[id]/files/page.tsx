@@ -28,6 +28,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import { confirm } from "@/components/confirm-dialog";
 import { FileIdeModal } from "@/components/file-ide";
 import { Button, Card } from "@/components/ui";
 import { api, apiUpload } from "@/lib/api";
@@ -138,39 +139,20 @@ function fileToBase64(file: File, onProgress?: (ratio: number) => void) {
   });
 }
 
-function ProgressRing({ percent }: { percent: number }) {
-  const size = 40;
-  const stroke = 3.5;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
+function FileProgressBar({ label, percent }: { label: string; percent: number }) {
   const value = Math.max(0, Math.min(100, Math.round(percent)));
-  const offset = circumference - (value / 100) * circumference;
   return (
-    <div className="relative size-10 shrink-0" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
-      <svg className="size-10 -rotate-90" viewBox={`0 0 ${size} ${size}`} aria-hidden>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          className="stroke-muted"
-          strokeWidth={stroke}
+    <div className="space-y-1.5" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-label={label}>
+      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span>{label}…</span>
+        <span className="tabular-nums">{value}%</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-150 ease-out"
+          style={{ width: `${Math.max(4, value)}%` }}
         />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          className="stroke-primary transition-[stroke-dashoffset] duration-150"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tabular-nums leading-none">
-        {value}%
-      </span>
+      </div>
     </div>
   );
 }
@@ -286,6 +268,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const [pending, setPending] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [percent, setPercent] = useState<number | null>(null);
+  const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const lastIndex = useRef<number | null>(null);
@@ -424,6 +407,24 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     return editing?.path === full || editing?.path === entry.name;
   }
 
+  function startFakeProgress(label: string) {
+    setPending(true);
+    setProgressLabel(label);
+    setPercent(4);
+    return window.setInterval(() => {
+      setPercent((current) => Math.min(90, (current ?? 4) + 3));
+    }, 250);
+  }
+
+  function finishProgress(ok: boolean) {
+    if (ok) setPercent(100);
+    setPending(false);
+    window.setTimeout(() => {
+      setPercent(null);
+      setProgressLabel(null);
+    }, ok ? 400 : 0);
+  }
+
   function toggleSelect(name: string, index: number, range: boolean) {
     setSelected((current) => {
       const next = new Set(current);
@@ -451,10 +452,20 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   }
 
   async function remove(entry: Entry) {
-    if (!window.confirm(`Delete ${entry.name}? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: "Delete file",
+        description: `Delete ${entry.name}? This cannot be undone.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     setError(null);
+    const timer = startFakeProgress(`Deleting ${entry.name}`);
     try {
       await files({ action: "delete", path: joinPath(path, entry.name) });
+      window.clearInterval(timer);
       if (isEditing(entry)) setEditing(null);
       setSelected((current) => {
         const next = new Set(current);
@@ -462,8 +473,11 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
         return next;
       });
       await load(path);
+      finishProgress(true);
     } catch (err) {
+      window.clearInterval(timer);
       setError(err instanceof Error ? err.message : "Delete failed");
+      finishProgress(false);
     }
   }
 
@@ -471,44 +485,63 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     const names = [...selected];
     if (!names.length) return;
     const label = names.length === 1 ? names[0] : `${names.length} items`;
-    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: "Delete files",
+        description: `Delete ${label}? This cannot be undone.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setPending(true);
+    setProgressLabel(names.length === 1 ? `Deleting ${names[0]}` : `Deleting ${names.length} items`);
+    setPercent(4);
     try {
-      for (const name of names) {
+      for (let index = 0; index < names.length; index++) {
+        const name = names[index];
+        if (!name) continue;
+        setProgressLabel(names.length === 1 ? `Deleting ${name}` : `Deleting ${index + 1} of ${names.length}`);
+        setPercent(Math.max(4, (index / names.length) * 100));
         await files({ action: "delete", path: joinPath(path, name) });
         if (editing && (editing.path === joinPath(path, name) || editing.path.endsWith(`/${name}`))) {
           setEditing(null);
         }
+        setPercent(((index + 1) / names.length) * 100);
       }
       setSelected(new Set());
       await load(path);
+      finishProgress(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed");
-    } finally {
-      setPending(false);
+      finishProgress(false);
     }
   }
 
   async function extract(entry: Entry) {
-    if (!window.confirm(`Extract ${entry.name} into this folder?`)) return;
+    if (
+      !(await confirm({
+        title: "Extract archive",
+        description: `Extract ${entry.name} into this folder?`,
+        confirmLabel: "Extract",
+        danger: false,
+      }))
+    ) {
+      return;
+    }
     setError(null);
-    setPending(true);
-    setPercent(1);
-    const timer = window.setInterval(() => {
-      setPercent((current) => Math.min(90, (current ?? 1) + 2));
-    }, 250);
+    const timer = startFakeProgress(`Extracting ${entry.name}`);
     try {
       await files({ action: "extract", path: joinPath(path, entry.name) });
       window.clearInterval(timer);
       setPercent(100);
       await load(path);
+      finishProgress(true);
     } catch (err) {
       window.clearInterval(timer);
       setError(err instanceof Error ? err.message : "Extract failed");
-    } finally {
-      setPending(false);
-      window.setTimeout(() => setPercent(null), 400);
+      finishProgress(false);
     }
   }
 
@@ -554,6 +587,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     if (!list.length) return;
     setError(null);
     setPending(true);
+    setProgressLabel(list.length === 1 ? `Uploading ${list[0]?.relative ?? "file"}` : `Uploading ${list.length} files`);
     const total = list.reduce((sum, item) => sum + Math.max(item.file.size, 1), 0);
     let finished = 0;
     const report = (loaded: number) => {
@@ -585,11 +619,10 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       }
       setPercent(100);
       await load(path);
+      finishProgress(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setPending(false);
-      window.setTimeout(() => setPercent(null), 400);
+      finishProgress(false);
     }
   }
 
@@ -609,7 +642,6 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
           <PathCrumbs path={path} onBrowse={browse} />
         </div>
         <div className="flex items-center gap-2">
-          {percent !== null ? <ProgressRing percent={percent} /> : null}
           <input
             ref={inputRef}
             type="file"
@@ -642,6 +674,9 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
           ) : null}
         </div>
       </div>
+      {percent !== null ? (
+        <FileProgressBar label={progressLabel ?? "Working"} percent={percent} />
+      ) : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       {selected.size > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2">

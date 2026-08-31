@@ -10,10 +10,14 @@ import {
   liveResources,
   pingDocker,
   powerServer,
+  runOfflineCommand,
+  containerRunning,
+  isInstallRunning,
   type InstallSpec,
   type PowerAction,
 } from "./docker";
 import { runDaemonConsole, sendConsoleCommand } from "./console";
+import { getProcessState } from "./process-state";
 import {
   deleteServerPath,
   extractArchive,
@@ -246,6 +250,23 @@ export function createDaemonApp(config: DaemonConfig) {
     return liveResources(config, uuid);
   }
 
+  async function dispatchCommand(uuid: string, command: string, opts: { shell?: boolean } = {}) {
+    if (isInstallRunning(uuid)) {
+      throw new Error("Unavailable while installing");
+    }
+    const process = getProcessState(uuid);
+    if (process === "running" || (await containerRunning(uuid).catch(() => false))) {
+      return sendConsoleCommand(uuid, command);
+    }
+    if (process === "starting" || process === "stopping") {
+      throw new Error("Wait until the server has started or stopped");
+    }
+    if (!opts.shell) {
+      throw new Error("Server is offline");
+    }
+    return runOfflineCommand(config, uuid, command);
+  }
+
   app.get("/v1/servers/:uuid/stats", async (c) => {
     return c.json({ ok: true, data: await statsPayload(c.req.param("uuid")) });
   });
@@ -267,7 +288,7 @@ export function createDaemonApp(config: DaemonConfig) {
     if (!command) {
       return c.json({ ok: false, error: { code: "INVALID_INPUT", message: "command is required" } }, 400);
     }
-    const data = await sendConsoleCommand(c.req.param("uuid"), command);
+    const data = await dispatchCommand(c.req.param("uuid"), command, { shell: body.shell === true });
     return c.json({ ok: true, data: data ?? { ok: true } });
   });
 
@@ -363,7 +384,7 @@ export function createDaemonApp(config: DaemonConfig) {
           } catch {
             /* treat as raw command */
           }
-          if (command) void sendConsoleCommand(uuid, command).catch(() => undefined);
+          if (command) void dispatchCommand(uuid, command, { shell: true }).catch(() => undefined);
         },
         onClose() {
           ac.abort();

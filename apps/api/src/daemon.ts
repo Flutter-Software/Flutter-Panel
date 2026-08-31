@@ -1,13 +1,14 @@
 import {
   FlutterError,
   heartbeatSchema,
+  daemonServerStateSchema,
   daemonConfigSaveSchema,
   PANEL_VERSION,
   type PowerAction,
 } from "@flutter-software/shared";
 import { signDaemonRequest, readBearerToken } from "@flutter-software/shared/ticket";
 import { env } from "./env";
-import { Node } from "./db/models";
+import { Node, Server } from "./db/models";
 import { authenticateNodeToken, isNodeOnline, panelApiUrl } from "./nodes";
 import type { Context } from "hono";
 
@@ -79,6 +80,39 @@ export async function heartbeat(c: Context) {
   };
 }
 
+export async function applyServerState(c: Context, uuid: string) {
+  const parsed = daemonServerStateSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    throw FlutterError.validation("Invalid server state", parsed.error.flatten());
+  }
+  const token = readBearerToken(c.req.header("authorization"));
+  const node = await authenticateNodeToken(token, parsed.data.nodeId);
+  const server = await Server.findOne({ uuid });
+  if (!server) throw FlutterError.notFound("Server not found");
+  if (server.nodeId.toString() !== node._id.toString()) {
+    throw FlutterError.forbidden("Server is not on this node");
+  }
+
+  if (parsed.data.install) {
+    if (server.status === "installing" || server.status === "install_failed") {
+      server.status = parsed.data.install.ok ? "offline" : "install_failed";
+      await server.save();
+    }
+    return { ok: true, status: server.status };
+  }
+
+  if (server.status === "installing" || server.status === "install_failed") {
+    return { ok: true, status: server.status };
+  }
+
+  const next = parsed.data.status;
+  if (next) {
+    server.status = next;
+    await server.save();
+  }
+  return { ok: true, status: server.status };
+}
+
 async function daemonFetch(
   node: { _id: { toString(): string }; daemonListenUrl?: string | null; lastHeartbeatAt?: Date | null },
   spec: { uuid: string; op: string; path: string; body?: unknown; timeoutMs?: number },
@@ -127,6 +161,13 @@ async function loadNode(nodeId: string) {
   return node;
 }
 
+class ConfirmedInstallFailure extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfirmedInstallFailure";
+  }
+}
+
 export async function installOnNode(nodeId: string, spec: InstallSpec) {
   const node = await loadNode(nodeId);
   await daemonFetch(node, {
@@ -138,22 +179,38 @@ export async function installOnNode(nodeId: string, spec: InstallSpec) {
   });
   // Daemon returns as soon as the job is queued. This request stays open and
   // polls — Paper image pulls on a cold host have taken hours. The UI already
-  // flipped the server to `installing` from createServer.
+  // flipped the server to `installing` from createServer. Transient daemon
+  // blips must not mark the install failed while the job is still running.
   const deadline = Date.now() + 6 * 60 * 60 * 1000;
+  let lastError = "Install timed out after 6 hours";
   while (Date.now() < deadline) {
-    const data = (await daemonFetch(node, {
-      uuid: spec.uuid,
-      op: "install",
-      path: "install-status",
-      timeoutMs: 15_000,
-    })) as { status?: string; error?: string } | undefined;
-    if (data?.status === "ok") return data;
-    if (data?.status === "failed") {
-      throw FlutterError.unavailable(data.error || "Install script failed");
+    const row = (await Server.findOne({ uuid: spec.uuid }).select("status").lean()) as {
+      status?: string;
+    } | null;
+    if (row?.status === "offline") return { status: "ok" as const };
+    if (row?.status === "install_failed") {
+      throw FlutterError.unavailable("Install script failed");
+    }
+    try {
+      const data = (await daemonFetch(node, {
+        uuid: spec.uuid,
+        op: "install",
+        path: "install-status",
+        timeoutMs: 15_000,
+      })) as { status?: string; error?: string } | undefined;
+      if (data?.status === "ok") return data;
+      if (data?.status === "failed") {
+        throw new ConfirmedInstallFailure(data.error || "Install script failed");
+      }
+    } catch (error) {
+      if (error instanceof ConfirmedInstallFailure) {
+        throw FlutterError.unavailable(error.message);
+      }
+      lastError = error instanceof Error ? error.message : String(error);
     }
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
-  throw FlutterError.unavailable("Install timed out after 6 hours");
+  throw FlutterError.unavailable(lastError);
 }
 
 export async function powerOnNode(nodeId: string, spec: InstallSpec, action: PowerAction) {
@@ -163,8 +220,8 @@ export async function powerOnNode(nodeId: string, spec: InstallSpec, action: Pow
     op: "power",
     path: "power",
     body: { ...spec, action },
-    timeoutMs: 60_000,
-  }) as Promise<{ status?: "running" | "offline" } | undefined>;
+    timeoutMs: 15_000,
+  }) as Promise<{ accepted?: boolean; status?: "offline" | "starting" | "running" | "stopping" } | undefined>;
 }
 
 export async function destroyOnNode(nodeId: string, uuid: string) {
@@ -207,14 +264,19 @@ export async function logsOnNode(nodeId: string, uuid: string, tail = 200) {
   }) as Promise<{ running?: boolean; lines?: string[] }>;
 }
 
-export async function commandOnNode(nodeId: string, uuid: string, command: string) {
+export async function commandOnNode(
+  nodeId: string,
+  uuid: string,
+  command: string,
+  opts: { shell?: boolean } = {},
+) {
   const node = await loadNode(nodeId);
   return daemonFetch(node, {
     uuid,
     op: "command",
     path: "command",
-    body: { command },
-    timeoutMs: 15_000,
+    body: { command, shell: Boolean(opts.shell) },
+    timeoutMs: opts.shell ? 45_000 : 15_000,
   });
 }
 

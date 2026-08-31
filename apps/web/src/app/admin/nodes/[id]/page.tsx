@@ -6,6 +6,7 @@ import { PANEL_VERSION } from "@flutter-software/shared";
 import { Cpu, HardDrive, MemoryStick, Server, Trash2 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { useAdminNode } from "@/components/node-frame";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatGiB } from "@/lib/types";
@@ -42,7 +43,15 @@ export default function NodeAboutPage() {
   const threads = node.system.cpuThreads || node.cpuCores || 0;
 
   async function onDelete() {
-    if (!window.confirm(`Delete node ${nodeName}? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: "Delete node",
+        description: `Delete ${nodeName}? This cannot be undone.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setPending(true);
     try {

@@ -3,6 +3,7 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Mail, Search, Trash2, UserPlus } from "lucide-react";
 import { PERMISSION_GROUPS, type ServerPermission } from "@flutter-software/shared";
+import { confirm } from "@/components/confirm-dialog";
 import { Badge, Button, Card, EmptyState, Input, Modal } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
@@ -226,7 +227,15 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
   }
 
   async function remove(sub: Subuser) {
-    if (!window.confirm(`Remove ${sub.username ?? sub.email} from this server?`)) return;
+    if (
+      !(await confirm({
+        title: "Remove user",
+        description: `Remove ${sub.username ?? sub.email} from this server?`,
+        confirmLabel: "Remove",
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setPending(true);
     try {

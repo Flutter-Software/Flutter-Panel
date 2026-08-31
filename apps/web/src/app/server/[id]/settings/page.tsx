@@ -1,6 +1,8 @@
 "use client";
 
 import { use, useEffect, useState, type FormEvent } from "react";
+import { confirm } from "@/components/confirm-dialog";
+import { SaveButton } from "@/components/save-button";
 import { Button, Field, Input, Textarea } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
@@ -28,6 +30,12 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
     setDescription(server.description);
   }, [id, server?.uuid]);
 
+  useEffect(() => {
+    if (!saved) return;
+    const timer = window.setTimeout(() => setSaved(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [saved]);
+
   async function onSave(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -50,7 +58,13 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
   }
 
   async function onReinstall() {
-    if (!window.confirm("Reinstall this server? Files in /home/container are kept; the install script runs again.")) {
+    if (
+      !(await confirm({
+        title: "Reinstall server",
+        description: "Files in /home/container are kept; the install script runs again.",
+        confirmLabel: "Reinstall",
+      }))
+    ) {
       return;
     }
     setError(null);
@@ -81,22 +95,33 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
 
       <form onSubmit={onSave} className="space-y-4 rounded-xl border border-border bg-card p-4">
         <Field label="Name" required>
-          <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={64} required disabled={!can(server, "settings.rename")} />
+          <Input
+            value={name}
+            onChange={(event) => {
+              setSaved(false);
+              setName(event.target.value);
+            }}
+            maxLength={64}
+            required
+            disabled={!can(server, "settings.rename")}
+          />
         </Field>
         <Field label="Description">
           <Textarea
             value={description}
-            onChange={(event) => setDescription(event.target.value)}
+            onChange={(event) => {
+              setSaved(false);
+              setDescription(event.target.value);
+            }}
             maxLength={240}
             className="min-h-[72px]"
             disabled={!can(server, "settings.rename")}
           />
         </Field>
         <div className="flex items-center gap-3">
-          <Button type="submit" disabled={pending || !name.trim() || !can(server, "settings.rename")}>
-            {pending ? "Saving…" : "Save"}
-          </Button>
-          {saved ? <p className="text-sm text-status-running">Saved</p> : null}
+          <SaveButton pending={pending} saved={saved} disabled={!name.trim() || !can(server, "settings.rename")}>
+            Save
+          </SaveButton>
         </div>
       </form>
 

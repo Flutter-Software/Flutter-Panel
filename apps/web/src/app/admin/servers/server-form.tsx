@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Box, Cpu, HardDrive, MemoryStick, Network, Server, Trash2, UserRound } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { AdminCreateHeader, AdminSection, SaveIsland, Switch, isDirty } from "@/components/admin-create";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, Field, Input, SearchSelect, Select, Textarea } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { api } from "@/lib/api";
@@ -178,7 +179,15 @@ export function ServerForm({
 
   async function onDelete() {
     if (!initial) return;
-    if (!window.confirm(`Delete server ${initial.name}? The container will be destroyed.`)) return;
+    if (
+      !(await confirm({
+        title: "Delete server",
+        description: `Delete ${initial.name}? The container will be destroyed.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setDeleting(true);
     try {

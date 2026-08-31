@@ -7,14 +7,17 @@ import {
   getLogs,
   injectContainerLog,
   inspectContainer,
+  isInstallRunning,
   killContainer,
   liveResources,
   sendCommand,
+  setConsoleEvent,
   setConsoleNotice,
   setConsoleReset,
   setConsoleWriter,
   stripAttachNoise,
 } from "./docker";
+import { getProcessState, setProcessState, setStatusBroadcast } from "./process-state";
 
 const MAX_HISTORY = 200;
 
@@ -121,6 +124,14 @@ function emit(uuid: string, event: string, data: string) {
   for (const listener of current.listeners) listener(event, data);
 }
 
+setStatusBroadcast((uuid, state) => {
+  emit(uuid, "status", state);
+});
+
+setConsoleEvent((uuid, event, data) => {
+  emit(uuid, event, data);
+});
+
 function flutterKey(line: string) {
   const match = /\[Flutter\]\s+(.*)$/.exec(line);
   return match ? match[1] : null;
@@ -182,30 +193,39 @@ function sleep(ms: number, signal: AbortSignal) {
 export async function sendConsoleCommand(uuid: string, command: string) {
   const value = command.trim();
   if (!value) return;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const write = sessions.get(uuid)?.write;
-    if (write?.(value)) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
   await sendCommand(uuid, value);
 }
 
 async function attachStdinStream(uuid: string, current: Session, signal: AbortSignal) {
-  await attachConsole(
-    uuid,
-    (line) => emitOutput(uuid, line),
-    signal,
-    (write) => {
-      current.write = write;
-    },
-  );
+  while (!signal.aborted) {
+    try {
+      await attachConsole(
+        uuid,
+        (line) => emitOutput(uuid, line),
+        signal,
+        (write) => {
+          current.write = write;
+        },
+      );
+    } catch {
+      current.write = null;
+    }
+    current.write = null;
+    if (signal.aborted) return;
+    await sleep(400, signal);
+  }
 }
 
 async function seedLogs(uuid: string) {
   try {
     const current = session(uuid);
-    const since = current.resetAt ? Math.floor(current.resetAt / 1000) : undefined;
-    const { lines } = await getLogs(uuid, since ? 400 : 120, since);
+    const generation = current.resetAt;
+    // A fresh start/restart just wiped the buffer. Don't pull previous
+    // container logs back into the empty console.
+    if (generation && Date.now() - generation < 2_000) return;
+    const since = generation ? Math.floor(generation / 1000) : undefined;
+    const { lines } = await getLogs(uuid, since ? 80 : 120, since);
+    if (sessions.get(uuid)?.resetAt !== generation) return;
     for (const line of lines) emitOutput(uuid, line);
   } catch {
     /* docker may be down */
@@ -220,23 +240,36 @@ async function flushContainerLogs(uuid: string) {
   for (const listener of current.listeners) listener("history", snapshot);
 }
 
+/** SIGINT 130 / SIGKILL 137 / SIGTERM 143 — Flutter stop/kill, not a crash. */
+function isStopSignalExit(code: number) {
+  return code === 130 || code === 137 || code === 143;
+}
+
 async function finishAttach(uuid: string) {
   await new Promise<void>((resolve) => setTimeout(resolve, 150));
   await flushContainerLogs(uuid);
   const after = await inspectContainer(uuid, true).catch(() => null);
   const state = after?.State;
-  if (state?.OOMKilled || (state && !state.Running && (state.ExitCode ?? 0) !== 0)) {
-    const reason = state.OOMKilled
+  if (state?.Running) return "running" as const;
+
+  const code = state?.ExitCode ?? 0;
+  const process = getProcessState(uuid);
+  if (!state?.OOMKilled && (process === "stopping" || isStopSignalExit(code))) {
+    return "offline" as const;
+  }
+
+  if (state?.OOMKilled || code !== 0) {
+    const reason = state?.OOMKilled
       ? "Server ran out of memory"
-      : state.Error?.trim()
+      : state?.Error?.trim()
         ? state.Error
-        : `Server crashed (exit ${state.ExitCode})`;
+        : `Server crashed (exit ${code})`;
     emit(uuid, "error", reason);
     consoleNotice(uuid, reason);
     await killContainer(uuid);
     return "crashed" as const;
   }
-  return state?.Running ? ("running" as const) : ("offline" as const);
+  return "offline" as const;
 }
 
 async function attachLive(uuid: string, signal: AbortSignal) {
@@ -250,14 +283,17 @@ async function attachLive(uuid: string, signal: AbortSignal) {
 
   const since = current.resetAt ? Math.floor(current.resetAt / 1000) : undefined;
   const seeding = current.seedPromise ??= seedLogs(uuid);
+  const recentReset = Boolean(current.resetAt && Date.now() - current.resetAt < 15_000);
 
   try {
     await Promise.all([
-      attachStdinStream(uuid, current, local.signal).catch(() => undefined),
+      attachStdinStream(uuid, current, local.signal).finally(() => local.abort()),
       followLogs(uuid, (line) => emitOutput(uuid, line), local.signal, {
-        tail: 80,
+        tail: recentReset ? 1 : 80,
         since,
-      }).catch(() => undefined),
+      })
+        .catch(() => undefined)
+        .finally(() => local.abort()),
       seeding.catch(() => undefined),
     ]);
   } finally {
@@ -301,12 +337,35 @@ async function pump(config: DaemonConfig, uuid: string) {
 
   while (!signal.aborted) {
     if (current.crashed) {
-      emit(uuid, "status", "offline");
+      setProcessState(uuid, "offline");
       await sleep(500, signal);
       continue;
     }
+
+    const installing = isInstallRunning(uuid);
     const running = await containerRunning(uuid).catch(() => false);
-    emit(uuid, "status", running ? "running" : "offline");
+    const process = getProcessState(uuid);
+
+    if (installing) {
+      if (process !== "offline") setProcessState(uuid, "offline");
+      await sleep(250, signal);
+      continue;
+    }
+
+    if (process === "starting") {
+      if (running) setProcessState(uuid, "running");
+      else await sleep(250, signal);
+      if (!running || signal.aborted) continue;
+    } else if (process === "stopping") {
+      if (!running) setProcessState(uuid, "offline");
+      await sleep(250, signal);
+      continue;
+    } else if (running && process !== "running") {
+      setProcessState(uuid, "running");
+    } else if (!running && process === "running") {
+      setProcessState(uuid, "offline");
+    }
+
     if (!running) {
       await sleep(250, signal);
       continue;
@@ -321,7 +380,7 @@ async function pump(config: DaemonConfig, uuid: string) {
 
     if (result === "crashed" || result === "error") {
       current.crashed = true;
-      emit(uuid, "status", "offline");
+      setProcessState(uuid, "offline");
       if (result === "error") {
         const still = await containerRunning(uuid).catch(() => false);
         if (still) {
@@ -353,6 +412,7 @@ export async function runDaemonConsole(
   const listener: Listener = (event, data) => sendWs(ws, event, data);
   current.listeners.add(listener);
   if (current.history.length) sendWs(ws, "history", JSON.stringify(current.history));
+  sendWs(ws, "status", getProcessState(uuid));
   const seeding = current.seedPromise ??= seedLogs(uuid);
   if (!current.abort) void pump(config, uuid);
   void seeding.catch(() => undefined).then(() => {

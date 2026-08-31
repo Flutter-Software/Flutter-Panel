@@ -1,7 +1,8 @@
 "use client";
 
 import { use, useEffect, useState, type FormEvent } from "react";
-import { Button, Field, Input } from "@/components/ui";
+import { Field, Input } from "@/components/ui";
+import { SaveButton } from "@/components/save-button";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
@@ -26,6 +27,12 @@ export default function StartupPage({ params }: { params: Promise<{ id: string }
     if (!server) return;
     setValues({ ...(server.environment ?? {}) });
   }, [id, server?.uuid]);
+
+  useEffect(() => {
+    if (!saved) return;
+    const timer = window.setTimeout(() => setSaved(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, [saved]);
 
   const variables = server?.eggVariables ?? [];
 
@@ -90,7 +97,10 @@ export default function StartupPage({ params }: { params: Promise<{ id: string }
             <Field key={variable.key} label={variable.key} hint={variable.description || undefined}>
               <Input
                 value={values[variable.key] ?? ""}
-                onChange={(event) => setValues((current) => ({ ...current, [variable.key]: event.target.value }))}
+                onChange={(event) => {
+                  setSaved(false);
+                  setValues((current) => ({ ...current, [variable.key]: event.target.value }));
+                }}
                 className="font-mono"
                 disabled={!can(server, "startup.update")}
               />
@@ -100,10 +110,9 @@ export default function StartupPage({ params }: { params: Promise<{ id: string }
       </div>
 
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={pending || variables.length === 0 || !can(server, "startup.update")}>
-          {pending ? "Saving…" : "Save environment"}
-        </Button>
-        {saved ? <p className="text-sm text-status-running">Saved. Restart to apply.</p> : null}
+        <SaveButton pending={pending} saved={saved} disabled={variables.length === 0 || !can(server, "startup.update")}>
+          Save environment
+        </SaveButton>
       </div>
     </form>
   );

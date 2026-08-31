@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import { Plus } from "lucide-react";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, Card } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
@@ -106,8 +107,16 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
                         variant="secondary"
                         size="sm"
                         disabled={pending}
-                        onClick={() => {
-                          if (!window.confirm("Restore this backup? The server will be stopped first.")) return;
+                        onClick={async () => {
+                          if (
+                            !(await confirm({
+                              title: "Restore backup",
+                              description: "The server will be stopped first.",
+                              confirmLabel: "Restore",
+                            }))
+                          ) {
+                            return;
+                          }
                           void run("restore", backup.id);
                         }}
                       >
@@ -119,8 +128,16 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
                         size="sm"
                         disabled={pending}
                         className="text-destructive"
-                        onClick={() => {
-                          if (!window.confirm("Delete this backup?")) return;
+                        onClick={async () => {
+                          if (
+                            !(await confirm({
+                              title: "Delete backup",
+                              description: "Delete this backup? This cannot be undone.",
+                              confirmLabel: "Delete",
+                            }))
+                          ) {
+                            return;
+                          }
                           void run("delete", backup.id);
                         }}
                       >

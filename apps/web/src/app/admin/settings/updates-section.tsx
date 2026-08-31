@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw, Terminal, X } from "lucide-react";
+import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@mantine/core";
 import { AdminSection } from "@/components/admin-create";
 import { api } from "@/lib/api";
@@ -79,9 +80,13 @@ export function UpdatesSection() {
 
   async function onUpdate() {
     if (
-      !window.confirm(
-        "Build the latest GitHub release in a staging folder first. The live panel is only replaced if install and compile succeed.",
-      )
+      !(await confirm({
+        title: "Install update",
+        description:
+          "Build the latest GitHub release in a staging folder first. The live panel is only replaced if install and compile succeed.",
+        confirmLabel: "Start update",
+        danger: false,
+      }))
     ) {
       return;
     }

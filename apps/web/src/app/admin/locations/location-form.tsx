@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { MapPin, Trash2 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { AdminCreateHeader, AdminSection, SaveIsland, isDirty } from "@/components/admin-create";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, Field, Input, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 
@@ -70,7 +71,15 @@ export function LocationForm({
 
   async function onDelete() {
     if (!initial) return;
-    if (!window.confirm(`Delete location ${initial.shortCode}? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: "Delete location",
+        description: `Delete ${initial.shortCode}? This cannot be undone.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setDeleting(true);
     try {

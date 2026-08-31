@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Box, Boxes, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { AdminPage, ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
@@ -14,7 +15,13 @@ export default function AdminNestsPage() {
   const nests = data?.data.nests ?? [];
 
   async function onDeleteNest(nest: NestRecord) {
-    if (!window.confirm(`Delete nest ${nest.name}? Unused eggs in this nest are deleted too.`)) {
+    if (
+      !(await confirm({
+        title: "Delete nest",
+        description: `Delete ${nest.name}? Unused eggs in this nest are deleted too.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
       return;
     }
     try {
@@ -26,7 +33,15 @@ export default function AdminNestsPage() {
   }
 
   async function onDeleteEgg(name: string, id: string) {
-    if (!window.confirm(`Delete egg ${name}? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: "Delete egg",
+        description: `Delete ${name}? This cannot be undone.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     try {
       await api(`/api/v1/admin/eggs/${id}`, { method: "DELETE" });
       await reload();

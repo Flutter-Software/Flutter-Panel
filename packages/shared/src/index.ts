@@ -69,6 +69,7 @@ export {
   serverUpdateSchema,
   powerActionSchema,
   heartbeatSchema,
+  daemonServerStateSchema,
   serverStatusSchema,
   scheduleCronSchema,
   scheduleTaskActionSchema,

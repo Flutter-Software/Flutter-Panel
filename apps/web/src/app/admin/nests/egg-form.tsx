@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Box, FileJson, Plus, Terminal, Trash2, Upload, Variable } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { AdminCreateHeader, AdminSection, SaveIsland, Segmented, isDirty } from "@/components/admin-create";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, Field, Input, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
@@ -206,7 +207,15 @@ export function EggForm({
 
   async function onDelete() {
     if (!initial) return;
-    if (!window.confirm(`Delete egg ${initial.name}? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: "Delete egg",
+        description: `Delete ${initial.name}? This cannot be undone.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setDeleting(true);
     try {

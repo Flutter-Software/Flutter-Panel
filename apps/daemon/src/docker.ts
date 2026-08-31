@@ -4,6 +4,8 @@ import Docker from "dockerode";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { DaemonConfig } from "./config";
+import { getProcessState, setProcessState, type ProcessState } from "./process-state";
+import { reportServerState } from "./panel-state";
 
 export type InstallSpec = {
   uuid: string;
@@ -39,6 +41,7 @@ function startupWrapper() {
 
 let notifyConsole: ((uuid: string, message: string) => void) | null = null;
 let resetConsole: ((uuid: string) => void) | null = null;
+let emitEvent: ((uuid: string, event: string, data: string) => void) | null = null;
 
 export function setConsoleNotice(notify: (uuid: string, message: string) => void) {
   notifyConsole = notify;
@@ -48,8 +51,16 @@ export function setConsoleReset(reset: (uuid: string) => void) {
   resetConsole = reset;
 }
 
+export function setConsoleEvent(emit: (uuid: string, event: string, data: string) => void) {
+  emitEvent = emit;
+}
+
 function notice(uuid: string, message: string) {
   notifyConsole?.(uuid, message);
+}
+
+function consoleEvent(uuid: string, event: string, data: string) {
+  emitEvent?.(uuid, event, data);
 }
 
 function clock(date = new Date()) {
@@ -506,6 +517,11 @@ async function runInstallScript(root: string, spec: InstallSpec) {
     },
     Labels: { "flutter.server": spec.uuid, "flutter.role": "install" },
   });
+  const prior = (await readInstallStatus(root)) ?? {
+    status: "installing" as const,
+    startedAt: new Date().toISOString(),
+  };
+  await writeInstallStatus(root, { ...prior, status: "installing", containerId: container.id });
   let stopLogs: (() => void) | undefined;
   try {
     notice(spec.uuid, "Running install script…");
@@ -539,9 +555,59 @@ type InstallJobStatus = {
   error?: string;
   startedAt: string;
   finishedAt?: string;
+  containerId?: string;
 };
 
 const installJobs = new Map<string, Promise<void>>();
+
+export function isInstallRunning(uuid: string) {
+  return installJobs.has(uuid);
+}
+
+async function findInstallContainer(uuid: string) {
+  const list = await docker.listContainers({
+    all: true,
+    filters: { label: [`flutter.server=${uuid}`, "flutter.role=install"] },
+  });
+  return list[0] ?? null;
+}
+
+function reportInstall(config: DaemonConfig, uuid: string, ok: boolean, error?: string) {
+  consoleEvent(uuid, "install completed", ok ? "true" : "false");
+  void reportServerState(config, uuid, { install: { ok, ...(error ? { error } : {}) } });
+}
+
+async function attachInstallWait(config: DaemonConfig, uuid: string, containerId: string, startedAt: string) {
+  const root = serverRoot(config, uuid);
+  const container = docker.getContainer(containerId);
+  try {
+    const result = await container.wait();
+    if (result.StatusCode !== 0) {
+      throw new Error(`Install script exited ${result.StatusCode}`);
+    }
+    await writeInstallStatus(root, {
+      status: "ok",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      containerId,
+    });
+    notice(uuid, "Install finished.");
+    reportInstall(config, uuid, true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await writeInstallStatus(root, {
+      status: "failed",
+      error: message,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      containerId,
+    });
+    notice(uuid, `Install failed: ${message.slice(0, 400)}`);
+    reportInstall(config, uuid, false, message);
+  } finally {
+    await container.remove({ force: true }).catch(() => undefined);
+  }
+}
 
 function installStatusPath(root: string) {
   return join(flutterDir(root), "install-status.json");
@@ -612,6 +678,7 @@ export async function startInstallServer(config: DaemonConfig, spec: InstallSpec
   const startedAt = new Date().toISOString();
   await mkdir(root, { recursive: true });
   await writeInstallStatus(root, { status: "installing", startedAt });
+  consoleEvent(spec.uuid, "install started", "");
   const job = installServer(config, spec)
     .then(async () => {
       await writeInstallStatus(root, {
@@ -620,6 +687,7 @@ export async function startInstallServer(config: DaemonConfig, spec: InstallSpec
         finishedAt: new Date().toISOString(),
       });
       notice(spec.uuid, "Install finished.");
+      reportInstall(config, spec.uuid, true);
     })
     .catch(async (error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -630,6 +698,7 @@ export async function startInstallServer(config: DaemonConfig, spec: InstallSpec
         finishedAt: new Date().toISOString(),
       });
       notice(spec.uuid, `Install failed: ${message.slice(0, 400)}`);
+      reportInstall(config, spec.uuid, false, message);
     })
     .finally(() => {
       installJobs.delete(spec.uuid);
@@ -641,16 +710,101 @@ export async function startInstallServer(config: DaemonConfig, spec: InstallSpec
 export async function getInstallStatus(config: DaemonConfig, uuid: string): Promise<InstallJobStatus> {
   const root = serverRoot(config, uuid);
   const status = await readInstallStatus(root);
-  if (!status) return { status: "failed", error: "Install has not started", startedAt: new Date().toISOString() };
+  if (!status) {
+    return { status: "installing", startedAt: new Date().toISOString() };
+  }
   if (status.status === "installing" && !installJobs.has(uuid)) {
-    return {
+    const listed = await findInstallContainer(uuid).catch(() => null);
+    const id = listed?.Id || status.containerId;
+    if (id) {
+      const info = await docker.getContainer(id).inspect().catch(() => null);
+      if (info?.State.Running || info?.State.Status === "created") {
+        const job = attachInstallWait(config, uuid, id, status.startedAt).finally(() => {
+          if (installJobs.get(uuid) === job) installJobs.delete(uuid);
+        });
+        installJobs.set(uuid, job);
+        return status;
+      }
+      if (info && !info.State.Running) {
+        const code = info.State.ExitCode ?? 0;
+        if (code === 0) {
+          const ok: InstallJobStatus = {
+            ...status,
+            status: "ok",
+            finishedAt: status.finishedAt || new Date().toISOString(),
+          };
+          await writeInstallStatus(root, ok);
+          await docker.getContainer(id).remove({ force: true }).catch(() => undefined);
+          return ok;
+        }
+        const failed: InstallJobStatus = {
+          ...status,
+          status: "failed",
+          error: status.error || `Install script exited ${code}`,
+          finishedAt: status.finishedAt || new Date().toISOString(),
+        };
+        await writeInstallStatus(root, failed);
+        await docker.getContainer(id).remove({ force: true }).catch(() => undefined);
+        return failed;
+      }
+    }
+    const failed: InstallJobStatus = {
       ...status,
       status: "failed",
       error: status.error || "Daemon restarted during install",
       finishedAt: status.finishedAt || new Date().toISOString(),
     };
+    await writeInstallStatus(root, failed);
+    return failed;
   }
   return status;
+}
+
+export async function recoverInstallJobs(config: DaemonConfig) {
+  const rootDir = resolve(config.dataDir, "servers");
+  let uuids: string[] = [];
+  try {
+    uuids = await readdir(rootDir);
+  } catch {
+    return;
+  }
+  for (const uuid of uuids) {
+    const status = await readInstallStatus(join(rootDir, uuid)).catch(() => null);
+    if (!status || status.status !== "installing") continue;
+    await getInstallStatus(config, uuid);
+    const next = await readInstallStatus(join(rootDir, uuid));
+    if (next?.status === "failed") {
+      reportInstall(config, uuid, false, next.error || "Daemon restarted during install");
+    } else if (next?.status === "ok") {
+      reportInstall(config, uuid, true);
+    }
+  }
+}
+
+export async function hydrateProcessStates(config: DaemonConfig) {
+  const running = new Set<string>();
+  const list = await docker.listContainers({
+    filters: { label: ["flutter.server"] },
+  });
+  for (const row of list) {
+    const uuid = row.Labels?.["flutter.server"];
+    if (!uuid || row.Labels?.["flutter.role"] === "install") continue;
+    if (row.State === "running") running.add(uuid);
+  }
+  const rootDir = resolve(config.dataDir, "servers");
+  let uuids: string[] = [];
+  try {
+    uuids = await readdir(rootDir);
+  } catch {
+    uuids = [...running];
+  }
+  for (const uuid of new Set([...uuids, ...running])) {
+    if (isInstallRunning(uuid)) continue;
+    const status = await readInstallStatus(join(rootDir, uuid)).catch(() => null);
+    if (status?.status === "installing") continue;
+    setProcessState(uuid, running.has(uuid) ? "running" : "offline");
+    if (running.has(uuid)) void ensureStatsStream(uuid).catch(() => undefined);
+  }
 }
 
 export async function destroyServer(config: DaemonConfig, uuid: string) {
@@ -731,16 +885,184 @@ async function stopRunning(uuid: string, stopCommand: string, graceMs: number) {
   invalidateInspect(uuid);
 }
 
-export async function powerServer(config: DaemonConfig, spec: InstallSpec, action: PowerAction) {
+const powerAborts = new Map<string, AbortController>();
+
+function beginPower(uuid: string) {
+  powerAborts.get(uuid)?.abort();
+  const ac = new AbortController();
+  powerAborts.set(uuid, ac);
+  return ac.signal;
+}
+
+function aborted(signal: AbortSignal) {
+  return signal.aborted;
+}
+
+async function bootContainer(config: DaemonConfig, spec: InstallSpec, signal: AbortSignal) {
   const uuid = spec.uuid;
   const name = containerName(uuid);
   const root = serverRoot(config, uuid);
+  await mkdir(root, { recursive: true });
+  const merged = mergeSpec(await loadSpec(root), spec);
+  await saveSpec(root, merged);
+  if (aborted(signal)) return;
+  const image = merged.dockerImage?.trim() || "busybox:1.36";
+  await pullImage(image);
+  if (aborted(signal)) return;
+  const identity = await ensureServerOwnership(root, uuid);
+  if (aborted(signal)) return;
+  const fingerprint = specFingerprint(merged);
+  const existing = await inspectContainer(uuid, true);
+  const sameSpec = existing?.Config.Labels?.["flutter.spec"] === fingerprint;
+
+  const settleStarted = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    if (aborted(signal)) return;
+    invalidateInspect(uuid);
+    const after = await inspectContainer(uuid, true);
+    if (after?.State.Running) {
+      setProcessState(uuid, "running");
+      void ensureStatsStream(uuid).catch(() => undefined);
+      notice(uuid, "Server is running.");
+      return;
+    }
+    const code = after?.State.ExitCode ?? 0;
+    const dockerError = after?.State.Error?.trim();
+    if (after?.State.OOMKilled) notice(uuid, "Server ran out of memory");
+    else if (dockerError) notice(uuid, dockerError);
+    else if (code !== 0) notice(uuid, `Server crashed (exit ${code})`);
+    else notice(uuid, "Server process exited immediately.");
+    await noticeRecentLogs(uuid);
+    setProcessState(uuid, "offline");
+    notice(uuid, "Server is offline.");
+  };
+
+  if (existing?.State.Running && sameSpec) {
+    await applyCompute(existing.Id, merged);
+    return settleStarted();
+  }
+
+  if (sameSpec && existing && !existing.State.Running) {
+    await applyCompute(existing.Id, merged);
+    if (aborted(signal)) return;
+    await docker.getContainer(existing.Id).start();
+    return settleStarted();
+  }
+
+  if (existing) await removeContainer(uuid);
+  if (aborted(signal)) return;
+
+  const env = runtimeEnvironment(merged);
+  const hasStartup = Boolean(merged.startup?.trim());
+  if (hasStartup && !env.STARTUP?.trim()) env.STARTUP = DEFAULT_STARTUP;
+  const ports = dockerPortMap(merged);
+  const compute = cpuLayout(merged.limits.cpuPercent, merged.limits.cpuPinning ?? 0, uuid);
+
+  const container = await docker.createContainer({
+    name,
+    Image: image,
+    User: identity.user,
+    // Yolks ENTRYPOINT tini and CMD /entrypoint.sh. Docker Init is PID 1;
+    // run /entrypoint.sh ourselves so Arma/SteamCMD eggs can set runtime
+    // vars and eval $STARTUP. Images with an empty startup (itzg) keep
+    // their own entrypoint.
+    ...(hasStartup ? { Entrypoint: ["/bin/sh", "-c"], Cmd: [startupWrapper()] } : {}),
+    Tty: true,
+    OpenStdin: true,
+    AttachStdin: true,
+    AttachStdout: true,
+    AttachStderr: true,
+    WorkingDir: "/home/container",
+    Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
+    ExposedPorts: ports.exposed,
+    HostConfig: {
+      Init: true,
+      Binds: [`${bindPath(root)}:/home/container`],
+      Memory: merged.limits.memoryBytes > 0 ? merged.limits.memoryBytes : 0,
+      ...(compute.nanoCpus ? { NanoCpus: compute.nanoCpus } : {}),
+      ...(compute.cpuShares ? { CpuShares: compute.cpuShares } : {}),
+      ...(compute.cpuset ? { CpusetCpus: compute.cpuset } : {}),
+      PortBindings: ports.bindings,
+      RestartPolicy: { Name: "no" },
+    },
+    Labels: { "flutter.server": uuid, "flutter.spec": fingerprint },
+  });
+  if (aborted(signal)) {
+    await container.remove({ force: true }).catch(() => undefined);
+    return;
+  }
+  await container.start();
+  return settleStarted();
+}
+
+async function runPower(config: DaemonConfig, spec: InstallSpec, action: PowerAction, signal: AbortSignal) {
+  const uuid = spec.uuid;
+  const root = serverRoot(config, uuid);
   invalidateInspect(uuid);
   if (action === "stop" || action === "kill") stopStatsStream(uuid);
+  if (action === "start" || action === "restart") stopStatsStream(uuid);
+
+  await mkdir(root, { recursive: true });
+  const merged = mergeSpec(await loadSpec(root), spec);
+  await saveSpec(root, merged);
+  if (aborted(signal)) return;
+
+  if (action === "kill") {
+    const existing = await inspectContainer(uuid, true);
+    if (existing) {
+      await signalContainer(existing.Id, "SIGKILL");
+      await withTimeout(docker.getContainer(existing.Id).kill(), 2_000).catch(() => undefined);
+    }
+    if (aborted(signal)) return;
+    setProcessState(uuid, "offline");
+    notice(uuid, "Server is offline.");
+    return;
+  }
+
+  if (action === "stop") {
+    await stopRunning(uuid, merged.stopCommand ?? "", 2_000);
+    if (aborted(signal)) return;
+    setProcessState(uuid, "offline");
+    notice(uuid, "Server is offline.");
+    return;
+  }
+
+  if (action === "restart") {
+    const existing = await inspectContainer(uuid, true);
+    if (existing?.State.Running) {
+      await stopRunning(uuid, merged.stopCommand ?? "", 2_000);
+      if (aborted(signal)) return;
+    }
+    setProcessState(uuid, "starting");
+  }
+
+  await bootContainer(config, spec, signal);
+}
+
+export async function powerServer(config: DaemonConfig, spec: InstallSpec, action: PowerAction) {
+  const uuid = spec.uuid;
+  const signal = beginPower(uuid);
+
+  if (action === "kill" || action === "stop") {
+    setProcessState(uuid, "stopping");
+  } else if (action === "restart") {
+    const current = getProcessState(uuid);
+    const running = await containerRunning(uuid).catch(() => false);
+    setProcessState(
+      uuid,
+      running || current === "running" || current === "starting" || current === "stopping"
+        ? "stopping"
+        : "starting",
+    );
+  } else {
+    setProcessState(uuid, "starting");
+  }
+
   if (action === "start" || action === "restart") {
     stopStatsStream(uuid);
     resetConsole?.(uuid);
   }
+
   notice(
     uuid,
     action === "restart"
@@ -751,116 +1073,13 @@ export async function powerServer(config: DaemonConfig, spec: InstallSpec, actio
           ? "Killing server..."
           : "Starting server...",
   );
-  try {
-    await mkdir(root, { recursive: true });
-    const merged = mergeSpec(await loadSpec(root), spec);
-    await saveSpec(root, merged);
-    const image = merged.dockerImage?.trim() || "busybox:1.36";
-    let identity = hostIdentity();
-    if (action === "start" || action === "restart") {
-      await pullImage(image);
-      identity = await ensureServerOwnership(root, uuid);
-    }
-    const fingerprint = specFingerprint(merged);
-    const existing = await inspectContainer(uuid);
-    const sameSpec = existing?.Config.Labels?.["flutter.spec"] === fingerprint;
 
-    const done = (status: "running" | "offline") => {
-      invalidateInspect(uuid);
-      notice(uuid, status === "running" ? "Server is running." : "Server is offline.");
-      return { status, action };
-    };
+  void runPower(config, spec, action, signal).catch((error) => {
+    notice(uuid, error instanceof Error ? `Power action failed: ${error.message}` : "Power action failed.");
+    if (!signal.aborted) setProcessState(uuid, "offline");
+  });
 
-    const settleStarted = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      invalidateInspect(uuid);
-      const after = await inspectContainer(uuid, true);
-      if (after?.State.Running) return done("running");
-      const code = after?.State.ExitCode ?? 0;
-      const dockerError = after?.State.Error?.trim();
-      if (after?.State.OOMKilled) notice(uuid, "Server ran out of memory");
-      else if (dockerError) notice(uuid, dockerError);
-      else if (code !== 0) notice(uuid, `Server crashed (exit ${code})`);
-      else notice(uuid, "Server process exited immediately.");
-      await noticeRecentLogs(uuid);
-      return done("offline");
-    };
-
-    if (action === "kill") {
-      if (existing) {
-        await signalContainer(existing.Id, "SIGKILL");
-        await withTimeout(docker.getContainer(existing.Id).kill(), 2_000).catch(() => undefined);
-      }
-      return done("offline");
-    }
-
-    if (action === "stop") {
-      await stopRunning(uuid, merged.stopCommand ?? "", 2_000);
-      return done("offline");
-    }
-
-    if (action === "start" && existing?.State.Running) {
-      return settleStarted();
-    }
-
-    if (sameSpec && existing) {
-      await applyCompute(existing.Id, merged);
-      if (action === "restart" && existing.State.Running) {
-        await docker.getContainer(existing.Id).restart({ t: 2 });
-        return settleStarted();
-      }
-      if (!existing.State.Running) {
-        await docker.getContainer(existing.Id).start();
-        return settleStarted();
-      }
-    }
-
-    if (existing) await removeContainer(uuid);
-
-    const env = runtimeEnvironment(merged);
-    const hasStartup = Boolean(merged.startup?.trim());
-    if (hasStartup && !env.STARTUP?.trim()) env.STARTUP = DEFAULT_STARTUP;
-    const ports = dockerPortMap(merged);
-    const compute = cpuLayout(merged.limits.cpuPercent, merged.limits.cpuPinning ?? 0, uuid);
-
-    const container = await docker.createContainer({
-      name,
-      Image: image,
-      User: identity.user,
-      // Yolks ENTRYPOINT tini and CMD /entrypoint.sh. Docker Init is PID 1;
-      // run /entrypoint.sh ourselves so Arma/SteamCMD eggs can set runtime
-      // vars and eval $STARTUP. Images with an empty startup (itzg) keep
-      // their own entrypoint.
-      ...(hasStartup ? { Entrypoint: ["/bin/sh", "-c"], Cmd: [startupWrapper()] } : {}),
-      Tty: true,
-      OpenStdin: true,
-      AttachStdin: true,
-      AttachStdout: true,
-      AttachStderr: true,
-      WorkingDir: "/home/container",
-      Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
-      ExposedPorts: ports.exposed,
-      HostConfig: {
-        Init: true,
-        Binds: [`${bindPath(root)}:/home/container`],
-        Memory: merged.limits.memoryBytes > 0 ? merged.limits.memoryBytes : 0,
-        ...(compute.nanoCpus ? { NanoCpus: compute.nanoCpus } : {}),
-        ...(compute.cpuShares ? { CpuShares: compute.cpuShares } : {}),
-        ...(compute.cpuset ? { CpusetCpus: compute.cpuset } : {}),
-        PortBindings: ports.bindings,
-        RestartPolicy: { Name: "no" },
-      },
-      Labels: { "flutter.server": uuid, "flutter.spec": fingerprint },
-    });
-    await container.start();
-    return settleStarted();
-  } catch (error) {
-    notice(
-      uuid,
-      error instanceof Error ? `Power action failed: ${error.message}` : "Power action failed.",
-    );
-    throw error;
-  }
+  return { accepted: true as const, status: getProcessState(uuid) as ProcessState, action };
 }
 
 export async function containerRunning(uuid: string) {
@@ -1094,10 +1313,13 @@ export async function liveResources(config: DaemonConfig, uuid: string) {
   if (running) await ensureStatsStream(uuid).catch(() => undefined);
   else stopStatsStream(uuid);
 
-  let stats = resourceCache.get(uuid)?.stats ?? null;
+  let stats = running ? (resourceCache.get(uuid)?.stats ?? null) : null;
   if (running && !stats) {
     stats = await readDockerStats(uuid).catch(() => null);
     if (stats) cacheStats(uuid, true, stats);
+  }
+  if (!running && cached?.stats) {
+    cacheStats(uuid, false, null);
   }
 
   if (!cached || now - cached.diskAt > 8_000) {
@@ -1447,17 +1669,216 @@ export async function injectContainerLog(uuid: string, message: string) {
   }
 }
 
-export async function sendCommand(uuid: string, command: string) {
-  const payload = command.endsWith("\n") || command === "\x03" ? command : `${command}\n`;
-  if (tryConsoleWrite?.(uuid, payload)) return { ok: true };
-  const stream = await withTimeout(attachStream(uuid, { stdin: true, stdout: true, stderr: true }), 2_000);
+const EXEC_CMD_TIMEOUT_MS = 30_000;
+
+async function execShellCommand(uuid: string, command: string): Promise<"ok" | "notfound" | "failed"> {
+  const info = await inspectContainer(uuid);
+  if (!info?.State.Running) return "failed";
+  const identity = hostIdentity();
+  let exec;
   try {
-    if (!writeAttach(stream, payload)) throw new Error("stdin write failed");
-    await new Promise((resolveWrite) => setTimeout(resolveWrite, 80));
-  } finally {
-    stream.destroy?.();
+    exec = await docker.getContainer(info.Id).exec({
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+      User: identity.user,
+      WorkingDir: "/home/container",
+      Cmd: ["sh", "-c", command],
+    });
+  } catch {
+    return "failed";
   }
-  return { ok: true };
+
+  const buffered: string[] = [];
+  let streamed = false;
+  const flush = (line: string) => {
+    if (streamed) {
+      consoleEvent(uuid, "output", line);
+      return;
+    }
+    buffered.push(line);
+  };
+  const release = () => {
+    if (streamed) return;
+    streamed = true;
+    for (const line of buffered) consoleEvent(uuid, "output", line);
+    buffered.length = 0;
+  };
+
+  try {
+    const stream = (await exec.start({ hijack: true, stdin: false })) as NodeJS.ReadableStream & {
+      destroy?: () => void;
+    };
+    const parser = createOutputParser(false, flush);
+    const onData = (chunk: Buffer | string) => parser.push(chunk);
+    stream.on("data", onData);
+    const trickle = setTimeout(release, 400);
+    const killer = setTimeout(() => stream.destroy?.(), EXEC_CMD_TIMEOUT_MS);
+    await new Promise<void>((resolve) => {
+      const stop = () => {
+        stream.off("data", onData);
+        parser.end();
+        resolve();
+      };
+      stream.on("end", stop);
+      stream.on("error", stop);
+      stream.resume?.();
+    });
+    clearTimeout(trickle);
+    clearTimeout(killer);
+    const result = await exec.inspect().catch(() => null);
+    const code = result?.ExitCode ?? 0;
+    if (code === 127 && !streamed) return "notfound";
+    release();
+    if (code === 137) {
+      consoleEvent(uuid, "output", `[${clock()}] Command timed out after 30s`);
+    }
+    return "ok";
+  } catch {
+    return "failed";
+  }
+}
+
+export async function sendCommand(uuid: string, command: string) {
+  if (command === "\x03") {
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      if (tryConsoleWrite?.(uuid, "\x03")) return { ok: true };
+      const running = await containerRunning(uuid).catch(() => false);
+      if (!running) throw new Error("Server is not running");
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    throw new Error("Console is not attached");
+  }
+  const value = command.trim();
+  if (!value) return { ok: true };
+  const payload = command.endsWith("\n") ? command : `${command}\n`;
+  const execResult = await execShellCommand(uuid, value);
+  if (execResult === "ok") return { ok: true };
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    if (tryConsoleWrite?.(uuid, payload)) return { ok: true };
+    const running = await containerRunning(uuid).catch(() => false);
+    if (!running) throw new Error("Server is not running");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  throw new Error("Console is not attached");
+}
+
+const OFFLINE_CMD_MAX = 4_000;
+const OFFLINE_CMD_TIMEOUT_MS = 30_000;
+const offlineCommands = new Map<string, Promise<void>>();
+
+function oneshotName(uuid: string) {
+  return `flutter-cmd-${uuid}`;
+}
+
+async function removeOneshot(uuid: string) {
+  await docker
+    .getContainer(oneshotName(uuid))
+    .remove({ force: true })
+    .catch(() => undefined);
+}
+
+export async function runOfflineCommand(config: DaemonConfig, uuid: string, command: string) {
+  const value = command.trim();
+  if (!value) throw new Error("command is required");
+  if (value.length > OFFLINE_CMD_MAX) throw new Error("Command is too long");
+  if (isInstallRunning(uuid)) throw new Error("Unavailable while installing");
+  const process = getProcessState(uuid);
+  if (process === "running" || (await containerRunning(uuid))) {
+    return sendCommand(uuid, value);
+  }
+  if (process === "starting" || process === "stopping") {
+    throw new Error("Wait until the server has started or stopped");
+  }
+  if (offlineCommands.has(uuid)) {
+    throw new Error("A command is already running");
+  }
+
+  const root = serverRoot(config, uuid);
+  const spec = mergeSpec(await loadSpec(root), {
+    uuid,
+    name: uuid,
+    dockerImage: "",
+    startup: "",
+    stopCommand: "stop",
+    environment: {},
+    limits: { memoryBytes: 0, diskBytes: 0, cpuPercent: 0 },
+    allocation: { ip: "0.0.0.0", port: 0 },
+  });
+  const image = spec.dockerImage?.trim() || "busybox:1.36";
+  const identity = hostIdentity();
+  const compute = cpuLayout(spec.limits.cpuPercent, spec.limits.cpuPinning ?? 0, uuid);
+  const memory =
+    spec.limits.memoryBytes > 0 ? Math.min(spec.limits.memoryBytes, 512 * 1024 * 1024) : 256 * 1024 * 1024;
+
+  const job = (async () => {
+    await pullImage(image);
+    await removeOneshot(uuid);
+    const container = await docker.createContainer({
+      name: oneshotName(uuid),
+      Image: image,
+      User: identity.user,
+      Entrypoint: ["/bin/sh", "-c"],
+      Cmd: [value],
+      Tty: false,
+      WorkingDir: "/home/container",
+      Env: Object.entries(runtimeEnvironment(spec)).map(([key, val]) => `${key}=${val}`),
+      HostConfig: {
+        Binds: [`${bindPath(root)}:/home/container`],
+        ReadonlyRootfs: true,
+        Tmpfs: { "/tmp": "rw,noexec,nosuid,size=64m", "/var/tmp": "rw,noexec,nosuid,size=32m" },
+        NetworkMode: "none",
+        Memory: memory,
+        MemorySwap: memory,
+        ...(compute.nanoCpus ? { NanoCpus: compute.nanoCpus } : {}),
+        PidsLimit: 64,
+        CapDrop: ["ALL"],
+        SecurityOpt: ["no-new-privileges:true"],
+        AutoRemove: false,
+      },
+      Labels: { "flutter.server": uuid, "flutter.role": "oneshot" },
+    });
+    let stopLogs: (() => void) | undefined;
+    const timer = setTimeout(() => {
+      void container.kill().catch(() => undefined);
+    }, OFFLINE_CMD_TIMEOUT_MS);
+    try {
+      await container.start();
+      const stream = (await container.logs({
+        follow: true,
+        stdout: true,
+        stderr: true,
+      })) as NodeJS.ReadableStream & { destroy?: () => void };
+      const parser = createOutputParser(false, (line) => consoleEvent(uuid, "output", line));
+      const onData = (chunk: Buffer | string) => parser.push(chunk);
+      stream.on("data", onData);
+      stopLogs = () => {
+        stream.off("data", onData);
+        stream.destroy?.();
+        parser.end();
+      };
+      const result = await container.wait();
+      stopLogs();
+      stopLogs = undefined;
+      if (result.StatusCode === 137) {
+        consoleEvent(uuid, "output", `[${clock()}] Command timed out after 30s`);
+      } else if (result.StatusCode !== 0) {
+        consoleEvent(uuid, "output", `[${clock()}] Command exited ${result.StatusCode}`);
+      }
+    } finally {
+      clearTimeout(timer);
+      stopLogs?.();
+      await container.remove({ force: true }).catch(() => undefined);
+    }
+  })();
+
+  offlineCommands.set(uuid, job);
+  try {
+    await job;
+    return { ok: true, offline: true };
+  } finally {
+    offlineCommands.delete(uuid);
+  }
 }
 
 export async function runBackupContainer(image: string, binds: string[], cmd: string[]) {

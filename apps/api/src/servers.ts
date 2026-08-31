@@ -314,6 +314,7 @@ export async function getClientServer(serverId: string, viewerId: string, admin:
 
 async function withLiveUsage(client: ReturnType<typeof toClientServer>) {
   if (!client.nodeOnline) return client;
+  if (client.status === "installing" || client.status === "install_failed") return client;
   try {
     const live = await statsOnNode(client.nodeId, client.uuid);
     if (typeof live.diskBytes === "number" && live.diskBytes > 0) {
@@ -492,11 +493,7 @@ export async function powerServer(
 
 async function finishPower(serverId: string, nodeId: string, spec: InstallSpec, action: PowerAction) {
   try {
-    const result = await powerOnNode(nodeId, spec, action);
-    const row = await Server.findById(serverId);
-    if (!row || row.status === "installing") return;
-    row.status = result?.status === "running" ? "running" : "offline";
-    await row.save();
+    await powerOnNode(nodeId, spec, action);
   } catch (error) {
     log("error", "power action failed", {
       serverId,
@@ -504,9 +501,11 @@ async function finishPower(serverId: string, nodeId: string, spec: InstallSpec, 
       error: error instanceof Error ? error.message : String(error),
     });
     const row = await Server.findById(serverId);
-    if (!row || row.status === "installing") return;
-    row.status = "offline";
-    await row.save();
+    if (!row || row.status === "installing" || row.status === "install_failed") return;
+    if (row.status === "starting" || row.status === "stopping") {
+      row.status = "offline";
+      await row.save();
+    }
   }
 }
 
@@ -542,15 +541,18 @@ async function runInstall(serverId: string) {
     server.status = "installing";
     await server.save();
     await installOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation));
-    server.status = "offline";
-    await server.save();
+    const row = await Server.findById(serverId);
+    if (row && (row.status === "installing" || row.status === "install_failed")) {
+      row.status = "offline";
+      await row.save();
+    }
   } catch (error) {
     log("error", "server install failed", {
       serverId,
       error: error instanceof Error ? error.message : String(error),
     });
     const server = await Server.findById(serverId);
-    if (server) {
+    if (server && server.status === "installing") {
       server.status = "install_failed";
       await server.save();
     }
@@ -596,8 +598,13 @@ export async function serverCommand(
       ? String((body as { command: unknown }).command ?? "")
       : String(body ?? "");
   if (!command.trim()) throw FlutterError.validation("command is required");
+  const shell = Boolean(typeof body === "object" && body && (body as { shell?: unknown }).shell);
   const server = await requireServer(serverId, viewerId, admin, "control.console");
-  await commandOnNode(server.nodeId.toString(), server.uuid, command.trim());
+  if (server.status === "installing") {
+    throw FlutterError.conflict("Wait for install to finish before sending commands");
+  }
+  const live = server.status === "running" || server.status === "starting" || server.status === "stopping";
+  await commandOnNode(server.nodeId.toString(), server.uuid, command.trim(), { shell: shell && !live });
   return { ok: true };
 }
 
@@ -720,16 +727,14 @@ export async function applyPowerDirect(serverId: string, action: PowerAction) {
   server.status = action === "start" || action === "restart" ? "starting" : "stopping";
   await server.save();
   try {
-    const result = await powerOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation), action);
-    const row = await Server.findById(serverId);
-    if (!row || row.status === "installing") return;
-    row.status = result?.status === "running" ? "running" : "offline";
-    await row.save();
+    await powerOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation), action);
   } catch (error) {
     const row = await Server.findById(serverId);
-    if (row && row.status !== "installing") {
-      row.status = "offline";
-      await row.save();
+    if (row && row.status !== "installing" && row.status !== "install_failed") {
+      if (row.status === "starting" || row.status === "stopping") {
+        row.status = "offline";
+        await row.save();
+      }
     }
     throw error;
   }

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Boxes, Pencil, Plus, Trash2 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { AdminCreateHeader, AdminSection, SaveIsland, isDirty } from "@/components/admin-create";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Field, Input, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { EggRecord } from "./egg-form";
@@ -72,7 +73,13 @@ export function NestForm({
 
   async function onDelete() {
     if (!initial) return;
-    if (!window.confirm(`Delete nest ${initial.name}? Unused eggs in this nest are deleted too.`)) {
+    if (
+      !(await confirm({
+        title: "Delete nest",
+        description: `Delete ${initial.name}? Unused eggs in this nest are deleted too.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
       return;
     }
     setError(null);

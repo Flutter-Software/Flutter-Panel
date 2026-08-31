@@ -5,6 +5,7 @@ import Link from "next/link";
 import { MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import { AdminPage, ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
@@ -18,7 +19,15 @@ export default function AdminLocationsPage() {
 
   const onDelete = useCallback(
     async (location: LocationRecord) => {
-      if (!window.confirm(`Delete location ${location.shortCode}? This cannot be undone.`)) return;
+      if (
+        !(await confirm({
+          title: "Delete location",
+          description: `Delete ${location.shortCode}? This cannot be undone.`,
+          confirmLabel: "Delete",
+        }))
+      ) {
+        return;
+      }
       try {
         await api(`/api/v1/admin/locations/${location.id}`, { method: "DELETE" });
         await reload();

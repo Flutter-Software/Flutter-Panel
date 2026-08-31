@@ -217,6 +217,9 @@ export function createApp() {
 
   app.get("/daemon/configuration", async (c) => c.json({ data: await daemon.configuration(c) }));
   app.post("/daemon/heartbeat", async (c) => c.json({ data: await daemon.heartbeat(c) }));
+  app.post("/daemon/servers/:uuid/state", async (c) =>
+    c.json({ data: await daemon.applyServerState(c, c.req.param("uuid")) }),
+  );
 
   app.get("/client/servers", async (c) => {
     const session = await requireUser(c);
@@ -746,7 +749,6 @@ async function connectDaemonConsole(
 ) {
   const node = await Node.findById(claims.nodeId);
   if (!node || !isNodeOnline(node.lastHeartbeatAt) || !node.daemonListenUrl) {
-    sendClient(ws, { event: "status", data: "offline" });
     sendClient(ws, { event: "error", data: "Node daemon is offline" });
     return;
   }
@@ -766,7 +768,7 @@ async function connectDaemonConsole(
     if (Number(ws.readyState) === 1) ws.send(wsText(event.data));
   });
   daemonWs.addEventListener("close", () => {
-    sendClient(ws, { event: "status", data: "offline" });
+    sendClient(ws, { event: "error", data: "Lost connection to the daemon console" });
   });
   daemonWs.addEventListener("error", () => {
     sendClient(ws, { event: "error", data: "Lost connection to the daemon console" });

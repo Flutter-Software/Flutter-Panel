@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, Trash2 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { useAdminNode } from "@/components/node-frame";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -19,7 +20,15 @@ export default function NodeAllocationsPage() {
   const used = node.allocations.filter((row) => row.assigned).length;
 
   async function onRemove(id: string, label: string) {
-    if (!window.confirm(`Remove allocation ${label}?`)) return;
+    if (
+      !(await confirm({
+        title: "Remove allocation",
+        description: `Remove ${label}?`,
+        confirmLabel: "Remove",
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setRemovingId(id);
     try {

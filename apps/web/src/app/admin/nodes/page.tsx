@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Check, Copy, Plus, Server, Trash2 } from "lucide-react";
 import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
+import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -108,7 +109,15 @@ export default function AdminNodesPage() {
   }
 
   async function onDelete(node: Node) {
-    if (!window.confirm(`Delete node ${node.name}? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: "Delete node",
+        description: `Delete ${node.name}? This cannot be undone.`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     setActionError(null);
     try {
       await api(`/api/v1/admin/nodes/${node.id}`, { method: "DELETE" });

@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { describeCron, nextCronDate, type CronFields } from "@flutter-software/shared";
+import { confirm } from "@/components/confirm-dialog";
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, Select, Textarea } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
@@ -348,7 +349,15 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
   }
 
   async function remove(row: Schedule) {
-    if (!window.confirm(`Delete schedule “${row.name}”?`)) return;
+    if (
+      !(await confirm({
+        title: "Delete schedule",
+        description: `Delete “${row.name}”?`,
+        confirmLabel: "Delete",
+      }))
+    ) {
+      return;
+    }
     setError(null);
     setPending(true);
     try {

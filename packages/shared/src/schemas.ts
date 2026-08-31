@@ -375,6 +375,17 @@ export const heartbeatSchema = z.object({
     .optional(),
 });
 
+export const daemonServerStateSchema = z.object({
+  nodeId: objectIdSchema,
+  status: z.enum(["offline", "starting", "running", "stopping"]).optional(),
+  install: z
+    .object({
+      ok: z.boolean(),
+      error: z.string().max(2000).optional(),
+    })
+    .optional(),
+});
+
 export const serverStatusSchema = z.enum([
   "offline",
   "installing",
