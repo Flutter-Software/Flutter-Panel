@@ -9,6 +9,7 @@ import {
   useState,
   type ChangeEvent,
   type DragEvent,
+  type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -20,6 +21,8 @@ import {
   Copy,
   FilePlus,
   FileText,
+  Folder,
+  FolderInput,
   FolderOpen,
   FolderPlus,
   MoreVertical,
@@ -30,7 +33,7 @@ import {
 } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
 import { FileIdeModal } from "@/components/file-ide";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Field, Input, Modal } from "@/components/ui";
 import { api, apiUpload } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useServerRecord } from "@/components/server-frame";
@@ -42,6 +45,16 @@ type Entry = { name: string; kind: "file" | "dir"; size: number; modifiedAt: str
 type Menu =
   | { x: number; y: number; kind: "entry"; entry: Entry }
   | { x: number; y: number; kind: "blank" };
+
+type NameModalState =
+  | { mode: "create-file" }
+  | { mode: "create-dir" }
+  | { mode: "rename"; entry: Entry };
+
+type MoveModalState = {
+  from: string;
+  entries: Entry[];
+};
 
 function joinPath(dir: string, name: string) {
   if (!dir || dir === "/") return name.startsWith("/") ? name : `/${name}`;
@@ -60,6 +73,40 @@ function parentPath(dir: string) {
   if (cleaned === "/") return "/";
   const idx = cleaned.lastIndexOf("/");
   return idx <= 0 ? "/" : cleaned.slice(0, idx);
+}
+
+function displayContainerPath(dir: string) {
+  const cleaned = normalizeDir(dir);
+  return cleaned === "/" ? "/home/container" : `/home/container${cleaned}`;
+}
+
+function parseEntryName(value: string): { name: string } | { error: string } {
+  const name = value.trim();
+  if (!name) return { error: "Enter a name" };
+  if (name === "." || name === "..") return { error: "Enter a valid name" };
+  if (/[\\/]/.test(name)) return { error: "Name cannot contain slashes" };
+  return { name };
+}
+
+function isInsidePath(dir: string, ancestor: string) {
+  const target = normalizeDir(dir);
+  const root = normalizeDir(ancestor);
+  return target === root || target.startsWith(`${root}/`);
+}
+
+function cannotMoveTo(from: string, entries: Entry[], dest: string) {
+  const destDir = normalizeDir(dest);
+  if (destDir === normalizeDir(from)) return true;
+  return entries.some((entry) => {
+    if (entry.kind !== "dir") return false;
+    return isInsidePath(destDir, joinPath(from, entry.name));
+  });
+}
+
+function moveCollisions(from: string, items: Entry[], dest: string, destEntries: Entry[]) {
+  if (normalizeDir(from) === normalizeDir(dest)) return [];
+  const names = new Set(items.map((entry) => entry.name));
+  return destEntries.filter((entry) => names.has(entry.name)).map((entry) => entry.name);
 }
 
 function filesHref(pathname: string, dir: string) {
@@ -272,6 +319,16 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const [menu, setMenu] = useState<Menu | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const lastIndex = useRef<number | null>(null);
+  const [nameModal, setNameModal] = useState<NameModalState | null>(null);
+  const [nameValue, setNameValue] = useState("");
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [namePending, setNamePending] = useState(false);
+  const [moveModal, setMoveModal] = useState<MoveModalState | null>(null);
+  const [moveDest, setMoveDest] = useState("/");
+  const [moveList, setMoveList] = useState<Entry[]>([]);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [moveLoading, setMoveLoading] = useState(false);
+  const [movePending, setMovePending] = useState(false);
 
   async function files(body: Record<string, unknown>) {
     return api<{ data: unknown }>(`/api/v1/client/servers/${id}/files`, {
@@ -545,18 +602,79 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     }
   }
 
-  async function renameEntry(entry: Entry) {
-    const name = window.prompt("Rename", entry.name);
-    if (!name?.trim() || name.trim() === entry.name) return;
-    const from = joinPath(path, entry.name);
-    const to = joinPath(path, name.trim());
+  function closeNameModal() {
+    if (namePending) return;
+    setNameModal(null);
+    setNameValue("");
+    setNameError(null);
+  }
+
+  function openCreate(kind: "file" | "dir") {
+    setNameModal({ mode: kind === "file" ? "create-file" : "create-dir" });
+    setNameValue("");
+    setNameError(null);
+  }
+
+  function openRename(entry: Entry) {
+    setNameModal({ mode: "rename", entry });
+    setNameValue(entry.name);
+    setNameError(null);
+  }
+
+  function focusNameInput(event: FocusEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    if (nameModal?.mode === "rename" && nameModal.entry.kind === "file") {
+      const current = nameModal.entry.name;
+      const dot = current.lastIndexOf(".");
+      if (dot > 0) {
+        input.setSelectionRange(0, dot);
+        return;
+      }
+    }
+    input.select();
+  }
+
+  async function submitNameModal() {
+    if (!nameModal || namePending) return;
+    const parsed = parseEntryName(nameValue);
+    if ("error" in parsed) {
+      setNameError(parsed.error);
+      return;
+    }
+    const name = parsed.name;
+    if (nameModal.mode === "rename" && name === nameModal.entry.name) {
+      closeNameModal();
+      return;
+    }
+    if (nameModal.mode !== "rename" && entries.some((entry) => entry.name === name)) {
+      setNameError("A file or folder with that name already exists");
+      return;
+    }
+    if (nameModal.mode === "rename" && entries.some((entry) => entry.name === name && entry.name !== nameModal.entry.name)) {
+      setNameError("A file or folder with that name already exists");
+      return;
+    }
+    setNameError(null);
+    setNamePending(true);
     setError(null);
     try {
-      await files({ action: "rename", path: from, to });
-      if (isEditing(entry) && editing) setEditing({ ...editing, path: to });
+      if (nameModal.mode === "create-dir") {
+        await files({ action: "mkdir", path: joinPath(path, name) });
+      } else if (nameModal.mode === "create-file") {
+        await files({ action: "write", path: joinPath(path, name), content: "" });
+      } else {
+        const from = joinPath(path, nameModal.entry.name);
+        const to = joinPath(path, name);
+        await files({ action: "rename", path: from, to });
+        if (isEditing(nameModal.entry) && editing) setEditing({ ...editing, path: to });
+      }
+      setNameModal(null);
+      setNameValue("");
       await load(path);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Rename failed");
+      setNameError(err instanceof Error ? err.message : nameModal.mode === "rename" ? "Rename failed" : "Create failed");
+    } finally {
+      setNamePending(false);
     }
   }
 
@@ -569,17 +687,72 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     }
   }
 
-  async function create(kind: "file" | "dir") {
-    const name = window.prompt(kind === "dir" ? "Folder name" : "File name");
-    if (!name?.trim()) return;
+  function openMove(items: Entry[]) {
+    if (!items.length) return;
+    setMoveModal({ from: path, entries: items });
+    setMoveDest(path);
+    setMoveList(entries);
+    setMoveError(null);
+    setMovePending(false);
+  }
+
+  function closeMoveModal() {
+    if (movePending) return;
+    setMoveModal(null);
+    setMoveError(null);
+    setMoveList([]);
+  }
+
+  async function browseMove(dir: string) {
+    const next = normalizeDir(dir);
+    setMoveError(null);
+    setMoveLoading(true);
+    try {
+      const result = await files({ action: "list", path: next });
+      const data = result.data as { path: string; entries: Entry[] };
+      setMoveDest(normalizeDir(data.path));
+      setMoveList(data.entries ?? []);
+    } catch (err) {
+      setMoveError(err instanceof Error ? err.message : "Failed to list folders");
+    } finally {
+      setMoveLoading(false);
+    }
+  }
+
+  async function submitMove() {
+    if (!moveModal || movePending) return;
+    if (cannotMoveTo(moveModal.from, moveModal.entries, moveDest)) {
+      setMoveError(normalizeDir(moveDest) === normalizeDir(moveModal.from) ? "Already in this folder" : "Cannot move a folder into itself");
+      return;
+    }
+    const collisions = moveCollisions(moveModal.from, moveModal.entries, moveDest, moveList);
+    if (collisions.length) {
+      setMoveError(
+        collisions.length === 1
+          ? `${collisions[0]} already exists in this folder`
+          : `${collisions.length} items already exist in this folder`,
+      );
+      return;
+    }
+    setMoveError(null);
+    setMovePending(true);
     setError(null);
     try {
-      const next = joinPath(path, name.trim());
-      if (kind === "dir") await files({ action: "mkdir", path: next });
-      else await files({ action: "write", path: next, content: "" });
+      for (const entry of moveModal.entries) {
+        const from = joinPath(moveModal.from, entry.name);
+        const to = joinPath(moveDest, entry.name);
+        await files({ action: "rename", path: from, to });
+        if (editing && (editing.path === from || editing.path === entry.name)) {
+          setEditing({ ...editing, path: to });
+        }
+      }
+      setMoveModal(null);
+      setSelected(new Set());
       await load(path);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Create failed");
+      setMoveError(err instanceof Error ? err.message : "Move failed");
+    } finally {
+      setMovePending(false);
     }
   }
 
@@ -634,6 +807,15 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     await uploadList(list);
   }
 
+  const moveFolders = moveList.filter((entry) => entry.kind === "dir");
+  const moveConflicts = moveModal
+    ? moveCollisions(moveModal.from, moveModal.entries, moveDest, moveList)
+    : [];
+  const moveBlocked = Boolean(
+    moveModal && cannotMoveTo(moveModal.from, moveModal.entries, moveDest),
+  );
+  const moveHereDisabled = !moveModal || movePending || moveLoading || moveBlocked || moveConflicts.length > 0;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -662,11 +844,11 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             <Upload className="size-3.5" />
             Upload
           </Button>
-          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => create("dir")}>
+          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openCreate("dir")}>
             <FolderPlus className="size-3.5" />
             Folder
           </Button>
-          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => create("file")}>
+          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openCreate("file")}>
             <FilePlus className="size-3.5" />
             File
           </Button>
@@ -687,6 +869,12 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             <Button type="button" variant="ghost" size="sm" onClick={() => selectAll(false)}>
               Clear
             </Button>
+            {canWrite ? (
+            <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openMove(entries.filter((entry) => selected.has(entry.name)))}>
+              <FolderInput className="size-3.5" />
+              Move
+            </Button>
+            ) : null}
             {canDelete ? (
             <Button type="button" variant="danger" size="sm" disabled={pending} onClick={() => void removeSelected()}>
               <Trash2 className="size-3.5" />
@@ -872,7 +1060,18 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 onClick={() => {
                   const entry = menu.entry;
                   setMenu(null);
-                  void renameEntry(entry);
+                  openRename(entry);
+                }}
+              />
+              <MenuItem
+                icon={<FolderInput className="size-3.5" />}
+                label={selected.size > 1 && selected.has(menu.entry.name) ? `Move ${selected.size} items` : "Move"}
+                disabled={pending || !canWrite}
+                onClick={() => {
+                  const entry = menu.entry;
+                  const bulk = selected.size > 1 && selected.has(entry.name);
+                  setMenu(null);
+                  openMove(bulk ? entries.filter((item) => selected.has(item.name)) : [entry]);
                 }}
               />
               <MenuItem
@@ -925,7 +1124,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 disabled={pending}
                 onClick={() => {
                   setMenu(null);
-                  void create("file");
+                  openCreate("file");
                 }}
               />
               <MenuItem
@@ -934,7 +1133,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 disabled={pending}
                 onClick={() => {
                   setMenu(null);
-                  void create("dir");
+                  openCreate("dir");
                 }}
               />
               <MenuItem
@@ -974,6 +1173,161 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
           onClose={() => setEditing(null)}
         />
       ) : null}
+
+      <Modal
+        title={
+          nameModal?.mode === "create-file"
+            ? "New file"
+            : nameModal?.mode === "create-dir"
+              ? "New folder"
+              : "Rename"
+        }
+        description={
+          nameModal?.mode === "rename"
+            ? `Renaming ${nameModal.entry.name}`
+            : `This will be created in ${displayContainerPath(path)}`
+        }
+        open={Boolean(nameModal)}
+        onClose={closeNameModal}
+        className="max-w-md"
+        footer={
+          <>
+            <Button type="button" variant="secondary" size="sm" disabled={namePending} onClick={closeNameModal}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={namePending || !nameValue.trim()}
+              onClick={() => void submitNameModal()}
+            >
+              {namePending
+                ? "Saving…"
+                : nameModal?.mode === "create-file"
+                  ? "Create file"
+                  : nameModal?.mode === "create-dir"
+                    ? "Create folder"
+                    : "Rename"}
+            </Button>
+          </>
+        }
+      >
+        {nameError ? <p className="mb-3 text-sm text-destructive">{nameError}</p> : null}
+        <Field label="Name" required>
+          <Input
+            autoFocus
+            value={nameValue}
+            disabled={namePending}
+            placeholder={
+              nameModal?.mode === "create-dir"
+                ? "plugins"
+                : nameModal?.mode === "create-file"
+                  ? "server.properties"
+                  : undefined
+            }
+            onChange={(event) => {
+              setNameValue(event.target.value);
+              if (nameError) setNameError(null);
+            }}
+            onFocus={focusNameInput}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void submitNameModal();
+              }
+            }}
+          />
+        </Field>
+      </Modal>
+
+      <Modal
+        title={
+          moveModal && moveModal.entries.length === 1
+            ? `Move ${moveModal.entries[0]?.name}`
+            : `Move ${moveModal?.entries.length ?? 0} items`
+        }
+        description="Choose a folder, then move the selection here."
+        open={Boolean(moveModal)}
+        onClose={closeMoveModal}
+        className="max-w-md"
+        footer={
+          <>
+            <Button type="button" variant="secondary" size="sm" disabled={movePending} onClick={closeMoveModal}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={moveHereDisabled}
+              onClick={() => void submitMove()}
+            >
+              {movePending ? "Moving…" : "Move here"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          {moveError ? <p className="text-sm text-destructive">{moveError}</p> : null}
+          <PathCrumbs path={moveDest} onBrowse={(dir) => void browseMove(dir)} />
+          <p className="font-mono text-xs text-muted-foreground">{displayContainerPath(moveDest)}</p>
+          <div className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+            {moveDest !== "/" ? (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                disabled={moveLoading || movePending}
+                onClick={() => void browseMove(parentPath(moveDest))}
+              >
+                <ArrowUp className="size-3.5" />
+                Parent directory
+              </button>
+            ) : null}
+            {moveFolders.map((folder) => {
+              const blocked =
+                moveModal != null &&
+                normalizeDir(moveDest) === normalizeDir(moveModal.from) &&
+                moveModal.entries.some((entry) => entry.kind === "dir" && entry.name === folder.name);
+              return (
+                <button
+                  key={folder.name}
+                  type="button"
+                  disabled={blocked || moveLoading || movePending}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                  onClick={() => void browseMove(joinPath(moveDest, folder.name))}
+                >
+                  <Folder className="size-3.5 text-muted-foreground" />
+                  <span className="truncate">{folder.name}</span>
+                </button>
+              );
+            })}
+            {moveFolders.length === 0 && !moveLoading ? (
+              <p className={cn("text-center text-sm text-muted-foreground", moveDest === "/" ? "px-3 py-8" : "px-3 py-3")}>
+                No folders in this directory
+              </p>
+            ) : null}
+            {moveLoading && moveFolders.length === 0 ? (
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">Loading…</p>
+            ) : null}
+          </div>
+          {moveModal && moveBlocked ? (
+            <p className="text-xs text-muted-foreground">
+              {normalizeDir(moveDest) === normalizeDir(moveModal.from)
+                ? "Already in this folder. Open a different folder to move."
+                : "Cannot move a folder into itself."}
+            </p>
+          ) : moveConflicts.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {moveConflicts.length === 1
+                ? `${moveConflicts[0]} already exists here`
+                : `${moveConflicts.length} items already exist here`}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Move to {displayContainerPath(moveDest)}
+            </p>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
