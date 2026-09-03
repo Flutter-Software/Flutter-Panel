@@ -1,4 +1,4 @@
-export const PANEL_VERSION = "0.2.58";
+export const PANEL_VERSION = "0.2.60";
 
 export const SESSION_COOKIE = "flutter_session";
 export const CSRF_COOKIE = "flutter_csrf";

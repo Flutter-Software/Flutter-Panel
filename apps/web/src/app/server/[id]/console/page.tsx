@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type UIEvent } from "react";
-import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Search, X } from "lucide-react";
 import { Card } from "@/components/ui";
 import { StatGraph } from "@/components/status";
 import { PowerButtons } from "@/components/power-buttons";
@@ -211,6 +211,7 @@ export default function ConsolePage({
   const [server, setServer] = useState<ServerRecord | null>(framed);
   const [command, setCommand] = useState("");
   const [lines, setLines] = useState<string[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -270,6 +271,8 @@ export default function ConsolePage({
   useEffect(() => {
     setSeries(emptySeries());
     lastNet.current = null;
+    setLines([]);
+    setHistoryLoaded(false);
     const tick = window.setInterval(() => setTick((value) => value + 1), 1000);
     return () => window.clearInterval(tick);
   }, [id]);
@@ -309,16 +312,20 @@ export default function ConsolePage({
             const parsed = JSON.parse(String(event.data)) as { event?: string; data?: string };
             if (parsed.event === "cleared") {
               ignoreHistoryUntil.current = Date.now() + 1_500;
+              setHistoryLoaded(true);
               setLines([]);
               setSeries(emptySeries());
               lastNet.current = null;
               setNetRate(0);
               return;
             }
-            if (parsed.event === "history" && parsed.data) {
-              if (Date.now() < ignoreHistoryUntil.current) return;
+            if (parsed.event === "history") {
+              if (Date.now() < ignoreHistoryUntil.current) {
+                setHistoryLoaded(true);
+                return;
+              }
               try {
-                const rows = JSON.parse(parsed.data) as string[];
+                const rows = parsed.data ? (JSON.parse(parsed.data) as string[]) : [];
                 if (Array.isArray(rows)) {
                   const next = rows.filter((line) => typeof line === "string" && !isAttachNoise(line));
                   setLines((current) => {
@@ -334,6 +341,7 @@ export default function ConsolePage({
               } catch {
                 /* ignore */
               }
+              setHistoryLoaded(true);
               return;
             }
             if (parsed.event === "output" && parsed.data !== undefined) {
@@ -465,8 +473,12 @@ export default function ConsolePage({
     };
 
     void connect();
+    const readyTimer = window.setTimeout(() => {
+      if (!closed) setHistoryLoaded(true);
+    }, 12_000);
     return () => {
       closed = true;
+      window.clearTimeout(readyTimer);
       if (retryTimer) window.clearTimeout(retryTimer);
       ws?.close();
       socketRef.current = null;
@@ -583,6 +595,7 @@ export default function ConsolePage({
     setError(null);
     if (action === "start" || action === "restart") {
       ignoreHistoryUntil.current = Date.now() + 1_500;
+      setHistoryLoaded(true);
       setLines([]);
       setSeries(emptySeries());
       lastNet.current = null;
@@ -706,26 +719,37 @@ export default function ConsolePage({
                 searchOpen && "pb-14",
               )}
             >
-              {lines.map((line, index) => (
-                <div
-                  key={`${index}-${line.slice(0, 24)}`}
-                  data-console-line={index}
-                  className={cn(
-                    searchOpen &&
-                      needle &&
-                      matchIndexes[matchIndex] === index &&
-                      "rounded-sm bg-primary/10",
-                  )}
-                >
-                  <ConsoleLine
-                    line={line}
-                    query={searchOpen ? searchQuery : ""}
-                    active={searchOpen && matchIndexes[matchIndex] === index}
-                  />
-                </div>
-              ))}
+              {historyLoaded
+                ? lines.map((line, index) => (
+                    <div
+                      key={`${index}-${line.slice(0, 24)}`}
+                      data-console-line={index}
+                      className={cn(
+                        searchOpen &&
+                          needle &&
+                          matchIndexes[matchIndex] === index &&
+                          "rounded-sm bg-primary/10",
+                      )}
+                    >
+                      <ConsoleLine
+                        line={line}
+                        query={searchOpen ? searchQuery : ""}
+                        active={searchOpen && matchIndexes[matchIndex] === index}
+                      />
+                    </div>
+                  ))
+                : null}
             </div>
-            {lines.length === 0 ? (
+            {!historyLoaded ? (
+              <div
+                className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-background"
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2 className="size-8 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Loading console history...</p>
+              </div>
+            ) : lines.length === 0 ? (
               <div className="pointer-events-none absolute inset-0 p-4 font-mono text-[13px] leading-6 text-muted-foreground">
                 {running || starting || stopping
                   ? "Waiting for output…"

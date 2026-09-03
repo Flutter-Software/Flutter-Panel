@@ -6,6 +6,7 @@ import { MotionProvider } from "@/components/motion-provider";
 import { AuthProvider } from "@/components/auth-provider";
 import { BrandingProvider } from "@/components/branding-provider";
 import { ConfirmProvider } from "@/components/confirm-dialog";
+import { ToastProvider } from "@/components/toast";
 import { MOTION_BOOTSTRAP_SCRIPT } from "@/lib/motion";
 import "./globals.css";
 
@@ -49,7 +50,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <ThemeProvider>
             <BrandingProvider>
               <AuthProvider>
-                <ConfirmProvider>{children}</ConfirmProvider>
+                <ConfirmProvider>
+                  <ToastProvider>{children}</ToastProvider>
+                </ConfirmProvider>
               </AuthProvider>
             </BrandingProvider>
           </ThemeProvider>

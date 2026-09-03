@@ -19,6 +19,7 @@ import {
   Settings,
   Shield,
   SlidersHorizontal,
+  SquareArrowOutUpRight,
   Terminal,
   Users,
 } from "lucide-react";
@@ -336,7 +337,15 @@ export function ServerSidebar({
         onPrefetch={(href) => prefetchServer(href, serverId)}
       />
       {user?.role === "admin" ? (
-        <div className="mt-auto border-t border-sidebar-border p-3">
+        <div className="mt-auto space-y-0.5 border-t border-sidebar-border p-3">
+          <Link
+            href={`/admin/servers/${serverId}`}
+            onMouseEnter={() => prefetchQuery(`/api/v1/admin/servers/${serverId}`)}
+            className="pressable flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/80 hover:bg-accent/70 hover:text-foreground"
+          >
+            <SquareArrowOutUpRight className="size-4 shrink-0" />
+            View this server in Admin
+          </Link>
           <Link
             href="/admin"
             onMouseEnter={() => prefetchQuery("/api/v1/admin/servers")}

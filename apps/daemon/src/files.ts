@@ -168,6 +168,92 @@ export async function uploadServerFile(
   });
 }
 
+function parseArchiveNames(names: unknown) {
+  if (!Array.isArray(names) || !names.length) throw new Error("Select files to archive");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const name = String(raw ?? "").trim();
+    if (!name || name === "." || name === "..") throw new Error("Invalid file name");
+    if (/[\\/]/.test(name)) throw new Error("Name cannot contain slashes");
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  if (!out.length) throw new Error("Select files to archive");
+  if (out.length > 500) throw new Error("Too many items to archive at once");
+  return out;
+}
+
+function isMissing(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+}
+
+async function unusedArchiveName(dir: string, stem: string) {
+  const clean = stem.replace(/[\\/]/g, "").trim() || "archive";
+  let n = 0;
+  for (;;) {
+    const name = n === 0 ? `${clean}.tar.gz` : `${clean}-${n}.tar.gz`;
+    try {
+      await stat(join(dir, name));
+    } catch (error) {
+      if (isMissing(error)) return name;
+      throw error;
+    }
+    n += 1;
+    if (n > 1000) throw new Error("Could not pick an archive name");
+  }
+}
+
+export async function compressArchive(
+  config: DaemonConfig,
+  uuid: string,
+  relDir: string,
+  names: unknown,
+) {
+  const items = parseArchiveNames(names);
+  const root = serverRoot(config, uuid);
+  const dir = safeJoin(root, relDir);
+  const info = await stat(dir);
+  if (!info.isDirectory()) throw new Error("Not a directory");
+  const atRoot = displayPath(root, dir) === "/";
+
+  const sources: string[] = [];
+  for (const name of items) {
+    if (atRoot && name === ".flutter") throw new Error("Cannot archive .flutter");
+    const rel = [relDir.replace(/^\/+|\/+$/g, ""), name].filter(Boolean).join("/");
+    const target = safeJoin(root, rel);
+    try {
+      await stat(target);
+    } catch (error) {
+      if (isMissing(error)) throw new Error(`${name} was not found`);
+      throw error;
+    }
+    sources.push(name.startsWith("-") ? `./${name}` : name);
+  }
+
+  const stem = items.length === 1 ? items[0] : "archive";
+  const archiveName = await unusedArchiveName(dir, stem);
+  const destRel = relative(root, dir).replace(/\\/g, "/");
+  const destMount = destRel ? `/data/${destRel}` : "/data";
+
+  return withWritable(config, uuid, async () => {
+    try {
+      await runBackupContainer(
+        "alpine:3.20",
+        [`${bindPath(root)}:/data`],
+        ["tar", "czf", `${destMount}/${archiveName}`, "-C", destMount, ...sources],
+      );
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? error.message : "unknown error";
+      throw new Error(`Could not create the archive (${detail})`);
+    }
+    const archivePath = join(dir, archiveName);
+    const meta = await stat(archivePath);
+    return { path: displayPath(root, archivePath), size: meta.size };
+  });
+}
+
 export function archiveKind(name: string) {
   const lower = name.toLowerCase();
   if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) return "tar.gz" as const;

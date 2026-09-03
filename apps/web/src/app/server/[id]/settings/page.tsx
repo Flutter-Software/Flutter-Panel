@@ -1,9 +1,11 @@
 "use client";
 
 import { use, useEffect, useState, type FormEvent } from "react";
+import { Check, Copy, ExternalLink } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
 import { SaveButton } from "@/components/save-button";
-import { Button, Field, Input, Textarea } from "@/components/ui";
+import { Button, buttonClass, Field, Input, Textarea } from "@/components/ui";
+import { useAuth } from "@/components/auth-provider";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
@@ -13,6 +15,7 @@ import { can } from "@/lib/access";
 export default function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const framed = useServerRecord();
+  const { user } = useAuth();
   const { data, error: loadError, reload } = useQuery<{ data: { server: ServerRecord } }>(
     `/api/v1/client/servers/${id}`,
   );
@@ -23,6 +26,8 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
   const [pending, setPending] = useState(false);
   const [reinstalling, setReinstalling] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
     if (!server) return;
@@ -81,6 +86,27 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
     }
   }
 
+  const sftpHost = server?.sftpHost ?? "";
+  const sftpPort = server?.sftpPort ?? 2022;
+  const sftpAddress = sftpHost ? `${sftpHost}:${sftpPort}` : "";
+  const sftpUsername = user?.username && server?.uuid ? `${user.username}.${server.uuid}` : "";
+  const sftpUrl =
+    sftpHost && sftpUsername
+      ? `sftp://${encodeURIComponent(sftpUsername)}@${sftpHost}:${sftpPort}`
+      : "";
+  const canSftp = can(server, "file.read");
+
+  async function copyValue(key: string, value: string) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(key);
+      window.setTimeout(() => setCopied((current) => (current === key ? null : current)), 1200);
+    } catch {
+      /* ignore */
+    }
+  }
+
   if (loadError && !server) {
     return <p className="text-sm text-destructive">{loadError}</p>;
   }
@@ -130,13 +156,37 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
         <Field label="UUID">
           <Input value={server?.uuid ?? ""} readOnly className="font-mono" />
         </Field>
-        <Field label="SFTP" hint="SFTP daemon is not enabled yet. This is the node address it will use.">
-          <Input
-            value={server ? `${server.sftpHost}:${server.sftpPort}` : ""}
-            readOnly
-            className="font-mono"
-          />
+        <Field
+          label="SFTP address"
+          extra={
+            <CopyFieldButton
+              copied={copied === "address"}
+              disabled={!sftpAddress}
+              onCopy={() => void copyValue("address", sftpAddress)}
+            />
+          }
+          hint="Connect with FileZilla, WinSCP, or Cyberduck. Password is your panel account password."
+        >
+          <Input value={sftpAddress} readOnly className="font-mono" />
         </Field>
+        <Field
+          label="SFTP username"
+          extra={
+            <CopyFieldButton
+              copied={copied === "username"}
+              disabled={!sftpUsername}
+              onCopy={() => void copyValue("username", sftpUsername)}
+            />
+          }
+        >
+          <Input value={sftpUsername} readOnly className="font-mono" />
+        </Field>
+        {canSftp && sftpUrl ? (
+          <a href={sftpUrl} className={buttonClass({ variant: "secondary" })}>
+            <ExternalLink className="size-4" />
+            Launch SFTP
+          </a>
+        ) : null}
         <Field label="Primary allocation">
           <Input value={server?.allocation ?? ""} readOnly className="font-mono" />
         </Field>
@@ -161,5 +211,31 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
       </div>
       ) : null}
     </div>
+  );
+}
+
+function CopyFieldButton({
+  copied,
+  disabled,
+  onCopy,
+}: {
+  copied: boolean;
+  disabled?: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="no-press inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      disabled={disabled}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={(event) => {
+        event.preventDefault();
+        onCopy();
+      }}
+    >
+      {copied ? <Check className="size-3 text-status-running" /> : <Copy className="size-3" />}
+      {copied ? "Copied" : "Copy"}
+    </button>
   );
 }

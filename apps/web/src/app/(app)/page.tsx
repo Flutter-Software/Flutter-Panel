@@ -103,7 +103,7 @@ export default function DashboardPage() {
           onClick={() => setTab("my")}
         >
           My servers
-          <Badge>{mine.length}</Badge>
+          <Badge className="rounded-sm">{mine.length}</Badge>
         </button>
         <button
           type="button"
@@ -113,8 +113,8 @@ export default function DashboardPage() {
           )}
           onClick={() => setTab("other")}
         >
-          Others
-          <Badge className="bg-muted text-muted-foreground">{other.length}</Badge>
+          Shared with Me
+          <Badge className="rounded-sm bg-muted text-muted-foreground">{other.length}</Badge>
         </button>
         <div className="ml-auto w-full sm:w-64">
           <Input

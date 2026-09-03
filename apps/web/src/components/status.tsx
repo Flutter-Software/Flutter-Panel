@@ -42,12 +42,27 @@ export function statusMeta(status: ServerStatus) {
   return STATUS[status];
 }
 
-export function StatusDot({ status }: { status: ServerStatus }) {
+const STATUS_PILL: Record<ServerStatus, string> = {
+  running: "bg-status-running/15 text-status-running",
+  starting: "bg-status-warn/15 text-status-warn",
+  stopping: "bg-status-warn/15 text-status-warn",
+  installing: "bg-status-info/15 text-status-info",
+  install_failed: "bg-status-error/15 text-status-error",
+  offline: "bg-muted text-status-offline",
+};
+
+export function StatusPill({ status }: { status: ServerStatus }) {
   const meta = STATUS[status];
+  const live = status === "starting" || status === "stopping" || status === "installing";
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-      <span className={cn("size-2 rounded-full", meta.bar)} />
-      <span className={meta.className}>{meta.label}</span>
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
+        STATUS_PILL[status],
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", meta.bar, live && "animate-pulse")} />
+      {meta.label}
     </span>
   );
 }

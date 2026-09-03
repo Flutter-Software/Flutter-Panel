@@ -643,6 +643,7 @@ export async function serverFiles(
     content?: string;
     to?: string;
     name?: string;
+    names?: string[];
     contentBase64?: string;
   };
   const action = parsed.action || "list";
@@ -655,6 +656,7 @@ export async function serverFiles(
     rename: "file.write",
     delete: "file.delete",
     extract: "file.archive",
+    compress: "file.archive",
   };
   const permission = filePerm[action];
   if (!permission) throw FlutterError.validation("Unknown file action");
@@ -666,6 +668,7 @@ export async function serverFiles(
     content: parsed.content,
     to: parsed.to,
     name: parsed.name,
+    names: parsed.names,
     contentBase64: parsed.contentBase64,
     maxBytes: uploadLimitBytes(node?.uploadLimitMb),
   });

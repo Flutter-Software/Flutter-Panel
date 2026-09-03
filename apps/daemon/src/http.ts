@@ -19,6 +19,7 @@ import {
 import { runDaemonConsole, sendConsoleCommand } from "./console";
 import { getProcessState } from "./process-state";
 import {
+  compressArchive,
   deleteServerPath,
   extractArchive,
   listFiles,
@@ -336,6 +337,9 @@ export function createDaemonApp(config: DaemonConfig) {
     }
     if (action === "extract") {
       return c.json({ ok: true, data: await extractArchive(config, uuid, path) });
+    }
+    if (action === "compress") {
+      return c.json({ ok: true, data: await compressArchive(config, uuid, path, body.names) });
     }
     return c.json({ ok: false, error: { code: "INVALID_INPUT", message: "Unknown file action" } }, 400);
   });

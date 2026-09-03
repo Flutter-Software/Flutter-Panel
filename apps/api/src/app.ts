@@ -217,6 +217,7 @@ export function createApp() {
 
   app.get("/daemon/configuration", async (c) => c.json({ data: await daemon.configuration(c) }));
   app.post("/daemon/heartbeat", async (c) => c.json({ data: await daemon.heartbeat(c) }));
+  app.post("/daemon/sftp/auth", async (c) => c.json({ data: await daemon.authenticateSftp(c) }));
   app.post("/daemon/servers/:uuid/state", async (c) =>
     c.json({ data: await daemon.applyServerState(c, c.req.param("uuid")) }),
   );

@@ -411,13 +411,12 @@ export async function runDaemonConsole(
   }
   const listener: Listener = (event, data) => sendWs(ws, event, data);
   current.listeners.add(listener);
-  if (current.history.length) sendWs(ws, "history", JSON.stringify(current.history));
   sendWs(ws, "status", getProcessState(uuid));
   const seeding = current.seedPromise ??= seedLogs(uuid);
   if (!current.abort) void pump(config, uuid);
   void seeding.catch(() => undefined).then(() => {
     if (current.seedPromise === seeding) current.seedPromise = null;
-    if (current.history.length && current.listeners.has(listener)) {
+    if (current.listeners.has(listener)) {
       sendWs(ws, "history", JSON.stringify(current.history));
     }
   });

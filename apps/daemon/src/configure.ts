@@ -14,6 +14,7 @@ export async function runConfigure(argv: string[]) {
   const configPath = readFlag(argv, "--config") || defaultConfigPath();
   const listenPortRaw = readFlag(argv, "--port");
   const listenPort = listenPortRaw ? Number(listenPortRaw) : 8080;
+  const sftpPortRaw = readFlag(argv, "--sftp-port");
 
   if (!panelUrl || !token || !nodeId) {
     throw new Error(
@@ -47,6 +48,7 @@ export async function runConfigure(argv: string[]) {
       nodeId?: string;
       listenHost?: string;
       listenPort?: number;
+      sftpPort?: number;
       listenUrl?: string;
       dataDir?: string;
       requestSecret?: string;
@@ -59,6 +61,7 @@ export async function runConfigure(argv: string[]) {
   }
 
   const port = Number.isInteger(listenPort) ? listenPort : json.data.listenPort || 8080;
+  const sftpPort = sftpPortRaw ? Number(sftpPortRaw) : json.data.sftpPort || 2022;
   const written = await writeDaemonConfig(
     {
       panelUrl,
@@ -67,6 +70,7 @@ export async function runConfigure(argv: string[]) {
       requestSecret: json.data.requestSecret,
       listenHost: readFlag(argv, "--host") || json.data.listenHost || "0.0.0.0",
       listenPort: port,
+      sftpPort: Number.isInteger(sftpPort) ? sftpPort : 2022,
       listenUrl: readFlag(argv, "--listen-url") || json.data.listenUrl || `http://127.0.0.1:${port}`,
       dataDir: readFlag(argv, "--data-dir") || json.data.dataDir || "./data",
     },

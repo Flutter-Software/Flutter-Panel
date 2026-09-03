@@ -2,8 +2,9 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { ArrowLeft, Box, Check, Copy, Cpu, Network, type LucideIcon } from "lucide-react";
 import { ServerSidebar } from "@/components/sidebar";
-import { StatusDot } from "@/components/status";
+import { StatusPill } from "@/components/status";
 import { useAuth } from "@/components/auth-provider";
 import { ErrorPage, QueryErrorPage } from "@/components/error-page";
 import { prefetchQuery, useQuery } from "@/lib/query";
@@ -44,6 +45,7 @@ export function ServerFrame({
   const path = `/api/v1/client/servers/${serverId}`;
   const { data, error, errorStatus, reload } = useQuery<ServerPayload>(path);
   const [liveStatus, setLiveStatus] = useState<ServerStatus | null>(null);
+  const [copied, setCopied] = useState(false);
   const polled = data?.data.server ?? null;
   const server = useMemo(() => {
     if (!polled) return null;
@@ -55,6 +57,7 @@ export function ServerFrame({
 
   useEffect(() => {
     setLiveStatus(null);
+    setCopied(false);
   }, [serverId]);
 
   useEffect(() => {
@@ -87,24 +90,66 @@ export function ServerFrame({
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <ServerSidebar serverId={serverId} server={server} />
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="shrink-0 border-b border-border px-4 py-3 sm:px-6">
-              <div>
-                <Link href="/" className="text-xs text-primary hover:underline">
-                  Server list
+            <header className="shrink-0 border-b border-border px-4 py-2.5 sm:px-6">
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/"
+                  aria-label="Back to servers"
+                  title="Servers"
+                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:block"
+                >
+                  <ArrowLeft className="size-4" />
                 </Link>
-                <div className="mt-1 flex items-center gap-2">
-                  <h1 className="text-lg font-semibold">{server?.name ?? "Server"}</h1>
-                  {server ? <StatusDot status={server.status} /> : null}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {server
-                    ? `${server.egg} · ${server.node} · ${server.allocation}`
-                    : error && !server
-                      ? error
-                      : "\u00a0"}
-                </p>
+                {server ? (
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <h1 className="min-w-0 truncate text-base font-semibold tracking-tight sm:text-lg">
+                        {server.name}
+                      </h1>
+                      <StatusPill status={server.status} />
+                    </div>
+                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <HeaderMeta icon={Box}>{server.egg}</HeaderMeta>
+                      <HeaderMeta icon={Cpu}>
+                        {server.nodeLocation ? `${server.node} · ${server.nodeLocation}` : server.node}
+                      </HeaderMeta>
+                      {server.allocation && server.allocation !== "unassigned" ? (
+                        <button
+                          type="button"
+                          className="no-press inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md py-0.5 font-mono hover:text-foreground"
+                          onClick={() => {
+                            void navigator.clipboard.writeText(server.allocation).then(
+                              () => {
+                                setCopied(true);
+                                window.setTimeout(() => setCopied(false), 1200);
+                              },
+                              () => undefined,
+                            );
+                          }}
+                          aria-label={copied ? "Address copied" : `Copy address ${server.allocation}`}
+                          title={copied ? "Copied" : "Copy address"}
+                        >
+                          <Network className="size-3.5 shrink-0 opacity-70" aria-hidden />
+                          <span className="truncate">{server.allocation}</span>
+                          {copied ? (
+                            <Check className="size-3 shrink-0 text-status-running" aria-hidden />
+                          ) : (
+                            <Copy className="size-3 shrink-0 opacity-50" aria-hidden />
+                          )}
+                        </button>
+                      ) : (
+                        <HeaderMeta icon={Network}>Unassigned</HeaderMeta>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="h-5 w-40 animate-pulse rounded-md bg-muted" />
+                    <div className="h-3.5 w-56 animate-pulse rounded-md bg-muted/70" />
+                  </div>
+                )}
               </div>
-            </div>
+            </header>
             {maintenance && admin ? (
               <div className="shrink-0 border-b border-status-warn/30 bg-status-warn/10 px-4 py-2 text-sm text-status-warn sm:px-6">
                 This node is in maintenance mode. Users cannot open their servers.
@@ -115,5 +160,14 @@ export function ServerFrame({
         </div>
       </ServerRecordContext.Provider>
     </LiveStatusContext.Provider>
+  );
+}
+
+function HeaderMeta({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+      <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden />
+      <span className="truncate">{children}</span>
+    </span>
   );
 }

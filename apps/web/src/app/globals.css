@@ -94,6 +94,25 @@ html.light {
 @layer base {
   * {
     @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
   html,
   body {
@@ -196,6 +215,37 @@ html[data-reduce-motion="off"] button {
   to {
     stroke-dashoffset: 0;
   }
+}
+
+@keyframes flutter-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes flutter-toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+
+.flutter-toast-in {
+  animation: flutter-toast-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.flutter-toast-out {
+  animation: flutter-toast-out 220ms ease-in both;
+  pointer-events: none;
 }
 
 .flutter-save-circle {

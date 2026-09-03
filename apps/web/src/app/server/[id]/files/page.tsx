@@ -16,15 +16,16 @@ import {
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  Archive,
   ArchiveRestore,
   ArrowUp,
   Copy,
   FilePlus,
-  FileText,
   Folder,
   FolderInput,
   FolderOpen,
   FolderPlus,
+  Loader2,
   MoreVertical,
   Pencil,
   RefreshCw,
@@ -33,6 +34,8 @@ import {
 } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
 import { FileIdeModal } from "@/components/file-ide";
+import { FileTypeIcon } from "@/components/file-type-icon";
+import { toast } from "@/components/toast";
 import { Button, Card, Field, Input, Modal } from "@/components/ui";
 import { api, apiUpload } from "@/lib/api";
 import { cn } from "@/lib/cn";
@@ -115,6 +118,19 @@ function filesHref(pathname: string, dir: string) {
   return `${pathname}?path=${encodeURIComponent(next)}`;
 }
 
+type ClickPoint = { detail: number; clientX: number; clientY: number };
+type ClickGuard = { until: number; x: number; y: number };
+
+function isRepeatedClick(event: ClickPoint, guard: ClickGuard | null) {
+  if (event.detail > 1) return true;
+  if (!guard || Date.now() > guard.until) return false;
+  return Math.abs(event.clientX - guard.x) < 12 && Math.abs(event.clientY - guard.y) < 12;
+}
+
+function nextClickGuard(event: ClickPoint): ClickGuard {
+  return { until: Date.now() + 500, x: event.clientX, y: event.clientY };
+}
+
 const CONTAINER_ROOT = ["home", "container"] as const;
 
 function PathCrumbs({
@@ -122,7 +138,7 @@ function PathCrumbs({
   onBrowse,
 }: {
   path: string;
-  onBrowse: (next: string) => void;
+  onBrowse: (next: string, event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const nested = path === "/" ? [] : path.split("/").filter(Boolean);
   const crumbs = [
@@ -145,8 +161,8 @@ function PathCrumbs({
             ) : (
               <button
                 type="button"
-                className="hover:text-foreground hover:underline"
-                onClick={() => onBrowse(crumb.dir)}
+                className="no-press hover:text-foreground hover:underline"
+                onClick={(event) => onBrowse(crumb.dir, event)}
               >
                 {crumb.name}
               </button>
@@ -186,20 +202,22 @@ function fileToBase64(file: File, onProgress?: (ratio: number) => void) {
   });
 }
 
-function FileProgressBar({ label, percent }: { label: string; percent: number }) {
-  const value = Math.max(0, Math.min(100, Math.round(percent)));
+function TopLoadingBar({ label, percent }: { label: string; percent: number }) {
+  const value = Math.max(0, Math.min(100, percent));
   return (
-    <div className="space-y-1.5" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-label={label}>
-      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>{label}…</span>
-        <span className="tabular-nums">{value}%</span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary transition-[width] duration-150 ease-out"
-          style={{ width: `${Math.max(4, value)}%` }}
-        />
-      </div>
+    <div
+      className="pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(value)}
+      aria-label={label}
+      title={`${label}… ${Math.round(value)}%`}
+    >
+      <div
+        className="h-full bg-primary shadow-[0_0_8px_2px] shadow-primary/80 transition-[width] duration-150 ease-out"
+        style={{ width: `${Math.max(2, value)}%` }}
+      />
     </div>
   );
 }
@@ -281,6 +299,42 @@ function MenuItem({
   );
 }
 
+function SelectHit({
+  checked,
+  disabled,
+  label,
+  indeterminate,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  indeterminate?: boolean;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex h-11 w-12 cursor-pointer items-center justify-center",
+        disabled && "pointer-events-none cursor-default opacity-50",
+      )}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <input
+        type="checkbox"
+        className="size-5 shrink-0 cursor-pointer accent-primary"
+        checked={checked}
+        disabled={disabled}
+        aria-label={label}
+        ref={(el) => {
+          if (el && indeterminate !== undefined) el.indeterminate = indeterminate;
+        }}
+        onChange={onChange}
+      />
+    </label>
+  );
+}
+
 export default function FilesPage({ params }: { params: Promise<{ id: string }> }) {
   return (
     <Suspense
@@ -301,7 +355,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
-  const path = normalizeDir(search.get("path"));
+  const urlPath = normalizeDir(search.get("path"));
+  const [path, setPath] = useState(urlPath);
   const server = useServerRecord();
   const uploadLimit = server?.uploadLimitBytes || FILE_UPLOAD_LIMIT_BYTES;
   const canWrite = can(server, "file.write");
@@ -309,8 +364,12 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const canArchive = can(server, "file.archive");
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const listSeq = useRef(0);
+  const moveSeq = useRef(0);
+  const clickGuard = useRef<ClickGuard | null>(null);
+  const localNav = useRef<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [listing, setListing] = useState(true);
   const [editing, setEditing] = useState<{ path: string; content: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -337,52 +396,70 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     });
   }
 
-  async function load(nextPath = path) {
-    setError(null);
-    const result = await files({ action: "list", path: nextPath });
-    const data = result.data as { path: string; entries: Entry[] };
-    setEntries(data.entries ?? []);
+  function armClickGuard(event: ClickPoint) {
+    clickGuard.current = nextClickGuard(event);
+  }
+
+  function shouldIgnoreClick(event: ClickPoint) {
+    return isRepeatedClick(event, clickGuard.current);
+  }
+
+  function showError(err: unknown, fallback: string) {
+    toast(err instanceof Error ? err.message : fallback);
+  }
+
+  async function load(nextPath = path, opts: { keepEntries?: boolean; syncUrl?: boolean } = {}) {
+    const seq = ++listSeq.current;
+    setListing(true);
+    try {
+      const result = await files({ action: "list", path: nextPath });
+      if (seq !== listSeq.current) return;
+      const data = result.data as { path: string; entries: Entry[] };
+      setEntries(data.entries ?? []);
+      const listed = normalizeDir(data.path);
+      if (opts.syncUrl && listed !== nextPath) {
+        localNav.current = listed;
+        setPath(listed);
+        router.replace(filesHref(pathname, listed), { scroll: false });
+      }
+    } catch (err) {
+      if (seq !== listSeq.current) return;
+      showError(err, "Failed to list files");
+      setEntries([]);
+    } finally {
+      if (seq === listSeq.current) setListing(false);
+    }
   }
 
   function browse(nextPath: string) {
     const dir = normalizeDir(nextPath);
-    const href = filesHref(pathname, dir);
     setEditing(null);
     setMenu(null);
     setSelected(new Set());
     lastIndex.current = null;
-    if (href === filesHref(pathname, path)) {
-      void load(dir).catch((err) => setError(err instanceof Error ? err.message : "Failed to list files"));
+    if (dir === path) {
+      void load(dir, { keepEntries: true });
       return;
     }
-    router.push(href, { scroll: false });
+    setPath(dir);
+    localNav.current = dir;
+    router.push(filesHref(pathname, dir), { scroll: false });
   }
 
   useEffect(() => {
-    let cancelled = false;
+    if (localNav.current !== null) {
+      if (urlPath === localNav.current) localNav.current = null;
+      else return;
+    }
+    setPath((current) => (current === urlPath ? current : urlPath));
+  }, [urlPath]);
+
+  useEffect(() => {
     setMenu(null);
     setEditing(null);
     setSelected(new Set());
     lastIndex.current = null;
-    setError(null);
-    files({ action: "list", path })
-      .then((result) => {
-        if (cancelled) return;
-        const data = result.data as { path: string; entries: Entry[] };
-        setEntries(data.entries ?? []);
-        const listed = normalizeDir(data.path);
-        if (listed !== path) {
-          router.replace(filesHref(pathname, listed), { scroll: false });
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to list files");
-        setEntries([]);
-      });
-    return () => {
-      cancelled = true;
-    };
+    void load(path, { syncUrl: true });
   }, [id, path]);
 
   useEffect(() => {
@@ -428,31 +505,32 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     setMenu(next);
   }
 
-  async function openEntry(entry: Entry) {
+  async function openEntry(entry: Entry, event?: ClickPoint) {
+    if (event && shouldIgnoreClick(event)) return;
     const next = joinPath(path, entry.name);
-    setError(null);
     if (entry.kind === "dir") {
+      if (event) armClickGuard(event);
       browse(next);
       return;
     }
+    if (listing) return;
     try {
       const result = await files({ action: "read", path: next });
       const data = result.data as { path: string; content: string };
       setEditing({ path: data.path, content: data.content });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Cannot open file");
+      showError(err, "Cannot open file");
     }
   }
 
   async function saveFile() {
     if (!editing) return false;
     setPending(true);
-    setError(null);
     try {
       await files({ action: "write", path: editing.path, content: editing.content });
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      showError(err, "Save failed");
       return false;
     } finally {
       setPending(false);
@@ -518,7 +596,6 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     ) {
       return;
     }
-    setError(null);
     const timer = startFakeProgress(`Deleting ${entry.name}`);
     try {
       await files({ action: "delete", path: joinPath(path, entry.name) });
@@ -529,11 +606,11 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
         next.delete(entry.name);
         return next;
       });
-      await load(path);
+      await load(path, { keepEntries: true });
       finishProgress(true);
     } catch (err) {
       window.clearInterval(timer);
-      setError(err instanceof Error ? err.message : "Delete failed");
+      showError(err, "Delete failed");
       finishProgress(false);
     }
   }
@@ -551,7 +628,6 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     ) {
       return;
     }
-    setError(null);
     setPending(true);
     setProgressLabel(names.length === 1 ? `Deleting ${names[0]}` : `Deleting ${names.length} items`);
     setPercent(4);
@@ -568,10 +644,10 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
         setPercent(((index + 1) / names.length) * 100);
       }
       setSelected(new Set());
-      await load(path);
+      await load(path, { keepEntries: true });
       finishProgress(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
+      showError(err, "Delete failed");
       finishProgress(false);
     }
   }
@@ -587,17 +663,35 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     ) {
       return;
     }
-    setError(null);
     const timer = startFakeProgress(`Extracting ${entry.name}`);
     try {
       await files({ action: "extract", path: joinPath(path, entry.name) });
       window.clearInterval(timer);
       setPercent(100);
-      await load(path);
+      await load(path, { keepEntries: true });
       finishProgress(true);
     } catch (err) {
       window.clearInterval(timer);
-      setError(err instanceof Error ? err.message : "Extract failed");
+      showError(err, "Extract failed");
+      finishProgress(false);
+    }
+  }
+
+  async function compress(items: Entry[]) {
+    if (!items.length) return;
+    const names = items.map((entry) => entry.name);
+    const label = names.length === 1 ? names[0] : `${names.length} items`;
+    const timer = startFakeProgress(`Archiving ${label}`);
+    try {
+      await files({ action: "compress", path, names });
+      window.clearInterval(timer);
+      setPercent(100);
+      setSelected(new Set());
+      await load(path, { keepEntries: true });
+      finishProgress(true);
+    } catch (err) {
+      window.clearInterval(timer);
+      showError(err, "Archive failed");
       finishProgress(false);
     }
   }
@@ -656,7 +750,6 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     }
     setNameError(null);
     setNamePending(true);
-    setError(null);
     try {
       if (nameModal.mode === "create-dir") {
         await files({ action: "mkdir", path: joinPath(path, name) });
@@ -670,7 +763,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       }
       setNameModal(null);
       setNameValue("");
-      await load(path);
+      await load(path, { keepEntries: true });
     } catch (err) {
       setNameError(err instanceof Error ? err.message : nameModal.mode === "rename" ? "Rename failed" : "Create failed");
     } finally {
@@ -683,7 +776,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     try {
       await navigator.clipboard.writeText(full);
     } catch {
-      setError("Could not copy path");
+      toast("Could not copy path");
     }
   }
 
@@ -705,17 +798,22 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
 
   async function browseMove(dir: string) {
     const next = normalizeDir(dir);
+    const seq = ++moveSeq.current;
     setMoveError(null);
     setMoveLoading(true);
+    setMoveDest(next);
+    setMoveList([]);
     try {
       const result = await files({ action: "list", path: next });
+      if (seq !== moveSeq.current) return;
       const data = result.data as { path: string; entries: Entry[] };
       setMoveDest(normalizeDir(data.path));
       setMoveList(data.entries ?? []);
     } catch (err) {
+      if (seq !== moveSeq.current) return;
       setMoveError(err instanceof Error ? err.message : "Failed to list folders");
     } finally {
-      setMoveLoading(false);
+      if (seq === moveSeq.current) setMoveLoading(false);
     }
   }
 
@@ -736,7 +834,6 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     }
     setMoveError(null);
     setMovePending(true);
-    setError(null);
     try {
       for (const entry of moveModal.entries) {
         const from = joinPath(moveModal.from, entry.name);
@@ -748,7 +845,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       }
       setMoveModal(null);
       setSelected(new Set());
-      await load(path);
+      await load(path, { keepEntries: true });
     } catch (err) {
       setMoveError(err instanceof Error ? err.message : "Move failed");
     } finally {
@@ -758,7 +855,6 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
 
   async function uploadList(list: { relative: string; file: File }[]) {
     if (!list.length) return;
-    setError(null);
     setPending(true);
     setProgressLabel(list.length === 1 ? `Uploading ${list[0]?.relative ?? "file"}` : `Uploading ${list.length} files`);
     const total = list.reduce((sum, item) => sum + Math.max(item.file.size, 1), 0);
@@ -791,10 +887,10 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
         report(0);
       }
       setPercent(100);
-      await load(path);
+      await load(path, { keepEntries: true });
       finishProgress(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      showError(err, "Upload failed");
       finishProgress(false);
     }
   }
@@ -818,10 +914,38 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <div className="space-y-4">
+      {percent !== null ? <TopLoadingBar label={progressLabel ?? "Working"} percent={percent} /> : null}
+
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Files</h2>
-          <PathCrumbs path={path} onBrowse={browse} />
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              className="no-press inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+              disabled={path === "/"}
+              aria-label="Parent directory"
+              title="Parent directory"
+              onClick={(event) => {
+                if (shouldIgnoreClick(event)) return;
+                armClickGuard(event);
+                browse(parentPath(path));
+              }}
+            >
+              <ArrowUp className="size-3.5" />
+            </button>
+            <PathCrumbs
+              path={path}
+              onBrowse={(dir, event) => {
+                if (shouldIgnoreClick(event)) return;
+                armClickGuard(event);
+                browse(dir);
+              }}
+            />
+            <span className="inline-flex size-3.5 shrink-0 items-center justify-center" aria-hidden={!listing}>
+              {listing ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Loading folder" /> : null}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -838,55 +962,54 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               void uploadList(list);
             }}
           />
-          {canWrite ? (
+          {selected.size > 0 ? (
             <>
-          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => inputRef.current?.click()}>
-            <Upload className="size-3.5" />
-            Upload
-          </Button>
-          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openCreate("dir")}>
-            <FolderPlus className="size-3.5" />
-            Folder
-          </Button>
-          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openCreate("file")}>
-            <FilePlus className="size-3.5" />
-            File
-          </Button>
+              <p className="hidden text-sm text-muted-foreground sm:block">
+                <span className="font-medium text-foreground">{selected.size}</span> selected
+              </p>
+              <Button type="button" variant="ghost" size="sm" onClick={() => selectAll(false)}>
+                Clear
+              </Button>
+              {canWrite ? (
+                <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openMove(entries.filter((entry) => selected.has(entry.name)))}>
+                  <FolderInput className="size-3.5" />
+                  Move
+                </Button>
+              ) : null}
+              {canArchive ? (
+                <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => void compress(entries.filter((entry) => selected.has(entry.name)))}>
+                  <Archive className="size-3.5" />
+                  Archive
+                </Button>
+              ) : null}
+              {canDelete ? (
+                <Button type="button" variant="danger" size="sm" disabled={pending} onClick={() => void removeSelected()}>
+                  <Trash2 className="size-3.5" />
+                  Delete
+                </Button>
+              ) : null}
+            </>
+          ) : canWrite ? (
+            <>
+              <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => inputRef.current?.click()}>
+                <Upload className="size-3.5" />
+                Upload
+              </Button>
+              <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openCreate("dir")}>
+                <FolderPlus className="size-3.5" />
+                Folder
+              </Button>
+              <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openCreate("file")}>
+                <FilePlus className="size-3.5" />
+                File
+              </Button>
             </>
           ) : null}
         </div>
       </div>
-      {percent !== null ? (
-        <FileProgressBar label={progressLabel ?? "Working"} percent={percent} />
-      ) : null}
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {selected.size > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2">
-          <p className="text-sm">
-            <span className="font-medium">{selected.size}</span> selected
-          </p>
-          <div className="flex gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => selectAll(false)}>
-              Clear
-            </Button>
-            {canWrite ? (
-            <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openMove(entries.filter((entry) => selected.has(entry.name)))}>
-              <FolderInput className="size-3.5" />
-              Move
-            </Button>
-            ) : null}
-            {canDelete ? (
-            <Button type="button" variant="danger" size="sm" disabled={pending} onClick={() => void removeSelected()}>
-              <Trash2 className="size-3.5" />
-              Delete
-            </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
 
       <div
-        className={cn("relative", dragging && "ring-2 ring-primary rounded-xl")}
+        className="relative"
         onDragEnter={(event) => {
           event.preventDefault();
           if (canWrite) setDragging(true);
@@ -910,28 +1033,29 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             </div>
           ) : null}
         <table
-          className="w-full select-none text-sm"
+          className="w-full select-none text-sm outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none"
           tabIndex={0}
+          aria-busy={listing}
           onKeyDown={(event: KeyboardEvent<HTMLTableElement>) => {
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
               event.preventDefault();
               selectAll(true);
             }
+            if (event.key === "Backspace" && path !== "/" && !(event.target instanceof HTMLInputElement)) {
+              event.preventDefault();
+              browse(parentPath(path));
+            }
           }}
         >
           <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
-              <th className="w-10 px-3 py-2.5">
-                <input
-                  type="checkbox"
-                  className="size-4 accent-primary"
+              <th className="w-12 p-0">
+                <SelectHit
                   checked={entries.length > 0 && selected.size === entries.length}
-                  ref={(el) => {
-                    if (el) el.indeterminate = selected.size > 0 && selected.size < entries.length;
-                  }}
-                  onChange={onSelectAll}
-                  aria-label="Select all"
+                  indeterminate={selected.size > 0 && selected.size < entries.length}
                   disabled={!entries.length}
+                  label="Select all"
+                  onChange={onSelectAll}
                 />
               </th>
               <th className="px-4 py-2.5 font-medium">Name</th>
@@ -940,21 +1064,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               <th className="px-4 py-2.5 font-medium" />
             </tr>
           </thead>
-          <tbody>
-            {path !== "/" ? (
-              <tr className="border-t border-border">
-                <td className="px-4 py-2.5" colSpan={5}>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-                    onClick={() => browse(parentPath(path))}
-                  >
-                    <ArrowUp className="size-3.5" />
-                    Parent directory
-                  </button>
-                </td>
-              </tr>
-            ) : null}
+          <tbody className={cn(listing && "pointer-events-none")}>
             {entries.map((entry, index) => {
               const active = menu?.kind === "entry" && menu.entry.name === entry.name;
               const checked = selected.has(entry.name);
@@ -962,21 +1072,21 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 <tr
                   key={entry.name}
                   className={cn(
-                    "border-t border-border hover:bg-muted/40",
+                    "cursor-pointer border-t border-border hover:bg-muted/40",
                     (active || checked) && "bg-muted/60",
                   )}
                   onContextMenu={(event) =>
                     openMenu(event, { x: event.clientX, y: event.clientY, kind: "entry", entry })
                   }
-                  onDoubleClick={() => void openEntry(entry)}
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest("input, button, label")) return;
+                    void openEntry(entry, event);
+                  }}
                 >
-                  <td className="px-3 py-2.5">
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-primary"
+                  <td className="p-0">
+                    <SelectHit
                       checked={checked}
-                      aria-label={`Select ${entry.name}`}
-                      onClick={(event) => event.stopPropagation()}
+                      label={`Select ${entry.name}`}
                       onChange={(event) => {
                         const shift = "shiftKey" in event.nativeEvent && Boolean(event.nativeEvent.shiftKey);
                         toggleSelect(entry.name, index, shift);
@@ -984,13 +1094,16 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                     />
                   </td>
                   <td className="px-4 py-2.5">
-                    <button
-                      type="button"
-                      className="font-medium hover:text-primary"
-                      onClick={() => void openEntry(entry)}
-                    >
-                      {entry.name}
-                    </button>
+                    <span className="inline-flex min-w-0 items-center gap-2">
+                      {entry.kind === "dir" ? (
+                        <Folder className="size-4 shrink-0 text-primary" />
+                      ) : (
+                        <FileTypeIcon name={entry.name} className="shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate font-medium" title={entry.name}>
+                        {entry.name}
+                      </span>
+                    </span>
                   </td>
                   <td className="px-4 py-2.5 capitalize text-muted-foreground">{entry.kind}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">
@@ -1002,7 +1115,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="size-8 px-0 text-muted-foreground hover:text-foreground"
+                        className="no-press size-8 px-0 text-muted-foreground hover:text-foreground"
                         aria-label={`Actions for ${entry.name}`}
                         disabled={pending}
                         onClick={(event) => {
@@ -1022,7 +1135,16 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 </tr>
               );
             })}
-            {entries.length === 0 ? (
+            {listing && entries.length === 0 ? (
+              <tr className="border-t border-border">
+                <td className="px-4 py-8 text-center text-sm text-muted-foreground" colSpan={5}>
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="size-4 animate-spin" />
+                    Loading folder…
+                  </span>
+                </td>
+              </tr>
+            ) : !listing && entries.length === 0 ? (
               <tr className="border-t border-border">
                 <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={5}>
                   This folder is empty. Drag files here, use Upload, or right-click.
@@ -1044,7 +1166,13 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
           {menu.kind === "entry" ? (
             <>
               <MenuItem
-                icon={menu.entry.kind === "dir" ? <FolderOpen className="size-3.5" /> : <FileText className="size-3.5" />}
+                icon={
+                  menu.entry.kind === "dir" ? (
+                    <FolderOpen className="size-3.5" />
+                  ) : (
+                    <FileTypeIcon name={menu.entry.name} size={14} className="text-muted-foreground" />
+                  )
+                }
                 label={menu.entry.kind === "dir" ? "Open" : "Edit"}
                 disabled={pending}
                 onClick={() => {
@@ -1083,6 +1211,19 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                   void copyPath(entry);
                 }}
               />
+              {canArchive ? (
+                <MenuItem
+                  icon={<Archive className="size-3.5" />}
+                  label={selected.size > 1 && selected.has(menu.entry.name) ? `Archive ${selected.size} items` : "Archive"}
+                  disabled={pending}
+                  onClick={() => {
+                    const entry = menu.entry;
+                    const bulk = selected.size > 1 && selected.has(entry.name);
+                    setMenu(null);
+                    void compress(bulk ? entries.filter((item) => selected.has(item.name)) : [entry]);
+                  }}
+                />
+              ) : null}
               {menu.entry.kind === "file" && isArchive(menu.entry.name) && canArchive ? (
                 <MenuItem
                   icon={<ArchiveRestore className="size-3.5" />}
@@ -1148,13 +1289,25 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               <div className="my-1 h-px bg-border" />
               </>
               ) : null}
+              {canArchive && selected.size > 0 ? (
+                <MenuItem
+                  icon={<Archive className="size-3.5" />}
+                  label={selected.size === 1 ? "Archive" : `Archive ${selected.size} items`}
+                  disabled={pending}
+                  onClick={() => {
+                    const items = entries.filter((entry) => selected.has(entry.name));
+                    setMenu(null);
+                    void compress(items);
+                  }}
+                />
+              ) : null}
               <MenuItem
                 icon={<RefreshCw className="size-3.5" />}
                 label="Refresh"
                 disabled={pending}
                 onClick={() => {
                   setMenu(null);
-                  void load(path);
+                  void load(path, { keepEntries: true });
                 }}
               />
             </>
@@ -1268,15 +1421,29 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       >
         <div className="space-y-3">
           {moveError ? <p className="text-sm text-destructive">{moveError}</p> : null}
-          <PathCrumbs path={moveDest} onBrowse={(dir) => void browseMove(dir)} />
+          <div className="flex items-center gap-2">
+            <PathCrumbs
+              path={moveDest}
+              onBrowse={(dir, event) => {
+                if (shouldIgnoreClick(event)) return;
+                armClickGuard(event);
+                void browseMove(dir);
+              }}
+            />
+            {moveLoading ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Loading folder" /> : null}
+          </div>
           <p className="font-mono text-xs text-muted-foreground">{displayContainerPath(moveDest)}</p>
-          <div className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+          <div className={cn("max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border", moveLoading && "pointer-events-none")}>
             {moveDest !== "/" ? (
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-                disabled={moveLoading || movePending}
-                onClick={() => void browseMove(parentPath(moveDest))}
+                disabled={movePending}
+                onClick={(event) => {
+                  if (shouldIgnoreClick(event)) return;
+                  armClickGuard(event);
+                  void browseMove(parentPath(moveDest));
+                }}
               >
                 <ArrowUp className="size-3.5" />
                 Parent directory
@@ -1291,22 +1458,30 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 <button
                   key={folder.name}
                   type="button"
-                  disabled={blocked || moveLoading || movePending}
+                  disabled={blocked || movePending}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
-                  onClick={() => void browseMove(joinPath(moveDest, folder.name))}
+                  onClick={(event) => {
+                    if (shouldIgnoreClick(event)) return;
+                    armClickGuard(event);
+                    void browseMove(joinPath(moveDest, folder.name));
+                  }}
                 >
                   <Folder className="size-3.5 text-muted-foreground" />
                   <span className="truncate">{folder.name}</span>
                 </button>
               );
             })}
-            {moveFolders.length === 0 && !moveLoading ? (
+            {moveLoading && moveFolders.length === 0 ? (
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading folder…
+                </span>
+              </p>
+            ) : moveFolders.length === 0 ? (
               <p className={cn("text-center text-sm text-muted-foreground", moveDest === "/" ? "px-3 py-8" : "px-3 py-3")}>
                 No folders in this directory
               </p>
-            ) : null}
-            {moveLoading && moveFolders.length === 0 ? (
-              <p className="px-3 py-8 text-center text-sm text-muted-foreground">Loading…</p>
             ) : null}
           </div>
           {moveModal && moveBlocked ? (

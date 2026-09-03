@@ -1,6 +1,6 @@
 {
   "name": "@flutter-software/daemon",
-  "version": "0.2.58",
+  "version": "0.2.60",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,11 +17,13 @@
     "fflate": "^0.8.3",
     "hono": "^4.9.6",
     "node-unrar-js": "^2.0.2",
+    "ssh2": "^1.17.0",
     "tsx": "^4.20.4"
   },
   "devDependencies": {
     "@types/dockerode": "^3.3.44",
     "@types/node": "^22.15.0",
+    "@types/ssh2": "^1.15.6",
     "typescript": "^5.8.0"
   }
 }

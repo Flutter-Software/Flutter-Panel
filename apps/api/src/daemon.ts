@@ -3,13 +3,15 @@ import {
   heartbeatSchema,
   daemonServerStateSchema,
   daemonConfigSaveSchema,
+  hasServerPermission,
   PANEL_VERSION,
   type PowerAction,
 } from "@flutter-software/shared";
 import { signDaemonRequest, readBearerToken } from "@flutter-software/shared/ticket";
 import { env } from "./env";
-import { Node, Server } from "./db/models";
+import { Node, Server, Subuser, User } from "./db/models";
 import { authenticateNodeToken, isNodeOnline, panelApiUrl } from "./nodes";
+import { dummyPasswordHash, verifyPassword } from "./auth/crypto";
 import type { Context } from "hono";
 
 export type InstallSpec = {
@@ -41,6 +43,7 @@ export async function configuration(c: Context) {
     nodeId: node._id.toString(),
     listenHost: "0.0.0.0",
     listenPort: 8080,
+    sftpPort: Number(node.sftpPort) || 2022,
     // Template for `daemon:configure`. The real listenUrl is whatever the
     // operator passed (--listen-url / tunnel); heartbeat overwrites the node row.
     listenUrl: `http://127.0.0.1:8080`,
@@ -77,6 +80,7 @@ export async function heartbeat(c: Context) {
     ok: true,
     nodeId: node._id.toString(),
     version: PANEL_VERSION,
+    sftpPort: Number(node.sftpPort) || 2022,
   };
 }
 
@@ -289,13 +293,14 @@ export async function filesOnNode(
     content?: string;
     to?: string;
     name?: string;
+    names?: string[];
     contentBase64?: string;
     maxBytes?: number;
   },
 ) {
   const node = await loadNode(nodeId);
   const timeoutMs =
-    body.action === "upload" || body.action === "extract"
+    body.action === "upload" || body.action === "extract" || body.action === "compress"
       ? 600_000
       : body.action === "read" || body.action === "write"
         ? 300_000
@@ -379,4 +384,70 @@ export async function saveNodeDaemonConfig(nodeId: string, body: unknown) {
   }
   const node = await loadNode(nodeId);
   return daemonNodeOp(node, { method: "PUT", path: "config", body: { content: parsed.data.content } });
+}
+
+const SFTP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseSftpUsername(raw: string) {
+  const trimmed = raw.trim();
+  const dot = trimmed.lastIndexOf(".");
+  if (dot <= 0) return null;
+  const username = trimmed.slice(0, dot);
+  const uuid = trimmed.slice(dot + 1).toLowerCase();
+  if (!username || !SFTP_UUID.test(uuid)) return null;
+  return { username, uuid };
+}
+
+export async function authenticateSftp(c: Context) {
+  const token = readBearerToken(c.req.header("authorization"));
+  const body = (await c.req.json().catch(() => ({}))) as {
+    nodeId?: string;
+    username?: string;
+    password?: string;
+  };
+  const nodeId = String(body.nodeId ?? "");
+  const username = String(body.username ?? "");
+  const password = String(body.password ?? "");
+  const node = await authenticateNodeToken(token, nodeId);
+  const parsed = parseSftpUsername(username);
+
+  const reject = async (): Promise<never> => {
+    await verifyPassword(await dummyPasswordHash(), password || "x");
+    throw FlutterError.unauthorized("Invalid SFTP credentials");
+  };
+
+  if (!parsed || !password) return await reject();
+  const user = await User.findOne({ username: parsed.username });
+  if (!user) return await reject();
+  const matches = await verifyPassword(String(user.passwordHash), password);
+  if (!matches) throw FlutterError.unauthorized("Invalid SFTP credentials");
+  if (user.emailVerified === false) throw FlutterError.unauthorized("Invalid SFTP credentials");
+
+  const server = await Server.findOne({ uuid: parsed.uuid });
+  if (!server || server.nodeId.toString() !== node._id.toString()) {
+    throw FlutterError.unauthorized("Invalid SFTP credentials");
+  }
+
+  const admin = user.role === "admin";
+  const owner = server.ownerId.toString() === user._id.toString();
+  let permissions: string[] = [];
+  if (admin || owner) {
+    permissions = ["*"];
+  } else {
+    const sub = await Subuser.findOne({ serverId: server._id, userId: user._id });
+    if (!sub) throw FlutterError.unauthorized("Invalid SFTP credentials");
+    permissions = Array.isArray(sub.permissions) ? sub.permissions.map(String) : [];
+  }
+  if (!admin && node.maintenanceMode) {
+    throw FlutterError.unavailable("This node is in maintenance mode. Try again later.");
+  }
+  if (!hasServerPermission(permissions, "file.read")) {
+    throw FlutterError.forbidden("You do not have permission to access files on this server");
+  }
+
+  return {
+    uuid: server.uuid,
+    write: hasServerPermission(permissions, "file.write"),
+    delete: hasServerPermission(permissions, "file.delete"),
+  };
 }

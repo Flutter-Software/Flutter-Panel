@@ -14,6 +14,7 @@ export type DaemonConfig = {
   listenUrl: string;
   dataDir: string;
   heartbeatMs: number;
+  sftpPort: number;
 };
 
 export type DaemonFileConfig = {
@@ -25,6 +26,7 @@ export type DaemonFileConfig = {
   listenPort: number;
   listenUrl: string;
   dataDir: string;
+  sftpPort?: number;
 };
 
 export function defaultConfigPath() {
@@ -81,6 +83,7 @@ export async function loadConfig(): Promise<DaemonConfig> {
   ).replace(/\/+$/, "");
   const dataDir = resolve(env("DAEMON_DATA_DIR") || file?.dataDir || resolve(process.cwd(), "data"));
   const heartbeatMs = Number(process.env.DAEMON_HEARTBEAT_MS ?? 15_000);
+  const sftpPort = parsePort(process.env.DAEMON_SFTP_PORT, file?.sftpPort ?? 2022);
 
   if (!panelUrl || !nodeId || !daemonToken || !requestSecret) {
     throw new Error(
@@ -101,5 +104,6 @@ export async function loadConfig(): Promise<DaemonConfig> {
     listenUrl,
     dataDir,
     heartbeatMs: Number.isFinite(heartbeatMs) && heartbeatMs >= 5_000 ? heartbeatMs : 15_000,
+    sftpPort,
   };
 }
