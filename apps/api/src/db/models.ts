@@ -120,6 +120,7 @@ const serverSchema = new Schema(
     startup: { type: String, default: "" },
     stopCommand: { type: String, default: "" },
     status: { type: String, required: true, default: "offline" },
+    lastExit: { type: Schema.Types.Mixed, default: null },
     environment: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true },
@@ -193,6 +194,72 @@ const panelSettingsSchema = new Schema(
   { timestamps: true },
 );
 
+const databaseHostSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    host: { type: String, required: true },
+    port: { type: Number, required: true, default: 3306 },
+    username: { type: String, required: true },
+    password: { type: String, required: true },
+    publicHost: { type: String, default: "" },
+    publicPort: { type: Number, default: 0 },
+    nodeIds: { type: [{ type: Schema.Types.ObjectId, ref: "Node" }], default: [] },
+    maxDatabases: { type: Number, required: true, default: 0 },
+  },
+  { timestamps: true },
+);
+
+const serverDatabaseSchema = new Schema(
+  {
+    serverId: { type: Schema.Types.ObjectId, ref: "Server", required: true, index: true },
+    hostId: { type: Schema.Types.ObjectId, ref: "DatabaseHost", required: true, index: true },
+    name: { type: String, required: true },
+    database: { type: String, required: true, unique: true },
+    username: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    remote: { type: String, required: true, default: "%" },
+  },
+  { timestamps: true },
+);
+
+serverDatabaseSchema.index({ serverId: 1, name: 1 }, { unique: true });
+
+const activitySchema = new Schema(
+  {
+    serverId: { type: Schema.Types.ObjectId, ref: "Server", required: true, index: true },
+    actorId: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
+    actorKind: { type: String, required: true, default: "user", enum: ["user", "system", "schedule"] },
+    actorName: { type: String, required: true, default: "System" },
+    event: { type: String, required: true },
+    category: { type: String, required: true, index: true },
+    properties: { type: Schema.Types.Mixed, default: {} },
+    ip: { type: String, default: null },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+
+activitySchema.index({ serverId: 1, createdAt: -1, _id: -1 });
+activitySchema.index({ serverId: 1, category: 1, createdAt: -1 });
+activitySchema.index({ serverId: 1, actorName: 1, createdAt: -1 });
+
+const apiKeySchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    kind: { type: String, required: true, enum: ["client", "application"] },
+    name: { type: String, required: true, trim: true },
+    tokenHash: { type: String, required: true, unique: true },
+    tokenPrefix: { type: String, required: true },
+    serverIds: { type: [{ type: Schema.Types.ObjectId, ref: "Server" }], default: [] },
+    scopes: { type: [String], default: [] },
+    lastUsedAt: { type: Date, default: null },
+    expiresAt: { type: Date, default: null },
+    ip: { type: String, default: null },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+
+apiKeySchema.index({ userId: 1, kind: 1, createdAt: -1 });
+
 function modelOf(name: string, schema: Schema): Model<any> {
   // tsx/node --watch re-imports this file. mongoose throws on a second
   // model(name) for the same connection, so drop the cached one first.
@@ -211,3 +278,7 @@ export const Server = modelOf("Server", serverSchema);
 export const Subuser = modelOf("Subuser", subuserSchema);
 export const Schedule = modelOf("Schedule", scheduleSchema);
 export const PanelSettings = modelOf("PanelSettings", panelSettingsSchema);
+export const DatabaseHost = modelOf("DatabaseHost", databaseHostSchema);
+export const ServerDatabase = modelOf("ServerDatabase", serverDatabaseSchema);
+export const Activity = modelOf("Activity", activitySchema);
+export const ApiKey = modelOf("ApiKey", apiKeySchema);

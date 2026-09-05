@@ -2,6 +2,7 @@ import type { WSContext } from "hono/ws";
 import type { DaemonConfig } from "./config";
 import {
   attachConsole,
+  classifyContainerExit,
   containerRunning,
   followLogs,
   getLogs,
@@ -10,6 +11,8 @@ import {
   isInstallRunning,
   killContainer,
   liveResources,
+  readLastExit,
+  recordLastExit,
   sendCommand,
   setConsoleEvent,
   setConsoleNotice,
@@ -254,16 +257,23 @@ async function finishAttach(uuid: string) {
 
   const code = state?.ExitCode ?? 0;
   const process = getProcessState(uuid);
-  if (!state?.OOMKilled && (process === "stopping" || isStopSignalExit(code))) {
+  const stopping = process === "stopping";
+  if (state && !state.OOMKilled && (stopping || isStopSignalExit(code))) {
+    const exit = classifyContainerExit(state, stopping);
+    if (exit) void recordLastExit(uuid, exit);
     return "offline" as const;
   }
 
   if (state?.OOMKilled || code !== 0) {
-    const reason = state?.OOMKilled
-      ? "Server ran out of memory"
-      : state?.Error?.trim()
-        ? state.Error
-        : `Server crashed (exit ${code})`;
+    const exit = classifyContainerExit(state, false);
+    const reason = exit?.message
+      ? exit.message
+      : state?.OOMKilled
+        ? "Server ran out of memory"
+        : state?.Error?.trim()
+          ? state.Error
+          : `Server crashed (exit ${code})`;
+    if (exit) void recordLastExit(uuid, exit);
     emit(uuid, "error", reason);
     consoleNotice(uuid, reason);
     await killContainer(uuid);
@@ -412,6 +422,9 @@ export async function runDaemonConsole(
   const listener: Listener = (event, data) => sendWs(ws, event, data);
   current.listeners.add(listener);
   sendWs(ws, "status", getProcessState(uuid));
+  void readLastExit(uuid).then((exit) => {
+    if (exit && current.listeners.has(listener)) sendWs(ws, "last-exit", JSON.stringify(exit));
+  });
   const seeding = current.seedPromise ??= seedLogs(uuid);
   if (!current.abort) void pump(config, uuid);
   void seeding.catch(() => undefined).then(() => {

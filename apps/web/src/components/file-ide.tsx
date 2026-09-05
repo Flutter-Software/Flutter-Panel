@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor, { DiffEditor, type OnMount } from "@monaco-editor/react";
 import { useTheme } from "next-themes";
-import { FileCode, Save, X } from "lucide-react";
+import { FileCode, GitCompare, Save, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 const LANGUAGES: Record<string, string> = {
@@ -81,6 +81,7 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
   const { resolvedTheme } = useTheme();
   const original = useRef(content);
   const [dirty, setDirty] = useState(false);
+  const [diffing, setDiffing] = useState(false);
   const language = languageFor(path);
   const dark = resolvedTheme !== "light";
   const fileName = path.split("/").pop() || path;
@@ -89,6 +90,7 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
   useEffect(() => {
     original.current = content;
     setDirty(false);
+    setDiffing(false);
   }, [path]);
 
   async function handleSave() {
@@ -97,6 +99,7 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
     if (!ok) return;
     original.current = content;
     setDirty(false);
+    setDiffing(false);
   }
 
   const saveRef = useRef(handleSave);
@@ -140,7 +143,7 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
         role="dialog"
         aria-modal="true"
         aria-label={`Edit ${path}`}
-        className="relative flex h-[min(92vh,52rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-2xl"
+        className="relative flex h-[min(92vh,52rem)] w-full max-w-[min(96rem,96vw)] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-2xl"
       >
         <div className="flex h-7 shrink-0 items-center bg-muted/70">
           <p className="min-w-0 flex-1 truncate px-2.5 text-center font-mono text-[11px] leading-none text-muted-foreground">
@@ -150,18 +153,34 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
           </p>
           <div className="flex shrink-0 items-stretch">
             {readOnly ? null : (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 rounded-none px-2 text-[11px]"
-                disabled={pending || !dirty}
-                onClick={() => void handleSave()}
-                title="Save (Ctrl+S)"
-              >
-                <Save className="size-3.5" />
-                {pending ? "Saving" : "Save"}
-              </Button>
+              <>
+                {dirty || diffing ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 gap-1 rounded-none px-2 text-[11px]"
+                    disabled={pending}
+                    onClick={() => setDiffing((current) => !current)}
+                    title={diffing ? "Back to editor" : "Compare with last saved"}
+                  >
+                    <GitCompare className="size-3.5" />
+                    {diffing ? "Editor" : "Diff"}
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 rounded-none px-2 text-[11px]"
+                  disabled={pending || !dirty}
+                  onClick={() => void handleSave()}
+                  title="Save (Ctrl+S)"
+                >
+                  <Save className="size-3.5" />
+                  {pending ? "Saving" : "Save"}
+                </Button>
+              </>
             )}
             <button
               type="button"
@@ -187,6 +206,41 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
           </div>
         </div>
         <div className="min-h-0 flex-1 bg-background">
+          {diffing ? (
+            <DiffEditor
+              height="100%"
+              language={language}
+              original={original.current}
+              modified={content}
+              theme={dark ? "vs-dark" : "light"}
+              onMount={(editor) => {
+                const modified = editor.getModifiedEditor();
+                modified.onDidChangeModelContent(() => {
+                  const next = modified.getValue();
+                  setDirty(next !== original.current);
+                  onChange(next);
+                });
+              }}
+              options={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 13,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                readOnly: Boolean(readOnly),
+                originalEditable: false,
+                wordWrap: "on",
+                renderSideBySide: true,
+                renderLineHighlight: "line",
+                smoothScrolling: true,
+              }}
+              loading={
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Loading editor…
+                </div>
+              }
+            />
+          ) : (
           <Editor
             height="100%"
             language={language}
@@ -218,6 +272,7 @@ export function FileIdeModal({ path, content, pending, readOnly, onChange, onSav
               </div>
             }
           />
+          )}
         </div>
       </div>
     </div>

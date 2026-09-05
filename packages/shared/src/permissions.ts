@@ -12,6 +12,7 @@ export const SERVER_PERMISSIONS = [
   "backup.delete",
   "backup.restore",
   "allocation.read",
+  "allocation.update",
   "startup.read",
   "startup.update",
   "settings.rename",
@@ -21,10 +22,14 @@ export const SERVER_PERMISSIONS = [
   "user.update",
   "user.delete",
   "database.read",
+  "database.create",
+  "database.update",
+  "database.delete",
   "schedule.read",
   "schedule.create",
   "schedule.update",
   "schedule.delete",
+  "activity.read",
 ] as const;
 
 export type ServerPermission = (typeof SERVER_PERMISSIONS)[number];
@@ -51,7 +56,7 @@ export const PERMISSION_GROUPS: {
     label: "Files",
     description: "Browse and change server files.",
     permissions: [
-      { key: "file.read", label: "Read", description: "List directories and open files." },
+      { key: "file.read", label: "Read", description: "List directories, search, open, and download files." },
       { key: "file.write", label: "Write", description: "Create, upload, rename, and save files." },
       { key: "file.delete", label: "Delete", description: "Delete files and folders." },
       { key: "file.archive", label: "Archive", description: "Create tar.gz archives and extract zip, tar, and rar archives." },
@@ -72,7 +77,14 @@ export const PERMISSION_GROUPS: {
     key: "network",
     label: "Network",
     description: "Allocations assigned to this server.",
-    permissions: [{ key: "allocation.read", label: "Read", description: "View allocations and the connection address." }],
+    permissions: [
+      { key: "allocation.read", label: "Read", description: "View allocations and the connection address." },
+      {
+        key: "allocation.update",
+        label: "Update",
+        description: "Change notes, aliases, and which allocation is primary.",
+      },
+    ],
   },
   {
     key: "startup",
@@ -104,6 +116,17 @@ export const PERMISSION_GROUPS: {
     ],
   },
   {
+    key: "databases",
+    label: "Databases",
+    description: "MySQL databases assigned to this server.",
+    permissions: [
+      { key: "database.read", label: "Read", description: "View databases and connection details." },
+      { key: "database.create", label: "Create", description: "Create a new database on an available host." },
+      { key: "database.update", label: "Update", description: "Rotate the database password." },
+      { key: "database.delete", label: "Delete", description: "Delete a database from the host." },
+    ],
+  },
+  {
     key: "schedules",
     label: "Schedules",
     description: "Timed power, command, and backup jobs.",
@@ -113,6 +136,12 @@ export const PERMISSION_GROUPS: {
       { key: "schedule.update", label: "Update", description: "Edit schedules and run them now." },
       { key: "schedule.delete", label: "Delete", description: "Delete schedules." },
     ],
+  },
+  {
+    key: "activity",
+    label: "Activity",
+    description: "Who started the server, changed files, and edited subusers.",
+    permissions: [{ key: "activity.read", label: "Read", description: "View the activity timeline." }],
   },
 ];
 
@@ -126,6 +155,7 @@ export const NAV_PERMISSION: Record<string, ServerPermission> = {
   network: "allocation.read",
   startup: "startup.read",
   settings: "settings.rename",
+  activity: "activity.read",
 };
 
 export function isServerPermission(value: string): value is ServerPermission {

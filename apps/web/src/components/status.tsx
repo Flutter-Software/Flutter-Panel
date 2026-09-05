@@ -48,20 +48,27 @@ const STATUS_PILL: Record<ServerStatus, string> = {
   stopping: "bg-status-warn/15 text-status-warn",
   installing: "bg-status-info/15 text-status-info",
   install_failed: "bg-status-error/15 text-status-error",
-  offline: "bg-muted text-status-offline",
+  offline: "border border-border/80 bg-muted/60 text-foreground",
 };
 
-export function StatusPill({ status }: { status: ServerStatus }) {
+export function StatusPill({
+  status,
+  className,
+}: {
+  status: ServerStatus;
+  className?: string;
+}) {
   const meta = STATUS[status];
   const live = status === "starting" || status === "stopping" || status === "installing";
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
+        "inline-flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1 text-xs font-semibold tracking-wide",
         STATUS_PILL[status],
+        className,
       )}
     >
-      <span className={cn("size-1.5 rounded-full", meta.bar, live && "animate-pulse")} />
+      <span className={cn("size-2 shrink-0 rounded-full", meta.bar, live && "animate-pulse")} />
       {meta.label}
     </span>
   );

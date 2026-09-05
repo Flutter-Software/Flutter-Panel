@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { verifyDaemonRequest, readBearerToken } from "@flutter-software/shared/ticket";
 import { DAEMON_VERSION, defaultConfigPath, readDaemonConfigFile, writeDaemonConfig, type DaemonConfig, type DaemonFileConfig } from "./config";
@@ -13,6 +14,7 @@ import {
   runOfflineCommand,
   containerRunning,
   isInstallRunning,
+  bindDaemonConfig,
   type InstallSpec,
   type PowerAction,
 } from "./docker";
@@ -21,11 +23,14 @@ import { getProcessState } from "./process-state";
 import {
   compressArchive,
   deleteServerPath,
+  downloadServer,
   extractArchive,
   listFiles,
   mkdirServer,
   readServerFile,
   renameServerPath,
+  searchFiles,
+  statServerPath,
   uploadServerFile,
   writeServerFile,
 } from "./files";
@@ -82,6 +87,7 @@ function asInstallSpec(body: Record<string, unknown>, uuid: string): InstallSpec
 }
 
 export function createDaemonApp(config: DaemonConfig) {
+  bindDaemonConfig(config);
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
@@ -90,6 +96,7 @@ export function createDaemonApp(config: DaemonConfig) {
     return c.json({ ok: false, error: { code: "DAEMON_ERROR", message } }, 500);
   });
 
+  app.use("/health", cors({ origin: "*" }));
   app.get("/health", async (c) => {
     let docker = { ok: false as boolean, error: "not connected" as string | undefined };
     try {
@@ -134,6 +141,7 @@ export function createDaemonApp(config: DaemonConfig) {
         listenPort: config.listenPort,
         listenUrl: config.listenUrl,
         dataDir: config.dataDir,
+        sftpPort: config.sftpPort,
       },
       null,
       2,
@@ -177,6 +185,13 @@ export function createDaemonApp(config: DaemonConfig) {
         400,
       );
     }
+    const sftpPort = Number(parsed.sftpPort ?? 2022);
+    if (!Number.isInteger(sftpPort) || sftpPort < 1 || sftpPort > 65535) {
+      return c.json(
+        { ok: false, error: { code: "INVALID_INPUT", message: "sftpPort must be between 1 and 65535." } },
+        400,
+      );
+    }
     const path = await writeDaemonConfig({
       panelUrl: String(parsed.panelUrl).replace(/\/+$/, ""),
       nodeId: String(parsed.nodeId),
@@ -186,6 +201,7 @@ export function createDaemonApp(config: DaemonConfig) {
       listenPort,
       listenUrl: String(parsed.listenUrl).replace(/\/+$/, ""),
       dataDir: String(parsed.dataDir),
+      sftpPort,
     });
     return c.json({
       ok: true,
@@ -341,7 +357,28 @@ export function createDaemonApp(config: DaemonConfig) {
     if (action === "compress") {
       return c.json({ ok: true, data: await compressArchive(config, uuid, path, body.names) });
     }
+    if (action === "search") {
+      return c.json({ ok: true, data: await searchFiles(config, uuid, path, String(body.query ?? "")) });
+    }
+    if (action === "stat") {
+      return c.json({ ok: true, data: await statServerPath(config, uuid, path) });
+    }
     return c.json({ ok: false, error: { code: "INVALID_INPUT", message: "Unknown file action" } }, 400);
+  });
+
+  app.get("/v1/servers/:uuid/files/download", async (c) => {
+    const uuid = c.req.param("uuid");
+    const path = c.req.query("path") || "/";
+    const names = (c.req.queries("names") ?? []).map((value) => value.trim()).filter(Boolean);
+    const file = await downloadServer(config, uuid, path, names);
+    const ascii = file.filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+    c.header("Content-Type", file.mime);
+    c.header("Content-Length", String(file.body.length));
+    c.header(
+      "Content-Disposition",
+      `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+    );
+    return c.body(new Uint8Array(file.body));
   });
 
   app.post("/v1/servers/:uuid/backups", async (c) => {

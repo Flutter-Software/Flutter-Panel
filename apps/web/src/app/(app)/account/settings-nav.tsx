@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Laptop, Monitor, Shield, UserRound } from "lucide-react";
+import { KeyRound, Laptop, Monitor, Shield, UserRound } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const ITEMS = [
@@ -10,6 +10,7 @@ const ITEMS = [
   { href: "/account/appearance", label: "Appearance", icon: Monitor },
   { href: "/account/security", label: "Security", icon: Shield },
   { href: "/account/sessions", label: "Sessions", icon: Laptop },
+  { href: "/account/api-keys", label: "API keys", icon: KeyRound },
 ] as const;
 
 export function AccountSettingsNav() {

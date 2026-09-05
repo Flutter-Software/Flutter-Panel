@@ -16,6 +16,7 @@ import { sendSubuserInvite } from "./mail";
 import { hashPassword, publicUser, randomToken, sha256, validatePassword } from "./auth/crypto";
 import { createSession } from "./auth/session";
 import { assertPerm, requireAccess } from "./servers";
+import { recordActivity } from "./activity";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -178,6 +179,12 @@ export async function createSubuser(
       invitedBy: viewerId,
     });
     const usersById = await usersForSubusers([row]);
+    recordActivity({
+      serverId: access.server._id.toString(),
+      event: "user.create",
+      category: "users",
+      properties: { email, username: user.username },
+    });
     return { subuser: await toSubuserDto(row, usersById), emailed: false as const };
   }
 
@@ -200,6 +207,12 @@ export async function createSubuser(
     ...(await inviteMailContext(access.server)),
   });
   const usersById = await usersForSubusers([row]);
+  recordActivity({
+    serverId: access.server._id.toString(),
+    event: "user.create",
+    category: "users",
+    properties: { email },
+  });
   return { subuser: await toSubuserDto(row, usersById), emailed, inviteUrl: url };
 }
 
@@ -217,6 +230,12 @@ export async function updateSubuser(
   if (!row) throw FlutterError.notFound("Subuser not found");
   row.permissions = normalizePermissions(parsed.data.permissions);
   await row.save();
+  recordActivity({
+    serverId: access.server._id.toString(),
+    event: "user.update",
+    category: "users",
+    properties: { email: row.email },
+  });
   const usersById = await usersForSubusers([row]);
   return { subuser: await toSubuserDto(row, usersById) };
 }
@@ -225,7 +244,14 @@ export async function deleteSubuser(serverId: string, subuserId: string, viewerI
   const access = await requireAccess(serverId, viewerId, admin, "user.delete");
   const row = await Subuser.findOne({ _id: subuserId, serverId: access.server._id });
   if (!row) throw FlutterError.notFound("Subuser not found");
+  const email = row.email;
   await Subuser.deleteOne({ _id: row._id });
+  recordActivity({
+    serverId: access.server._id.toString(),
+    event: "user.delete",
+    category: "users",
+    properties: { email },
+  });
   return { ok: true };
 }
 
@@ -253,6 +279,12 @@ export async function resendSubuserInvite(
     ...(await inviteMailContext(access.server)),
   });
   const usersById = await usersForSubusers([row]);
+  recordActivity({
+    serverId: access.server._id.toString(),
+    event: "user.invite",
+    category: "users",
+    properties: { email: row.email },
+  });
   return { subuser: await toSubuserDto(row, usersById), emailed, inviteUrl: url };
 }
 
@@ -315,7 +347,7 @@ export async function completeInvite(c: Context, body: unknown) {
 }
 
 function homePath(serverId: string, permissions: ServerPermission[]) {
-  const order = ["console", "files", "backups", "network", "startup", "users", "settings"] as const;
+  const order = ["console", "files", "backups", "network", "startup", "users", "settings", "activity"] as const;
   for (const key of order) {
     const perm = NAV_PERMISSION[key];
     if (perm && hasServerPermission(permissions, perm)) return `/server/${serverId}/${key}`;

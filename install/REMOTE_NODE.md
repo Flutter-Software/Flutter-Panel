@@ -94,6 +94,8 @@ The script installs Docker, Node.js 22, and the daemon under `/opt/flutter-node`
 ```bash
 # daemon: panel → this node
 sudo ufw allow from PANEL_PUBLIC_IP to any port 8080 proto tcp
+# SFTP: clients → this node
+sudo ufw allow 2022/tcp
 # example Minecraft port (repeat per allocation)
 sudo ufw allow 25565/tcp
 sudo ufw enable
@@ -113,6 +115,7 @@ Then skip to [Confirm it is online](#3-confirm-it-is-online).
 | `--node ID` | Node id from Admin → Nodes |
 | `--listen-url URL` | URL the panel uses to reach this daemon |
 | `--port PORT` | Daemon listen port (default `8080`) |
+| `--sftp-port PORT` | SFTP listen port (default `2022`) |
 | `--host HOST` | Bind address (default `0.0.0.0`) |
 | `--prefix DIR` | Install directory (default `/opt/flutter-node`) |
 | `--data-dir DIR` | Game files (default `/var/lib/flutter`) |

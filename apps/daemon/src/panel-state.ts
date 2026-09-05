@@ -1,11 +1,13 @@
 import type { DaemonConfig } from "./config";
 import { panelUrlCandidates } from "./heartbeat";
 import { describeFetchError } from "./panel-fetch";
+import type { LastExit } from "@flutter-software/shared";
 import type { ProcessState } from "./process-state";
 
 export type ServerStatePayload = {
   status?: ProcessState;
   install?: { ok: boolean; error?: string };
+  lastExit?: LastExit | null;
 };
 
 function trimUrl(value: string) {

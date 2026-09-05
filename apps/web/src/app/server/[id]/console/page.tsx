@@ -1,8 +1,8 @@
 "use client";
 
 import { use, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type UIEvent } from "react";
-import { ChevronDown, ChevronUp, Loader2, Search, X } from "lucide-react";
-import { Card } from "@/components/ui";
+import { Check, ChevronDown, ChevronUp, Copy, Loader2, Search, X } from "lucide-react";
+import { Button, Card } from "@/components/ui";
 import { StatGraph } from "@/components/status";
 import { PowerButtons } from "@/components/power-buttons";
 import { useLiveServerStatus, usePolledServerRecord } from "@/components/server-frame";
@@ -11,10 +11,26 @@ import { browserConsoleSocketUrl } from "@/lib/console-socket";
 import { formatLimitMb, formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/access";
+import { ansiSpans, isFlutterConsoleLine, splitConsoleLine, stripConsoleAnsi } from "@/lib/console-ansi";
+import {
+  commandsForServer,
+  completeConsoleCommand,
+  filterConsoleCommands,
+  type ConsoleCommand,
+} from "@/lib/console-commands";
+import { toast } from "@/components/toast";
 import { UnlimitedStat } from "@/components/unlimited";
 
 const MAX_LINES = 400;
 const HISTORY = 60;
+const COMMAND_HISTORY = 100;
+const FILTERS = [
+  { value: "all", label: "All" },
+  { value: "game", label: "Game" },
+  { value: "flutter", label: "Flutter" },
+] as const;
+
+type ConsoleFilter = (typeof FILTERS)[number]["value"];
 
 type StatSeries = { cpu: number[]; memory: number[]; network: number[] };
 
@@ -40,15 +56,7 @@ function isAttachNoise(line: string) {
 }
 
 function lineBody(line: string) {
-  return displayConsoleText(line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, ""));
-}
-
-function displayConsoleText(value: string) {
-  return value
-    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
-    .replace(/\[{1,2}\d*(?:;\d+)*[GHfKJ]/g, "")
-    .replace(/\[{1,2}\d+(?:;\d+)*m/g, "")
-    .replace(/\u001b./g, "");
+  return stripConsoleAnsi(line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, ""));
 }
 
 function HighlightedText({ text, query, active }: { text: string; query: string; active: boolean }) {
@@ -80,37 +88,53 @@ function ConsoleLine({
   line,
   query = "",
   active = false,
+  copied = false,
+  onCopyLine,
 }: {
   line: string;
   query?: string;
   active?: boolean;
+  copied?: boolean;
+  onCopyLine?: (line: string) => void;
 }) {
-  const cleaned = displayConsoleText(line);
-  const flutter = /^\[(\d{2}:\d{2}:\d{2})\] \[Flutter\] (.*)$/.exec(cleaned);
-  if (flutter) {
-    return (
-      <div className="whitespace-pre-wrap break-all">
-        <span className="text-muted-foreground">[{flutter[1]}]</span>{" "}
-        <span className="font-medium text-primary">[Flutter]</span>{" "}
-        <span>
-          <HighlightedText text={flutter[2]} query={query} active={active} />
-        </span>
-      </div>
-    );
-  }
-  const stamped = /^\[(\d{2}:\d{2}:\d{2})\] (.*)$/.exec(cleaned);
-  if (stamped) {
-    return (
-      <div className="whitespace-pre-wrap break-all">
-        <span className="text-muted-foreground">[{stamped[1]}]</span>{" "}
-        <HighlightedText text={stamped[2]} query={query} active={active} />
-      </div>
-    );
-  }
-  if (!cleaned.trim()) return null;
+  const parts = splitConsoleLine(line);
+  const body = parts.body;
+  const needle = query.trim();
+  const bodyNode = needle ? (
+    <HighlightedText text={stripConsoleAnsi(body)} query={query} active={active} />
+  ) : (
+    ansiSpans(body).map((span, index) => (
+      <span key={index} className={span.className || undefined}>
+        {span.text}
+      </span>
+    ))
+  );
+
+  if (!stripConsoleAnsi(body).trim() && !parts.time) return null;
+
   return (
     <div className="whitespace-pre-wrap break-all">
-      <HighlightedText text={cleaned} query={query} active={active} />
+      {parts.time ? (
+        <>
+          <button
+            type="button"
+            className={cn(
+              "text-muted-foreground hover:text-foreground hover:underline",
+              copied && "text-primary",
+            )}
+            title={copied ? "Copied" : "Copy this line"}
+            onClick={() => onCopyLine?.(line)}
+          >
+            [{parts.time}]
+          </button>{" "}
+        </>
+      ) : null}
+      {parts.flutter ? (
+        <>
+          <span className="font-medium text-primary">[Flutter]</span>{" "}
+        </>
+      ) : null}
+      <span>{bodyNode}</span>
     </div>
   );
 }
@@ -200,6 +224,61 @@ function graphsLive(status?: ServerStatus | null, startedAt?: string | null) {
   return Boolean(startedAt);
 }
 
+function parseLastExit(raw: string): ServerRecord["lastExit"] {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as ServerRecord["lastExit"];
+    if (!value || typeof value !== "object" || typeof value.kind !== "string") return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function commandHistoryKey(serverId: string) {
+  return `flutter.console.history.${serverId}`;
+}
+
+function loadCommandHistory(serverId: string) {
+  try {
+    const raw = sessionStorage.getItem(commandHistoryKey(serverId));
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(-COMMAND_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function saveCommandHistory(serverId: string, commands: string[]) {
+  try {
+    sessionStorage.setItem(commandHistoryKey(serverId), JSON.stringify(commands.slice(-COMMAND_HISTORY)));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function lastExitBanner(exit: NonNullable<ServerRecord["lastExit"]>) {
+  switch (exit.kind) {
+    case "oom":
+      return { title: "Ran out of memory", detail: exit.message, tone: "error" as const };
+    case "killed":
+      return {
+        title: exit.code === 137 ? "Killed from the panel" : "Stopped",
+        detail: exit.message,
+        tone: "muted" as const,
+      };
+    case "crash":
+      return {
+        title: typeof exit.code === "number" ? `Process exited (code ${exit.code})` : "Process exited",
+        detail: exit.message,
+        tone: "error" as const,
+      };
+    case "install_failed":
+      return { title: "Install failed", detail: exit.message, tone: "error" as const };
+  }
+}
+
 export default function ConsolePage({
   params,
 }: {
@@ -210,10 +289,16 @@ export default function ConsolePage({
   const { setLiveStatus } = useLiveServerStatus();
   const [server, setServer] = useState<ServerRecord | null>(framed);
   const [command, setCommand] = useState("");
+  const [suggestIndex, setSuggestIndex] = useState(0);
+  const [suggestFocused, setSuggestFocused] = useState(false);
+  const [browseAll, setBrowseAll] = useState(false);
+  const commandInput = useRef<HTMLInputElement>(null);
+  const suggestList = useRef<HTMLUListElement>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedLogs, setCopiedLogs] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [netRate, setNetRate] = useState(0);
   const [, setTick] = useState(0);
@@ -226,13 +311,31 @@ export default function ConsolePage({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [matchIndex, setMatchIndex] = useState(0);
+  const [filter, setFilter] = useState<ConsoleFilter>("all");
+  const [copiedLine, setCopiedLine] = useState<number | null>(null);
+  const [selectionCopy, setSelectionCopy] = useState<{ text: string; top: number; left: number } | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const lastNet = useRef<{ rx: number; tx: number; at: number } | null>(null);
   const statusRef = useRef(server?.status);
   const ignoreHistoryUntil = useRef(0);
+  const commandHistory = useRef<string[]>([]);
+  const historyCursor = useRef(-1);
+  const draftCommand = useRef("");
   const [series, setSeries] = useState<StatSeries>(emptySeries);
 
+  const commandCatalog = server ? commandsForServer(server) : [];
+  const commandMatches = filterConsoleCommands(commandCatalog, browseAll && !command.trim() ? "" : command);
+
   statusRef.current = server?.status;
+
+  useEffect(() => {
+    setSuggestIndex(0);
+  }, [command, browseAll, server?.egg]);
+
+  useEffect(() => {
+    const active = suggestList.current?.querySelector("[data-active='true']");
+    if (active instanceof HTMLElement) active.scrollIntoView({ block: "nearest" });
+  }, [suggestIndex, command, browseAll]);
 
   function applyStatus(status: ServerStatus) {
     setLiveStatus(status);
@@ -273,6 +376,11 @@ export default function ConsolePage({
     lastNet.current = null;
     setLines([]);
     setHistoryLoaded(false);
+    setFilter("all");
+    setSelectionCopy(null);
+    commandHistory.current = loadCommandHistory(id);
+    historyCursor.current = -1;
+    draftCommand.current = "";
     const tick = window.setInterval(() => setTick((value) => value + 1), 1000);
     return () => window.clearInterval(tick);
   }, [id]);
@@ -435,8 +543,12 @@ export default function ConsolePage({
               applyStatus(parsed.data === "false" ? "install_failed" : "offline");
               return;
             }
+            if (parsed.event === "last-exit") {
+              setServer((current) => (current ? { ...current, lastExit: parseLastExit(parsed.data ?? "") } : current));
+              return;
+            }
             if (parsed.event === "error" && parsed.data) {
-              if (/crashed \(exit|out of memory/i.test(parsed.data)) {
+              if (/crashed \(exit|out of memory|process exited/i.test(parsed.data)) {
                 setServer((current) => {
                   if (!current || current.status === "installing" || current.status === "install_failed") {
                     return current;
@@ -444,8 +556,9 @@ export default function ConsolePage({
                   return { ...current, status: "offline" };
                 });
                 setLiveStatus("offline");
+                return;
               }
-              setError(parsed.data);
+              toast(parsed.data);
             }
           } catch {
             push(String(event.data));
@@ -464,7 +577,7 @@ export default function ConsolePage({
         };
       } catch (err) {
         if (closed) return;
-        setError(err instanceof Error ? err.message : "Console socket failed");
+        toast(err instanceof Error ? err.message : "Console socket failed");
         retryTimer = window.setTimeout(() => {
           retryMs = Math.min(4_000, retryMs * 1.5);
           void connect();
@@ -486,18 +599,28 @@ export default function ConsolePage({
   }, [id]);
 
   const needle = searchQuery.trim();
+  const visibleLines = useMemo(() => {
+    return lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => {
+        if (filter === "all") return true;
+        const flutter = isFlutterConsoleLine(line);
+        return filter === "flutter" ? flutter : !flutter;
+      });
+  }, [lines, filter]);
+
   const matchIndexes = useMemo(() => {
     if (!needle) return [];
     const lower = needle.toLowerCase();
     const indexes: number[] = [];
-    for (let index = 0; index < lines.length; index++) {
-      const line = lines[index];
-      if (line && displayConsoleText(line).toLowerCase().includes(lower)) {
+    for (let index = 0; index < visibleLines.length; index++) {
+      const line = visibleLines[index]?.line;
+      if (line && stripConsoleAnsi(line).toLowerCase().includes(lower)) {
         indexes.push(index);
       }
     }
     return indexes;
-  }, [lines, needle]);
+  }, [visibleLines, needle]);
 
   function scrollToBottom(behavior: ScrollBehavior = "auto") {
     const el = scroller.current;
@@ -556,7 +679,7 @@ export default function ConsolePage({
   useLayoutEffect(() => {
     if (!stickToBottom.current) return;
     scrollToBottom();
-  }, [lines]);
+  }, [visibleLines]);
 
   useEffect(() => {
     if (!searchOpen) {
@@ -589,7 +712,34 @@ export default function ConsolePage({
     const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
     stickToBottom.current = pinned;
     setAtBottom(pinned);
+    setSelectionCopy((current) => (current ? null : current));
   }
+
+  useEffect(() => {
+    const onSelection = () => {
+      const selection = window.getSelection();
+      const text = selection?.toString() ?? "";
+      const pane = scroller.current;
+      if (!selection || !text.trim() || !pane || selection.rangeCount === 0) {
+        setSelectionCopy(null);
+        return;
+      }
+      const node = selection.anchorNode;
+      if (!node || !pane.contains(node)) {
+        setSelectionCopy(null);
+        return;
+      }
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      const box = pane.getBoundingClientRect();
+      setSelectionCopy({
+        text,
+        top: Math.max(8, Math.min(box.height - 40, rect.top - box.top - 32)),
+        left: Math.min(Math.max(8, rect.left - box.left), Math.max(8, box.width - 88)),
+      });
+    };
+    document.addEventListener("selectionchange", onSelection);
+    return () => document.removeEventListener("selectionchange", onSelection);
+  }, []);
 
   async function power(action: "start" | "stop" | "restart" | "kill") {
     setError(null);
@@ -628,7 +778,7 @@ export default function ConsolePage({
         };
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Power action failed");
+      toast(err instanceof Error ? err.message : "Power action failed");
     }
   }
 
@@ -636,7 +786,17 @@ export default function ConsolePage({
     event.preventDefault();
     const value = command.trim();
     if (!value || !server || server.status === "installing") return;
+    const list = commandHistory.current;
+    if (list.at(-1) !== value) {
+      list.push(value);
+      if (list.length > COMMAND_HISTORY) list.splice(0, list.length - COMMAND_HISTORY);
+      saveCommandHistory(id, list);
+    }
+    historyCursor.current = -1;
+    draftCommand.current = "";
     setCommand("");
+    setBrowseAll(false);
+    setSuggestIndex(0);
     setError(null);
     setLines((current) => trimLines(current, [`> ${value}`]));
     const live =
@@ -654,7 +814,105 @@ export default function ConsolePage({
           return;
         }
       }
-      setError(err instanceof Error ? err.message : "Could not send command");
+      toast(err instanceof Error ? err.message : "Could not send command");
+    }
+  }
+
+  function acceptSuggestion(item: ConsoleCommand) {
+    historyCursor.current = -1;
+    draftCommand.current = "";
+    setCommand(completeConsoleCommand(command, item.command));
+    setBrowseAll(false);
+    setSuggestIndex(0);
+    commandInput.current?.focus();
+  }
+
+  function onCommandKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      if (browseAll || suggestFocused) {
+        event.preventDefault();
+        setBrowseAll(false);
+        setSuggestFocused(false);
+      }
+      return;
+    }
+    if ((event.key === " " && event.ctrlKey) || (event.key === " " && event.metaKey)) {
+      event.preventDefault();
+      setBrowseAll(true);
+      setSuggestFocused(true);
+      setSuggestIndex(0);
+      return;
+    }
+    const installing = server?.status === "installing";
+    const matches = filterConsoleCommands(commandCatalog, browseAll && !command.trim() ? "" : command);
+    const listOpen = Boolean(!installing && matches.length && (command.trim() || browseAll) && suggestFocused);
+    if (listOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSuggestIndex((current) => Math.min(matches.length - 1, current + 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSuggestIndex((current) => Math.max(0, current - 1));
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const item = matches[suggestIndex] ?? matches[0];
+        if (item) acceptSuggestion(item);
+        return;
+      }
+    }
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    const list = commandHistory.current;
+    if (!list.length) return;
+    event.preventDefault();
+    setBrowseAll(false);
+    if (event.key === "ArrowUp") {
+      if (historyCursor.current === -1) draftCommand.current = command;
+      const next = historyCursor.current === -1 ? list.length - 1 : Math.max(0, historyCursor.current - 1);
+      historyCursor.current = next;
+      setCommand(list[next] ?? "");
+      return;
+    }
+    if (historyCursor.current === -1) return;
+    const next = historyCursor.current + 1;
+    if (next >= list.length) {
+      historyCursor.current = -1;
+      setCommand(draftCommand.current);
+      return;
+    }
+    historyCursor.current = next;
+    setCommand(list[next] ?? "");
+  }
+
+  async function copyLastLines() {
+    const chunk = visibleLines
+      .slice(-50)
+      .map((row) => stripConsoleAnsi(row.line))
+      .join("\n");
+    if (!chunk) return;
+    try {
+      await navigator.clipboard.writeText(chunk);
+      setCopiedLogs(true);
+      window.setTimeout(() => setCopiedLogs(false), 1200);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function copyPlain(text: string, lineIndex?: number) {
+    const value = stripConsoleAnsi(text).trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(stripConsoleAnsi(text));
+      if (lineIndex !== undefined) {
+        setCopiedLine(lineIndex);
+        window.setTimeout(() => setCopiedLine((current) => (current === lineIndex ? null : current)), 1200);
+      }
+    } catch {
+      /* ignore */
     }
   }
 
@@ -691,6 +949,14 @@ export default function ConsolePage({
   const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
   const diskPct = diskLimit > 0 ? (diskUsed / diskLimit) * 100 : 0;
   const netMax = Math.max(1, netRate, ...series.network);
+  const suggestOpen = Boolean(
+    canType && suggestFocused && commandMatches.length > 0 && (command.trim() || browseAll),
+  );
+
+  const lastExit = server?.lastExit ?? null;
+  const showExit =
+    Boolean(lastExit) && (server?.status === "offline" || server?.status === "install_failed");
+  const exitMeta = lastExit ? lastExitBanner(lastExit) : null;
 
   return (
     <div className="space-y-4">
@@ -703,38 +969,96 @@ export default function ConsolePage({
           onPower={(action) => void power(action)}
         />
       </div>
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
         <Card className="overflow-hidden">
-          <div className="border-b border-border px-3 py-2">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Console</p>
+            <div className="flex rounded-md border border-border p-0.5" role="tablist" aria-label="Filter console lines">
+              {FILTERS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === option.value}
+                  className={cn(
+                    "h-6 rounded px-2 text-[11px] font-medium",
+                    filter === option.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => setFilter(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
+          {showExit && exitMeta ? (
+            <div
+              className={cn(
+                "flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2",
+                exitMeta.tone === "error"
+                  ? "border-status-error/30 bg-status-error/10"
+                  : "border-border bg-muted/40",
+              )}
+            >
+              <div className="min-w-0">
+                <p
+                  className={cn(
+                    "text-sm font-medium",
+                    exitMeta.tone === "error" ? "text-status-error" : "text-foreground",
+                  )}
+                >
+                  {exitMeta.title}
+                </p>
+                {exitMeta.detail && exitMeta.detail !== exitMeta.title ? (
+                  <p className="mt-0.5 text-xs text-muted-foreground">{exitMeta.detail}</p>
+                ) : null}
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "shrink-0",
+                  exitMeta.tone === "error" && "text-status-error hover:bg-status-error/15 hover:text-status-error",
+                )}
+                disabled={!lines.length}
+                onClick={() => void copyLastLines()}
+              >
+                {copiedLogs ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                {copiedLogs ? "Copied" : "Copy last 50"}
+              </Button>
+            </div>
+          ) : null}
           <div className="relative">
             <div
               ref={scroller}
               onScroll={onScroll}
               className={cn(
-                "terminal-scroll relative h-[32rem] overflow-y-auto bg-background p-4 font-mono text-[13px] leading-6 text-foreground transition-[padding] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                "terminal-scroll relative h-[32rem] overflow-y-auto bg-background p-4 font-mono text-[13px] leading-6 text-foreground transition-[padding] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] select-text",
                 searchOpen && "pb-14",
               )}
             >
               {historyLoaded
-                ? lines.map((line, index) => (
+                ? visibleLines.map((row, visibleIndex) => (
                     <div
-                      key={`${index}-${line.slice(0, 24)}`}
-                      data-console-line={index}
+                      key={`${row.index}-${row.line.slice(0, 24)}`}
+                      data-console-line={visibleIndex}
                       className={cn(
                         searchOpen &&
                           needle &&
-                          matchIndexes[matchIndex] === index &&
+                          matchIndexes[matchIndex] === visibleIndex &&
                           "rounded-sm bg-primary/10",
                       )}
                     >
                       <ConsoleLine
-                        line={line}
+                        line={row.line}
                         query={searchOpen ? searchQuery : ""}
-                        active={searchOpen && matchIndexes[matchIndex] === index}
+                        active={searchOpen && matchIndexes[matchIndex] === visibleIndex}
+                        onCopyLine={() => void copyPlain(row.line, row.index)}
+                        copied={copiedLine === row.index}
                       />
                     </div>
                   ))
@@ -754,9 +1078,29 @@ export default function ConsolePage({
                 {running || starting || stopping
                   ? "Waiting for output…"
                   : installing
-                    ? "Install is running on the daemon. Output appears here after the container starts."
+                    ? "Install is running. Output stays here if you refresh."
                     : "Server is offline. Press Start to boot the container."}
               </div>
+            ) : visibleLines.length === 0 ? (
+              <div className="pointer-events-none absolute inset-0 p-4 font-mono text-[13px] leading-6 text-muted-foreground">
+                {filter === "flutter" ? "No Flutter lines in this buffer." : "No game lines in this buffer."}
+              </div>
+            ) : null}
+            {selectionCopy ? (
+              <button
+                type="button"
+                className="absolute z-30 inline-flex h-7 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs font-medium shadow-sm hover:bg-muted"
+                style={{ top: selectionCopy.top, left: selectionCopy.left }}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  void copyPlain(selectionCopy.text);
+                  setSelectionCopy(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+              >
+                <Copy className="size-3" />
+                Copy
+              </button>
             ) : null}
             <div
               className={cn(
@@ -859,13 +1203,62 @@ export default function ConsolePage({
               </div>
             </div>
           </div>
-          <form className="flex items-center border-t border-border" onSubmit={(event) => void sendCommand(event)}>
+          <form className="relative flex items-center border-t border-border" onSubmit={(event) => void sendCommand(event)}>
+            {suggestOpen ? (
+              <ul
+                ref={suggestList}
+                id="console-command-suggest"
+                role="listbox"
+                className="absolute inset-x-0 bottom-full z-20 max-h-56 overflow-auto border-t border-border bg-card py-1 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.45)]"
+              >
+                {commandMatches.map((item, index) => {
+                  const active = index === suggestIndex;
+                  return (
+                    <li key={item.command} role="presentation">
+                      <button
+                        type="button"
+                        id={`console-command-option-${index}`}
+                        role="option"
+                        aria-selected={active}
+                        data-active={active ? "true" : undefined}
+                        className={cn(
+                          "flex w-full items-baseline gap-3 px-4 py-1.5 text-left font-mono text-sm",
+                          active ? "bg-primary/15 text-foreground" : "text-foreground hover:bg-muted/80",
+                        )}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setSuggestIndex(index)}
+                        onClick={() => acceptSuggestion(item)}
+                      >
+                        <span className="min-w-0 truncate">{item.command}</span>
+                        <span className="ml-auto truncate text-xs font-sans text-muted-foreground">
+                          {item.description}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
             <span className="pl-4 font-mono text-sm font-semibold text-primary" aria-hidden>
               $
             </span>
             <input
+              ref={commandInput}
               value={command}
-              onChange={(event) => setCommand(event.target.value)}
+              onChange={(event) => {
+                if (historyCursor.current !== -1) {
+                  historyCursor.current = -1;
+                  draftCommand.current = "";
+                }
+                setBrowseAll(false);
+                setSuggestFocused(true);
+                setCommand(event.target.value);
+              }}
+              onKeyDown={onCommandKeyDown}
+              onFocus={() => setSuggestFocused(true)}
+              onBlur={() => {
+                window.setTimeout(() => setSuggestFocused(false), 120);
+              }}
               className="h-11 flex-1 bg-transparent px-3 font-mono text-sm outline-none"
               placeholder={
                 !canType
@@ -877,6 +1270,13 @@ export default function ConsolePage({
               disabled={!canType}
               autoComplete="off"
               spellCheck={false}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={suggestOpen}
+              aria-controls={suggestOpen ? "console-command-suggest" : undefined}
+              aria-activedescendant={
+                suggestOpen ? `console-command-option-${suggestIndex}` : undefined
+              }
             />
           </form>
         </Card>

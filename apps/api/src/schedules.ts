@@ -13,6 +13,7 @@ import {
 import { Schedule, Server } from "./db/models";
 import { log } from "./log";
 import { applyPowerDirect, createBackupDirect, requireAccess, sendCommandDirect } from "./servers";
+import { recordActivity, runActivityContext } from "./activity";
 
 type TaskDoc = {
   _id: { toString(): string };
@@ -122,6 +123,12 @@ export async function createSchedule(serverId: string, viewerId: string, admin: 
     })),
     nextRunAt: parsed.data.enabled ? nextCronDate(parsed.data.cron) : null,
   });
+  recordActivity({
+    serverId: access.server._id.toString(),
+    event: "schedule.create",
+    category: "schedules",
+    properties: { name: row.name },
+  });
   return { schedule: publicSchedule(row) };
 }
 
@@ -153,13 +160,27 @@ export async function updateSchedule(
   );
   row.nextRunAt = parsed.data.enabled ? nextCronDate(parsed.data.cron) : null;
   await row.save();
+  recordActivity({
+    serverId: access.server._id.toString(),
+    event: "schedule.update",
+    category: "schedules",
+    properties: { name: row.name },
+  });
   return { schedule: publicSchedule(row) };
 }
 
 export async function deleteSchedule(serverId: string, scheduleId: string, viewerId: string, admin: boolean) {
   const access = await requireAccess(serverId, viewerId, admin, "schedule.delete");
-  const result = await Schedule.deleteOne({ _id: scheduleId, serverId: access.server._id });
-  if (!result.deletedCount) throw FlutterError.notFound("Schedule not found");
+  const row = await Schedule.findOne({ _id: scheduleId, serverId: access.server._id });
+  if (!row) throw FlutterError.notFound("Schedule not found");
+  const name = row.name;
+  await Schedule.deleteOne({ _id: row._id });
+  recordActivity({
+    serverId: access.server._id.toString(),
+    event: "schedule.delete",
+    category: "schedules",
+    properties: { name },
+  });
   return { ok: true };
 }
 
@@ -169,6 +190,12 @@ export async function runScheduleNow(serverId: string, scheduleId: string, viewe
   if (!row) throw FlutterError.notFound("Schedule not found");
   const claimed = await claimSchedule(row._id.toString());
   if (!claimed) throw FlutterError.conflict("This schedule is already running");
+  recordActivity({
+    serverId: access.server._id.toString(),
+    event: "schedule.run",
+    category: "schedules",
+    properties: { name: row.name },
+  });
   void finishSchedule(claimed, { ignoreOnline: true }).catch((error) => {
     log("error", "schedule run failed", {
       scheduleId: row._id.toString(),
@@ -229,7 +256,19 @@ async function finishSchedule(
     if (!options.ignoreOnline && claimed.onlyWhenOnline && server.status !== "running") {
       status = "skipped";
     } else {
-      await executeTasks(server._id.toString(), claimed.tasks as TaskDoc[]);
+      const run = () => executeTasks(server._id.toString(), claimed.tasks as TaskDoc[]);
+      if (options.ignoreOnline) {
+        await run();
+      } else {
+        recordActivity({
+          serverId: server._id.toString(),
+          event: "schedule.run",
+          category: "schedules",
+          actor: { kind: "schedule", username: claimed.name },
+          properties: { name: claimed.name },
+        });
+        await runActivityContext({ kind: "schedule", username: claimed.name }, run);
+      }
     }
   } catch (error) {
     status = "failed";

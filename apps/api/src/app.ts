@@ -9,7 +9,9 @@ import { env, requestOrigin } from "./env";
 import { pingMongo } from "./db/mongoose";
 import { pingPrisma } from "./db/prisma";
 import { pingRedis } from "./redis";
-import { ensureCsrfCookie, assertCsrf, requireAdmin, requireUser } from "./auth/session";
+import { ensureCsrfCookie, assertCsrf, requireAdmin, requireUser, requireSession, getAuth, withAuthLimits } from "./auth/session";
+import * as apiKeys from "./auth/api-keys";
+import { bearerApiKey } from "./auth/api-keys";
 import * as auth from "./auth/service";
 import * as admin from "./auth/admin";
 import * as daemon from "./daemon";
@@ -17,6 +19,8 @@ import * as eggs from "./eggs";
 import * as servers from "./servers";
 import * as subusers from "./subusers";
 import * as schedules from "./schedules";
+import * as databases from "./databases";
+import * as activity from "./activity";
 import * as settings from "./settings";
 import * as updater from "./update";
 import { Node } from "./db/models";
@@ -50,6 +54,7 @@ export function createApp() {
       method === "GET" ||
       method === "HEAD" ||
       method === "OPTIONS" ||
+      Boolean(bearerApiKey(c)) ||
       path.includes("/daemon/") ||
       path.includes("/ws/console") ||
       path.endsWith("/auth/login") ||
@@ -62,6 +67,21 @@ export function createApp() {
       assertCsrf(c);
     }
     await next();
+  });
+  app.use("*", async (c, next) => {
+    const auth = await getAuth(c);
+    if (!auth) return next();
+    return withAuthLimits(auth, () =>
+      activity.runActivityContext(
+        {
+          id: auth.user.id,
+          username: auth.user.username,
+          kind: "user",
+          ip: activity.requestIp(c),
+        },
+        () => next(),
+      ),
+    );
   });
 
   app.onError((error, c) => {
@@ -205,6 +225,18 @@ export function createApp() {
     await requireUser(c);
     return c.json({ data: await auth.cancelTotpSetup(c) });
   });
+  app.get("/account/api-keys", async (c) => {
+    const session = await requireSession(c);
+    return c.json({ data: await apiKeys.listApiKeys(session.user.id, session.user.role === "admin") });
+  });
+  app.post("/account/api-keys", async (c) => {
+    const session = await requireSession(c);
+    return c.json({ data: await apiKeys.createApiKey(session.user, await c.req.json(), activity.requestIp(c)) }, 201);
+  });
+  app.delete("/account/api-keys/:id", async (c) => {
+    const session = await requireSession(c);
+    return c.json({ data: await apiKeys.destroyApiKey(session.user.id, c.req.param("id")) });
+  });
   app.post("/auth/totp/login", async (c) => {
     const result = await auth.loginWithTotp(c, await c.req.json());
     return c.json({ data: result });
@@ -336,6 +368,25 @@ export function createApp() {
       ),
     });
   });
+  app.get("/client/servers/:id/files/download", async (c) => {
+    const session = await requireUser(c);
+    const names = (c.req.queries("names") ?? []).map((value) => value.trim()).filter(Boolean);
+    const file = await servers.downloadServerFiles(
+      c.req.param("id"),
+      session.user.id,
+      session.user.role === "admin",
+      c.req.query("path") || "/",
+      names,
+    );
+    const ascii = file.filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+    c.header("Content-Type", file.mime);
+    c.header("Content-Length", String(file.body.length));
+    c.header(
+      "Content-Disposition",
+      `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+    );
+    return c.body(new Uint8Array(file.body));
+  });
   app.post("/client/servers/:id/backups", async (c) => {
     const session = await requireUser(c);
     return c.json({
@@ -347,6 +398,56 @@ export function createApp() {
       ),
     });
   });
+  app.get("/client/servers/:id/databases", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: await databases.listServerDatabases(
+        c.req.param("id"),
+        session.user.id,
+        session.user.role === "admin",
+      ),
+    });
+  });
+  app.post("/client/servers/:id/databases", async (c) => {
+    const session = await requireUser(c);
+    return c.json(
+      {
+        data: {
+          database: await databases.createServerDatabase(
+            c.req.param("id"),
+            session.user.id,
+            session.user.role === "admin",
+            await c.req.json(),
+          ),
+        },
+      },
+      201,
+    );
+  });
+  app.post("/client/servers/:id/databases/:databaseId/rotate", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: {
+        database: await databases.rotateServerDatabase(
+          c.req.param("id"),
+          c.req.param("databaseId"),
+          session.user.id,
+          session.user.role === "admin",
+        ),
+      },
+    });
+  });
+  app.delete("/client/servers/:id/databases/:databaseId", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: await databases.deleteServerDatabase(
+        c.req.param("id"),
+        c.req.param("databaseId"),
+        session.user.id,
+        session.user.role === "admin",
+      ),
+    });
+  });
   app.get("/client/servers/:id/network", async (c) => {
     const session = await requireUser(c);
     return c.json({
@@ -355,6 +456,20 @@ export function createApp() {
           c.req.param("id"),
           session.user.id,
           session.user.role === "admin",
+        ),
+      },
+    });
+  });
+  app.patch("/client/servers/:id/network/:allocationId", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: {
+        allocations: await servers.updateServerAllocation(
+          c.req.param("id"),
+          c.req.param("allocationId"),
+          session.user.id,
+          session.user.role === "admin",
+          await c.req.json(),
         ),
       },
     });
@@ -488,6 +603,18 @@ export function createApp() {
       ),
     });
   });
+  app.get("/client/servers/:id/activity", async (c) => {
+    const session = await requireUser(c);
+    await servers.requireAccess(c.req.param("id"), session.user.id, session.user.role === "admin", "activity.read");
+    return c.json({
+      data: await activity.listActivity(c.req.param("id"), {
+        category: c.req.query("category") ?? undefined,
+        actor: c.req.query("actor") ?? undefined,
+        q: c.req.query("q") ?? undefined,
+        cursor: c.req.query("cursor") ?? undefined,
+      }),
+    });
+  });
 
   app.get("/branding", async (c) => c.json({ data: await settings.getPublicBranding() }));
   app.get("/branding/logo", async (c) => {
@@ -559,6 +686,34 @@ export function createApp() {
     await requireAdmin(c);
     return c.json({ data: await admin.deleteLocation(c.req.param("id")) });
   });
+  app.get("/admin/database-hosts", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: { hosts: await databases.listHosts() } });
+  });
+  app.post("/admin/database-hosts", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: { host: await databases.createHost(await c.req.json()) } }, 201);
+  });
+  app.post("/admin/database-hosts/test", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await databases.testConnection(await c.req.json()) });
+  });
+  app.get("/admin/database-hosts/:id", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: { host: await databases.getHost(c.req.param("id")) } });
+  });
+  app.patch("/admin/database-hosts/:id", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: { host: await databases.updateHost(c.req.param("id"), await c.req.json()) } });
+  });
+  app.post("/admin/database-hosts/:id/test", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await databases.testHost(c.req.param("id")) });
+  });
+  app.delete("/admin/database-hosts/:id", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await databases.deleteHost(c.req.param("id")) });
+  });
   app.get("/admin/nodes", async (c) => {
     await requireAdmin(c);
     return c.json({ data: { nodes: await admin.listNodes() } });
@@ -578,6 +733,10 @@ export function createApp() {
   app.get("/admin/nodes/:id/config", async (c) => {
     await requireAdmin(c);
     return c.json({ data: await daemon.getNodeDaemonConfig(c.req.param("id")) });
+  });
+  app.get("/admin/nodes/:id/health", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await daemon.probeNodeHealth(c.req.param("id")) });
   });
   app.put("/admin/nodes/:id/config", async (c) => {
     await requireAdmin(c);

@@ -163,6 +163,7 @@ const INVITE_PERMISSIONS: { label: string; group: string }[] = [
   { label: "Schedules", group: "schedules" },
   { label: "Startup", group: "startup" },
   { label: "Settings", group: "settings" },
+  { label: "Activity", group: "activity" },
 ];
 
 export type SubuserInviteMail = {

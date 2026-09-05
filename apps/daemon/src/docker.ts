@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { availableParallelism, cpus } from "node:os";
 import Docker from "dockerode";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { DaemonConfig } from "./config";
 import { getProcessState, setProcessState, type ProcessState } from "./process-state";
 import { reportServerState } from "./panel-state";
+import type { LastExit } from "@flutter-software/shared";
 
 export type InstallSpec = {
   uuid: string;
@@ -85,20 +86,29 @@ export function stripAttachNoise(text: string) {
     .trim();
 }
 
-/** Cursor-home / erase-line / color codes from npm and similar TTY installers. */
+/** Cursor-home / erase-line from npm and similar TTY installers. Color (SGR) stays for the panel. */
 function sanitizeConsoleOutput(text: string) {
   let value = text.replace(/\r\n/g, "\n");
+  const colors: string[] = [];
+  value = value.replace(/\x1b\[[0-9;]*m/g, (seq) => {
+    const token = `\uE000${colors.length}\uE001`;
+    colors.push(seq);
+    return token;
+  });
   value = value.replace(/\x1b\[[0-9;]*[GHf]/g, "\r");
   value = value.replace(/\x1b\[[0-9;]*[KJ]/g, "");
   value = value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
   value = value.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
   value = value.replace(/\x1b./g, "");
-  // ESC sometimes arrives as `[`, leaving `[[1G` / `[[33m`.
   value = value.replace(/\[{1,2}\d*(?:;\d+)*[GHf]/g, "\r");
   value = value.replace(/\[{1,2}\d*[KJ]/g, "");
   value = value.replace(/\[{1,2}\d+(?:;\d+)*m/g, "");
   value = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
-  return value;
+  return value.replace(/\uE000(\d+)\uE001/g, (_, index) => colors[Number(index)] ?? "");
+}
+
+function withoutAnsi(value: string) {
+  return value.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 function visibleConsoleLine(line: string) {
@@ -107,7 +117,7 @@ function visibleConsoleLine(line: string) {
 }
 
 function isProgressJunk(line: string) {
-  const value = line.trim();
+  const value = withoutAnsi(line).trim();
   if (!value) return true;
   if (/^[\s\\|/\-_.░▒▓█▌▐■▪●]+$/.test(value)) return true;
   return false;
@@ -128,9 +138,9 @@ export function formatDockerLogLine(line: string) {
   const match = trimmed.match(/^(\d{4}-\d{2}-\d{2}T[^\s]+)\s+(.*)$/s);
   const stamp = match ? parseDockerTime(match[1]) : null;
   const body = match ? match[2] : trimmed;
-  const visible = visibleConsoleLine(sanitizeConsoleOutput(body)).trim();
-  if (!visible || isProgressJunk(visible)) return "";
-  return `[${stamp ? clock(stamp) : clock()}] ${visible}`;
+  const visible = visibleConsoleLine(sanitizeConsoleOutput(body));
+  if (!withoutAnsi(visible).trim() || isProgressJunk(visible)) return "";
+  return `[${stamp ? clock(stamp) : clock()}] ${visible.trim()}`;
 }
 
 function createDocker() {
@@ -158,6 +168,144 @@ export function bindPath(hostPath: string) {
 
 export function flutterDir(root: string) {
   return join(root, ".flutter");
+}
+
+const INSTALL_LOG_MAX_BYTES = 256 * 1024;
+const INSTALL_LOG_MAX_LINES = 2000;
+
+let boundConfig: DaemonConfig | null = null;
+
+export function bindDaemonConfig(config: DaemonConfig) {
+  boundConfig = config;
+}
+
+function volumeRoot(uuid: string) {
+  const dataDir = boundConfig?.dataDir || resolve(process.cwd(), "data");
+  return resolve(dataDir, "servers", uuid);
+}
+
+function installLogPath(root: string) {
+  return join(flutterDir(root), "install.log");
+}
+
+function lastExitPath(root: string) {
+  return join(flutterDir(root), "last-exit.json");
+}
+
+async function resetInstallLog(root: string) {
+  await mkdir(flutterDir(root), { recursive: true });
+  await writeFile(installLogPath(root), "", "utf8");
+}
+
+async function capInstallLog(root: string) {
+  const path = installLogPath(root);
+  let text = "";
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    return;
+  }
+  if (text.length <= INSTALL_LOG_MAX_BYTES) {
+    const lines = text.split("\n");
+    if (lines.length <= INSTALL_LOG_MAX_LINES + 1) return;
+  }
+  let lines = text.split("\n").filter((line, index, all) => line.length > 0 || index < all.length - 1);
+  if (lines.length > INSTALL_LOG_MAX_LINES) lines = lines.slice(-INSTALL_LOG_MAX_LINES);
+  let next = `${lines.join("\n").replace(/\n+$/, "")}\n`;
+  if (next.length > INSTALL_LOG_MAX_BYTES) next = next.slice(-INSTALL_LOG_MAX_BYTES);
+  await writeFile(path, next, "utf8");
+}
+
+async function appendInstallLog(root: string, message: string) {
+  const line = `[${clock()}] [Flutter] ${message.replace(/\s+/g, " ").trim()}\n`;
+  if (!line.trim()) return;
+  await mkdir(flutterDir(root), { recursive: true });
+  await appendFile(installLogPath(root), line, "utf8").catch(() => undefined);
+  const info = await stat(installLogPath(root)).catch(() => null);
+  if (info && info.size > INSTALL_LOG_MAX_BYTES) await capInstallLog(root);
+}
+
+function installNotice(root: string, uuid: string, message: string) {
+  notice(uuid, message);
+  void appendInstallLog(root, message);
+}
+
+export async function readInstallLog(uuid: string, tail = 200) {
+  const path = installLogPath(volumeRoot(uuid));
+  try {
+    const text = await readFile(path, "utf8");
+    return text
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .slice(-Math.max(1, tail));
+  } catch {
+    return [] as string[];
+  }
+}
+
+function clipExitMessage(value: string) {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > 500 ? `${text.slice(0, 497)}…` : text;
+}
+
+export function classifyContainerExit(
+  state: { OOMKilled?: boolean; ExitCode?: number; Error?: string } | null | undefined,
+  stopping: boolean,
+): LastExit | null {
+  if (!state) return null;
+  const code = Number(state.ExitCode) || 0;
+  const dockerError = typeof state.Error === "string" ? state.Error.trim() : "";
+  const at = new Date().toISOString();
+  if (state.OOMKilled) {
+    return { kind: "oom", code, message: "Server ran out of memory", at };
+  }
+  if (stopping || code === 130 || code === 137 || code === 143) {
+    return {
+      kind: "killed",
+      code,
+      message: code === 137 ? "Killed from the panel" : "Stopped",
+      at,
+    };
+  }
+  if (code !== 0 || dockerError) {
+    return {
+      kind: "crash",
+      code,
+      message: clipExitMessage(dockerError || `Process exited (code ${code})`),
+      at,
+    };
+  }
+  return { kind: "crash", code: 0, message: "Server process exited immediately.", at };
+}
+
+export async function readLastExit(uuid: string): Promise<LastExit | null> {
+  try {
+    const raw = JSON.parse(await readFile(lastExitPath(volumeRoot(uuid)), "utf8")) as LastExit;
+    if (!raw || typeof raw.kind !== "string" || typeof raw.message !== "string") return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+export async function recordLastExit(uuid: string, exit: LastExit) {
+  const root = volumeRoot(uuid);
+  await mkdir(flutterDir(root), { recursive: true });
+  await writeFile(lastExitPath(root), `${JSON.stringify(exit, null, 2)}\n`, "utf8");
+  consoleEvent(uuid, "last-exit", JSON.stringify(exit));
+  if (boundConfig) {
+    void reportServerState(boundConfig, uuid, { lastExit: exit });
+  }
+}
+
+export async function clearLastExit(uuid: string) {
+  const path = lastExitPath(volumeRoot(uuid));
+  await writeFile(path, "null\n", "utf8").catch(() => undefined);
+  consoleEvent(uuid, "last-exit", "");
+  if (boundConfig) {
+    void reportServerState(boundConfig, uuid, { lastExit: null });
+  }
 }
 
 function isNotFound(error: unknown) {
@@ -524,14 +672,14 @@ async function runInstallScript(root: string, spec: InstallSpec) {
   await writeInstallStatus(root, { ...prior, status: "installing", containerId: container.id });
   let stopLogs: (() => void) | undefined;
   try {
-    notice(spec.uuid, "Running install script…");
+    installNotice(root, spec.uuid, "Running install script…");
     await container.start();
     const stream = (await container.logs({
       follow: true,
       stdout: true,
       stderr: true,
     })) as NodeJS.ReadableStream & { destroy?: () => void };
-    stopLogs = pipeInstallLogs(stream, spec.uuid);
+    stopLogs = pipeInstallLogs(stream, spec.uuid, root);
     const result = await container.wait();
     stopLogs?.();
     stopLogs = undefined;
@@ -574,7 +722,19 @@ async function findInstallContainer(uuid: string) {
 
 function reportInstall(config: DaemonConfig, uuid: string, ok: boolean, error?: string) {
   consoleEvent(uuid, "install completed", ok ? "true" : "false");
-  void reportServerState(config, uuid, { install: { ok, ...(error ? { error } : {}) } });
+  if (ok) {
+    void clearLastExit(uuid);
+    void reportServerState(config, uuid, { install: { ok: true }, lastExit: null });
+    return;
+  }
+  const message = clipExitMessage(error || "Install script failed");
+  const exit: LastExit = {
+    kind: "install_failed",
+    message,
+    at: new Date().toISOString(),
+  };
+  void recordLastExit(uuid, exit);
+  void reportServerState(config, uuid, { install: { ok: false, error: message }, lastExit: exit });
 }
 
 async function attachInstallWait(config: DaemonConfig, uuid: string, containerId: string, startedAt: string) {
@@ -591,7 +751,7 @@ async function attachInstallWait(config: DaemonConfig, uuid: string, containerId
       finishedAt: new Date().toISOString(),
       containerId,
     });
-    notice(uuid, "Install finished.");
+    installNotice(root, uuid, "Install finished.");
     reportInstall(config, uuid, true);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -602,7 +762,7 @@ async function attachInstallWait(config: DaemonConfig, uuid: string, containerId
       finishedAt: new Date().toISOString(),
       containerId,
     });
-    notice(uuid, `Install failed: ${message.slice(0, 400)}`);
+    installNotice(root, uuid, `Install failed: ${message.slice(0, 400)}`);
     reportInstall(config, uuid, false, message);
   } finally {
     await container.remove({ force: true }).catch(() => undefined);
@@ -626,7 +786,7 @@ async function readInstallStatus(root: string): Promise<InstallJobStatus | null>
   }
 }
 
-function pipeInstallLogs(stream: NodeJS.ReadableStream & { destroy?: () => void }, uuid: string) {
+function pipeInstallLogs(stream: NodeJS.ReadableStream & { destroy?: () => void }, uuid: string, root: string) {
   let leftover: Buffer = Buffer.alloc(0);
   let text = "";
   let lastAt = 0;
@@ -637,7 +797,7 @@ function pipeInstallLogs(stream: NodeJS.ReadableStream & { destroy?: () => void 
     const progress = /\d+%|\d+(\.\d+)?\s*(MiB|GiB|KiB|MB|GB|kB)/i.test(message);
     if (progress && now - lastAt < 400) return;
     lastAt = now;
-    notice(uuid, message.slice(0, 500));
+    installNotice(root, uuid, message.slice(0, 500));
   };
   const onData = (chunk: Buffer | string) => {
     const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -663,7 +823,7 @@ export async function installServer(config: DaemonConfig, spec: InstallSpec) {
   await mkdir(root, { recursive: true });
   const next = { ...spec, dockerImage: image };
   await writeEggFiles(root, next);
-  notice(spec.uuid, `Pulling ${image}…`);
+  installNotice(root, spec.uuid, `Pulling ${image}…`);
   await pullImage(image);
   await runInstallScript(root, next);
   await ensureServerOwnership(root, spec.uuid);
@@ -677,6 +837,7 @@ export async function startInstallServer(config: DaemonConfig, spec: InstallSpec
   }
   const startedAt = new Date().toISOString();
   await mkdir(root, { recursive: true });
+  await resetInstallLog(root);
   await writeInstallStatus(root, { status: "installing", startedAt });
   consoleEvent(spec.uuid, "install started", "");
   const job = installServer(config, spec)
@@ -686,7 +847,7 @@ export async function startInstallServer(config: DaemonConfig, spec: InstallSpec
         startedAt,
         finishedAt: new Date().toISOString(),
       });
-      notice(spec.uuid, "Install finished.");
+      installNotice(root, spec.uuid, "Install finished.");
       reportInstall(config, spec.uuid, true);
     })
     .catch(async (error) => {
@@ -697,7 +858,7 @@ export async function startInstallServer(config: DaemonConfig, spec: InstallSpec
         startedAt,
         finishedAt: new Date().toISOString(),
       });
-      notice(spec.uuid, `Install failed: ${message.slice(0, 400)}`);
+      installNotice(root, spec.uuid, `Install failed: ${message.slice(0, 400)}`);
       reportInstall(config, spec.uuid, false, message);
     })
     .finally(() => {
@@ -924,14 +1085,14 @@ async function bootContainer(config: DaemonConfig, spec: InstallSpec, signal: Ab
       setProcessState(uuid, "running");
       void ensureStatsStream(uuid).catch(() => undefined);
       notice(uuid, "Server is running.");
+      void clearLastExit(uuid);
       return;
     }
-    const code = after?.State.ExitCode ?? 0;
-    const dockerError = after?.State.Error?.trim();
-    if (after?.State.OOMKilled) notice(uuid, "Server ran out of memory");
-    else if (dockerError) notice(uuid, dockerError);
-    else if (code !== 0) notice(uuid, `Server crashed (exit ${code})`);
-    else notice(uuid, "Server process exited immediately.");
+    const exit = classifyContainerExit(after?.State, getProcessState(uuid) === "stopping");
+    if (exit) {
+      notice(uuid, exit.message);
+      void recordLastExit(uuid, exit);
+    }
     await noticeRecentLogs(uuid);
     setProcessState(uuid, "offline");
     notice(uuid, "Server is offline.");
@@ -1016,6 +1177,12 @@ async function runPower(config: DaemonConfig, spec: InstallSpec, action: PowerAc
     if (aborted(signal)) return;
     setProcessState(uuid, "offline");
     notice(uuid, "Server is offline.");
+    void recordLastExit(uuid, {
+      kind: "killed",
+      code: 137,
+      message: "Killed from the panel",
+      at: new Date().toISOString(),
+    });
     return;
   }
 
@@ -1024,6 +1191,11 @@ async function runPower(config: DaemonConfig, spec: InstallSpec, action: PowerAc
     if (aborted(signal)) return;
     setProcessState(uuid, "offline");
     notice(uuid, "Server is offline.");
+    void recordLastExit(uuid, {
+      kind: "killed",
+      message: "Stopped",
+      at: new Date().toISOString(),
+    });
     return;
   }
 
@@ -1478,13 +1650,21 @@ async function asBuffer(value: Buffer | NodeJS.ReadableStream) {
 }
 
 export async function getLogs(uuid: string, tail = 200, since?: number) {
+  const limit = Math.max(1, tail);
+  const status = await readInstallStatus(volumeRoot(uuid)).catch(() => null);
+  const preferInstall =
+    isInstallRunning(uuid) || status?.status === "installing" || status?.status === "failed";
+  const installLines = preferInstall ? await readInstallLog(uuid, limit) : [];
+
   const info = await inspectContainer(uuid, true);
-  if (!info) return { running: false, lines: [] as string[] };
+  if (!info) {
+    return { running: false, lines: installLines };
+  }
   const raw = await docker.getContainer(info.Id).logs({
     stdout: true,
     stderr: true,
     timestamps: true,
-    tail,
+    tail: limit,
     ...(since ? { since } : {}),
   });
   const text = decodeDockerLogs(await asBuffer(raw as Buffer)).replace(/\r\n/g, "\n");
@@ -1492,6 +1672,11 @@ export async function getLogs(uuid: string, tail = 200, since?: number) {
     .split("\n")
     .map((line) => formatDockerLogLine(line))
     .filter((line) => line.length > 0);
+  if (preferInstall && installLines.length) {
+    if (!lines.length || isInstallRunning(uuid) || status?.status === "failed") {
+      return { running: Boolean(info.State.Running), lines: installLines };
+    }
+  }
   return { running: Boolean(info.State.Running), lines };
 }
 

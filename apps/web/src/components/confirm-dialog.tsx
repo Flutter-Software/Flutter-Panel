@@ -65,7 +65,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         title={pending?.title ?? "Are you sure?"}
         open={Boolean(pending)}
         onClose={() => close(false)}
-        className="max-w-md transition duration-200 starting:scale-95 starting:opacity-0"
+        className="max-w-md"
         footer={
           pending ? (
             <>

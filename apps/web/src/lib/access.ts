@@ -27,6 +27,7 @@ export function serverHomeHref(server: ServerRecord) {
     "settings",
     "databases",
     "schedules",
+    "activity",
   ] as const;
   for (const key of order) {
     if (key === "settings") {

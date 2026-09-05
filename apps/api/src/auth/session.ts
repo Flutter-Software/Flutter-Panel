@@ -11,6 +11,18 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Session, User } from "../db/models";
 import { env } from "../env";
 import { publicUser, randomToken, sha256 } from "./crypto";
+import {
+  assertApplicationScope,
+  bearerApiKey,
+  resolveApiKey,
+  runApiKeyLimits,
+  type AuthState,
+} from "./api-keys";
+
+export type { AuthState } from "./api-keys";
+export type SessionUser = { user: ReturnType<typeof publicUser>; sessionId: string };
+const sessionByContext = new WeakMap<Context, Promise<SessionUser | null>>();
+const authByContext = new WeakMap<Context, Promise<AuthState | null>>();
 
 function cookieSecure() {
   // Installer sets COOKIE_SECURE from APP_URL. Don't infer from the request —
@@ -82,6 +94,37 @@ export function clearSessionCookie(c: Context) {
 }
 
 export async function getSessionUser(c: Context) {
+  const cached = sessionByContext.get(c);
+  if (cached) return cached;
+  const pending = loadSessionUser(c);
+  sessionByContext.set(c, pending);
+  return pending;
+}
+
+export async function getAuth(c: Context) {
+  const cached = authByContext.get(c);
+  if (cached) return cached;
+  const pending = loadAuth(c);
+  authByContext.set(c, pending);
+  return pending;
+}
+
+async function loadAuth(c: Context): Promise<AuthState | null> {
+  const token = bearerApiKey(c);
+  if (token) return resolveApiKey(token);
+  const session = await getSessionUser(c);
+  if (!session) return null;
+  return {
+    user: session.user,
+    sessionId: session.sessionId,
+    via: "session",
+    apiKeyId: null,
+    serverIds: null,
+    scopes: [],
+  };
+}
+
+async function loadSessionUser(c: Context): Promise<SessionUser | null> {
   const token = getCookie(c, SESSION_COOKIE);
   if (!token) return null;
   const session = await Session.findOne({
@@ -105,15 +148,33 @@ export async function destroySession(c: Context) {
 }
 
 export async function requireUser(c: Context) {
-  const session = await getSessionUser(c);
-  if (!session) throw FlutterError.unauthorized();
-  return session;
+  const auth = await getAuth(c);
+  if (!auth) throw FlutterError.unauthorized();
+  if (auth.via === "client-key" && c.req.path.includes("/admin/")) {
+    throw FlutterError.forbidden("Account API keys cannot use the admin API. Create an application key.");
+  }
+  return auth;
 }
 
 export async function requireAdmin(c: Context) {
-  const session = await requireUser(c);
-  if (session.user.role !== "admin") throw FlutterError.forbidden();
+  const auth = await requireUser(c);
+  if (auth.via === "client-key") {
+    throw FlutterError.forbidden("Account API keys cannot use the admin API. Create an application key.");
+  }
+  if (auth.user.role !== "admin") throw FlutterError.forbidden();
+  assertApplicationScope(c, auth);
+  return auth;
+}
+
+export async function requireSession(c: Context) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized("Sign in with the panel to manage this");
   return session;
+}
+
+export function withAuthLimits<T>(auth: AuthState, fn: () => T): T {
+  if (!auth.serverIds) return fn();
+  return runApiKeyLimits(auth.serverIds, fn);
 }
 
 export async function destroyOtherSessions(userId: string, keepSessionId: string) {

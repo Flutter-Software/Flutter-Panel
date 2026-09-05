@@ -9,11 +9,12 @@ import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card, EmptyState, Input, Select } from "@/components/ui";
 import { statusMeta } from "@/components/status";
+import { serverAlerts, serverAttention } from "@/components/server-card";
 import { CpuLimit, LimitMb } from "@/components/unlimited";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
-import type { ServerRecord, ServerStatus } from "@/lib/types";
+import { formatCompact, type ServerRecord, type ServerStatus } from "@/lib/types";
 
 const STATUS_PILL: Record<ServerStatus, string> = {
   running: "bg-status-running/15 text-status-running",
@@ -87,7 +88,7 @@ export default function AdminServersPage() {
         .join(" ")
         .toLowerCase();
       return haystack.includes(needle);
-    });
+    }).sort((a, b) => serverAttention(b) - serverAttention(a) || a.name.localeCompare(b.name));
   }, [servers, query, status, node, egg, owner]);
 
   const filtering = Boolean(query.trim() || status || node || egg || owner);
@@ -233,6 +234,7 @@ export default function AdminServersPage() {
           ) : (
             filtered.map((server) => {
               const meta = statusMeta(server.status);
+              const alerts = serverAlerts(server);
               const nodeLabel = server.nodeLocation
                 ? `${server.node} · ${server.nodeLocation}`
                 : server.node;
@@ -272,6 +274,21 @@ export default function AdminServersPage() {
                       {server.description ? (
                         <p className="mt-1 text-sm text-muted-foreground">{server.description}</p>
                       ) : null}
+                      {alerts.length ? (
+                        <ul className="mt-2 space-y-0.5">
+                          {alerts.map((alert) => (
+                            <li
+                              key={alert.text}
+                              className={cn(
+                                "text-xs font-medium",
+                                alert.tone === "error" ? "text-status-error" : "text-status-warn",
+                              )}
+                            >
+                              {alert.text}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <ButtonLink href={`/admin/servers/${server.id}`} variant="secondary" size="sm">
@@ -291,10 +308,14 @@ export default function AdminServersPage() {
                     </div>
                   </div>
 
-                  <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
                     <Meta label="Node" value={nodeLabel} />
                     <Meta label="Address" value={server.allocation} mono />
                     <Meta label="Owner" value={server.ownerName ?? "—"} />
+                    <Meta
+                      label="Usage"
+                      value={`CPU ${Math.round(server.cpu.used)}% · ${formatCompact(server.memory.usedMb)} · ${formatCompact(server.disk.usedMb)} disk`}
+                    />
                     <Meta
                       label="Limits"
                       value={

@@ -468,4 +468,5 @@ export async function startSftp(config: DaemonConfig) {
       resolveListen();
     });
   });
+  return server;
 }

@@ -1,7 +1,7 @@
 import { FILE_OPEN_LIMIT_BYTES, FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } from "@flutter-software/shared";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
-import { unzipSync } from "fflate";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { unzipSync, zipSync } from "fflate";
 import { createExtractorFromData, UnrarError } from "node-unrar-js";
 import { gunzipSync } from "node:zlib";
 import type { DaemonConfig } from "./config";
@@ -168,8 +168,8 @@ export async function uploadServerFile(
   });
 }
 
-function parseArchiveNames(names: unknown) {
-  if (!Array.isArray(names) || !names.length) throw new Error("Select files to archive");
+function parseItemNames(names: unknown, emptyMessage: string) {
+  if (!Array.isArray(names) || !names.length) throw new Error(emptyMessage);
   const out: string[] = [];
   const seen = new Set<string>();
   for (const raw of names) {
@@ -180,9 +180,13 @@ function parseArchiveNames(names: unknown) {
     seen.add(name);
     out.push(name);
   }
-  if (!out.length) throw new Error("Select files to archive");
-  if (out.length > 500) throw new Error("Too many items to archive at once");
+  if (!out.length) throw new Error(emptyMessage);
+  if (out.length > 500) throw new Error("Too many items at once");
   return out;
+}
+
+function parseArchiveNames(names: unknown) {
+  return parseItemNames(names, "Select files to archive");
 }
 
 function isMissing(error: unknown) {
@@ -356,4 +360,170 @@ function rarError(error: unknown) {
   }
   if (error instanceof Error && error.message) return new Error(error.message);
   return new Error("Could not extract RAR archive");
+}
+
+const SEARCH_MAX_HITS = 200;
+const SEARCH_MAX_VISIT = 2000;
+const SEARCH_MAX_DEPTH = 20;
+const ZIP_MAX_FILES = 5000;
+
+export async function statServerPath(config: DaemonConfig, uuid: string, relPath: string) {
+  const root = serverRoot(config, uuid);
+  const target = safeJoin(root, relPath);
+  const info = await stat(target);
+  return {
+    path: displayPath(root, target),
+    kind: info.isDirectory() ? ("dir" as const) : ("file" as const),
+    size: info.isDirectory() ? 0 : info.size,
+  };
+}
+
+export async function searchFiles(config: DaemonConfig, uuid: string, relPath: string, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) throw new Error("Enter a search");
+  if (q.length > 200) throw new Error("Search is too long");
+
+  const root = serverRoot(config, uuid);
+  const start = safeJoin(root, relPath);
+  const info = await stat(start);
+  if (!info.isDirectory()) throw new Error("Not a directory");
+
+  const matches: { path: string; name: string; kind: "file" | "dir"; size: number }[] = [];
+  let visited = 0;
+
+  async function walk(dir: string, depth: number) {
+    if (matches.length >= SEARCH_MAX_HITS || visited >= SEARCH_MAX_VISIT || depth > SEARCH_MAX_DEPTH) return;
+    const atRoot = displayPath(root, dir) === "/";
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (matches.length >= SEARCH_MAX_HITS || visited >= SEARCH_MAX_VISIT) return;
+      if (atRoot && entry.name === ".flutter") continue;
+      visited += 1;
+      const full = join(dir, entry.name);
+      if (entry.name.toLowerCase().includes(q)) {
+        let size = 0;
+        try {
+          const meta = await stat(full);
+          size = entry.isDirectory() ? 0 : meta.size;
+        } catch {
+          /* ignore */
+        }
+        matches.push({
+          path: displayPath(root, full),
+          name: entry.name,
+          kind: entry.isDirectory() ? "dir" : "file",
+          size,
+        });
+      }
+      if (entry.isDirectory()) await walk(full, depth + 1);
+    }
+  }
+
+  await walk(start, 0);
+  return {
+    path: displayPath(root, start),
+    query: q,
+    matches,
+    truncated: matches.length >= SEARCH_MAX_HITS || visited >= SEARCH_MAX_VISIT,
+  };
+}
+
+function safeDownloadName(name: string) {
+  const base = name.replace(/[\r\n"/\\]/g, "_").trim() || "download";
+  return base.slice(0, 180);
+}
+
+async function fileDownload(abs: string, filename: string, size: number) {
+  if (size > FILE_OPEN_LIMIT_BYTES) throw new Error("File is larger than 250 MB");
+  return {
+    filename: safeDownloadName(filename),
+    mime: "application/octet-stream",
+    body: await readFile(abs),
+  };
+}
+
+async function collectZip(
+  root: string,
+  abs: string,
+  zipName: string,
+  acc: { files: Record<string, Uint8Array>; bytes: number; count: number },
+) {
+  if (acc.count >= ZIP_MAX_FILES) throw new Error("Too many files to download at once");
+  const info = await stat(abs);
+  if (info.isDirectory()) {
+    const atRoot = displayPath(root, abs) === "/";
+    const entries = await readdir(abs, { withFileTypes: true });
+    for (const entry of entries) {
+      if (atRoot && entry.name === ".flutter") continue;
+      const child = zipName ? `${zipName}/${entry.name}` : entry.name;
+      await collectZip(root, join(abs, entry.name), child, acc);
+    }
+    return;
+  }
+  if (acc.bytes + info.size > FILE_OPEN_LIMIT_BYTES) throw new Error("Download is larger than 250 MB");
+  acc.files[zipName] = new Uint8Array(await readFile(abs));
+  acc.bytes += info.size;
+  acc.count += 1;
+}
+
+async function zipDownload(root: string, targets: { abs: string; zipName: string }[], zipName: string) {
+  const acc = { files: {} as Record<string, Uint8Array>, bytes: 0, count: 0 };
+  for (const target of targets) {
+    await collectZip(root, target.abs, target.zipName, acc);
+  }
+  if (!acc.count) throw new Error("Nothing to download");
+  const zipped = zipSync(acc.files, { level: 6 });
+  return {
+    filename: safeDownloadName(zipName),
+    mime: "application/zip",
+    body: Buffer.from(zipped),
+  };
+}
+
+export async function downloadServer(config: DaemonConfig, uuid: string, relPath: string, names: unknown) {
+  const root = serverRoot(config, uuid);
+  const items = Array.isArray(names) && names.length ? parseItemNames(names, "Select files to download") : null;
+
+  if (!items) {
+    const target = safeJoin(root, relPath);
+    const info = await stat(target);
+    const shown = displayPath(root, target);
+    if (info.isDirectory()) {
+      if (shown === "/") throw new Error("Select files to download");
+      return zipDownload(root, [{ abs: target, zipName: basename(target) }], `${basename(target)}.zip`);
+    }
+    return fileDownload(target, basename(target), info.size);
+  }
+
+  const dir = safeJoin(root, relPath);
+  const dirInfo = await stat(dir);
+  if (!dirInfo.isDirectory()) throw new Error("Not a directory");
+  const atRoot = displayPath(root, dir) === "/";
+
+  const targets: { abs: string; zipName: string }[] = [];
+  for (const name of items) {
+    if (atRoot && name === ".flutter") throw new Error("Cannot download .flutter");
+    const rel = [relPath.replace(/^\/+|\/+$/g, ""), name].filter(Boolean).join("/");
+    const abs = safeJoin(root, rel);
+    try {
+      await stat(abs);
+    } catch (error) {
+      if (isMissing(error)) throw new Error(`${name} was not found`);
+      throw error;
+    }
+    targets.push({ abs, zipName: name });
+  }
+
+  if (targets.length === 1) {
+    const info = await stat(targets[0].abs);
+    if (!info.isDirectory()) return fileDownload(targets[0].abs, targets[0].zipName, info.size);
+  }
+
+  const zipName = targets.length === 1 ? `${targets[0].zipName}.zip` : "files.zip";
+  return zipDownload(root, targets, zipName);
 }

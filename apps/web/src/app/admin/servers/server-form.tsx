@@ -523,7 +523,7 @@ export function ServerForm({
               onChange={(event) => setCpuPinning(event.target.value)}
             />
           </Field>
-          <Field label="Databases">
+          <Field label="Databases" hint="How many MySQL databases this server can create. Add a host under Admin → Databases first.">
             <Input
               type="number"
               min={0}

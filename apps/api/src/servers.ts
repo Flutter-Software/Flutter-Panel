@@ -1,31 +1,44 @@
 import { randomUUID } from "node:crypto";
 import {
   FlutterError,
+  allocationUpdateSchema,
   hasServerPermission,
+  lastExitSchema,
   powerActionSchema,
   serverCreateSchema,
   serverUpdateSchema,
   uploadLimitBytes,
+  type LastExit,
   type PowerAction,
   type ServerPermission,
   type ServerStatus,
 } from "@flutter-software/shared";
 import { Allocation, Egg, Location, Node, Schedule, Server, Subuser, User } from "./db/models";
+import { currentApiKeyLimits } from "./auth/api-keys";
 import {
   backupsOnNode,
   commandOnNode,
   destroyOnNode,
+  downloadOnNode,
   filesOnNode,
   installOnNode,
   logsOnNode,
   powerOnNode,
   statsOnNode,
+  statsForServers,
   type InstallSpec,
 } from "./daemon";
 import { env, consoleWsUrl } from "./env";
 import { isNodeOnline } from "./nodes";
 import { log } from "./log";
 import { signConsoleTicket } from "./console-ticket";
+import { destroyServerActivity, recordActivity, recordFileWrite, userActor } from "./activity";
+import { fileChangePreview } from "./file-preview";
+
+function publicLastExit(value: unknown): LastExit | null {
+  const parsed = lastExitSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 
 function envRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object") return {};
@@ -56,6 +69,34 @@ function eggDefaults(egg: { variables?: unknown }): Record<string, string> {
     if (variable.key) out[variable.key] = variable.default ?? "";
   }
   return out;
+}
+
+const HTTP_PORTS = new Set([80, 443, 3000, 3001, 5000, 5173, 8000, 8080, 8081, 8443, 8888, 9000]);
+const HTTP_EGG_RE =
+  /\b(nginx|apache|caddy|httpd|website|webserver|web server|gitea|wordpress|nextcloud|ghost|code-?server|phpmyadmin)\b/i;
+
+function allocationHost(row: { ip: string; alias?: string | null }) {
+  const alias = typeof row.alias === "string" ? row.alias.trim() : "";
+  return alias || row.ip;
+}
+
+function allocationDisplay(row: { ip: string; alias?: string | null; port: number }) {
+  return `${allocationHost(row)}:${row.port}`;
+}
+
+function allocationBrowserUrl(row: { ip: string; alias?: string | null; port: number }) {
+  const host = allocationHost(row);
+  const wrapped = host.includes(":") ? `[${host.replace(/^\[|\]$/g, "")}]` : host;
+  const scheme = row.port === 443 ? "https" : "http";
+  if ((scheme === "https" && row.port === 443) || (scheme === "http" && row.port === 80)) {
+    return `${scheme}://${wrapped}`;
+  }
+  return `${scheme}://${wrapped}:${row.port}`;
+}
+
+function allocationIsHttp(eggName: string, eggDescription: string, port: number) {
+  if (HTTP_PORTS.has(port)) return true;
+  return HTTP_EGG_RE.test(`${eggName} ${eggDescription}`);
 }
 
 async function relatedMany(
@@ -125,6 +166,7 @@ export function toClientServer(
     startup?: string;
     stopCommand?: string;
     status: string;
+    lastExit?: unknown;
     environment: unknown;
   },
   relatedDocs: Awaited<ReturnType<typeof related>>,
@@ -144,9 +186,10 @@ export function toClientServer(
     node: node?.name ?? "Unknown node",
     nodeId: server.nodeId.toString(),
     nodeLocation: location?.shortCode ?? "",
-    allocation: allocation ? `${allocation.ip}:${allocation.port}` : "unassigned",
+    allocation: allocation ? allocationDisplay(allocation) : "unassigned",
     allocationId: server.allocationId.toString(),
     status,
+    lastExit: publicLastExit(server.lastExit),
     owner: server.ownerId.toString() === viewerId,
     ownerId: server.ownerId.toString(),
     ownerName: owner?.username ?? "unknown",
@@ -201,6 +244,10 @@ export async function requireAccess(
   const server = await Server.findById(serverId);
   if (!server) throw FlutterError.notFound("Server not found");
   const owner = server.ownerId.toString() === viewerId;
+  const allowed = currentApiKeyLimits().serverIds;
+  if (allowed && !allowed.includes(server._id.toString())) {
+    throw FlutterError.forbidden("This API key cannot access this server");
+  }
   if (admin || owner) {
     const access = { server, permissions: ["*"], owner, admin };
     if (permission) assertPerm(access, permission);
@@ -319,41 +366,65 @@ export async function listClientServers(viewerId: string, admin: boolean) {
   const permByServer = new Map(subs.map((row) => [row.serverId.toString(), row.permissions.map(String)]));
   // Admin dashboard reuses the client payload. Empty query = every server.
   const query = admin ? {} : { $or: [{ ownerId: viewerId }, { _id: { $in: sharedIds } }] };
-  const rows = await Server.find(query).sort({ name: 1 });
+  let rows = await Server.find(query).sort({ name: 1 });
+  const allowed = currentApiKeyLimits().serverIds;
+  if (allowed) {
+    const allow = new Set(allowed);
+    rows = rows.filter((row) => allow.has(row._id.toString()));
+  }
   const relatedDocs = await relatedMany(rows);
-  return rows.map((row, index) => {
+  const clients = rows.map((row, index) => {
     const owner = row.ownerId.toString() === viewerId;
     const permissions = admin || owner ? ["*"] : (permByServer.get(row._id.toString()) ?? []);
     return toClientServer(row, relatedDocs[index], viewerId, permissions);
   });
+  return withLiveUsageMany(clients);
 }
 
 export async function getClientServer(serverId: string, viewerId: string, admin: boolean) {
-  return withLiveUsage(await loadClient(serverId, viewerId, admin));
+  const [client] = await withLiveUsageMany([await loadClient(serverId, viewerId, admin)]);
+  return client;
 }
 
-async function withLiveUsage(client: ReturnType<typeof toClientServer>) {
-  if (!client.nodeOnline) return client;
-  if (client.status === "installing" || client.status === "install_failed") return client;
+function applyLiveUsage(
+  client: ReturnType<typeof toClientServer>,
+  live: Awaited<ReturnType<typeof statsOnNode>>,
+) {
+  if (typeof live.diskBytes === "number" && live.diskBytes > 0) {
+    client.disk.usedMb = Math.round((live.diskBytes / 1024 / 1024) * 10) / 10;
+  }
+  const stats = live.stats;
+  if (stats) {
+    if (typeof stats.cpuPercent === "number") client.cpu.used = stats.cpuPercent;
+    if (typeof stats.memoryBytes === "number") {
+      client.memory.usedMb = Math.round((stats.memoryBytes / 1024 / 1024) * 10) / 10;
+    }
+  }
+  if (live.running && (client.status === "offline" || client.status === "starting")) {
+    client.status = "running";
+  }
+}
+
+async function withLiveUsageMany(clients: ReturnType<typeof toClientServer>[]) {
+  const targets = clients.filter(
+    (client) =>
+      client.nodeOnline &&
+      client.status !== "installing" &&
+      client.status !== "install_failed" &&
+      client.uuid &&
+      client.nodeId,
+  );
+  if (!targets.length) return clients;
   try {
-    const live = await statsOnNode(client.nodeId, client.uuid);
-    if (typeof live.diskBytes === "number" && live.diskBytes > 0) {
-      client.disk.usedMb = Math.round((live.diskBytes / 1024 / 1024) * 10) / 10;
-    }
-    const stats = live.stats;
-    if (stats) {
-      if (typeof stats.cpuPercent === "number") client.cpu.used = stats.cpuPercent;
-      if (typeof stats.memoryBytes === "number") {
-        client.memory.usedMb = Math.round((stats.memoryBytes / 1024 / 1024) * 10) / 10;
-      }
-    }
-    if (live.running && (client.status === "offline" || client.status === "starting")) {
-      client.status = "running";
+    const live = await statsForServers(targets.map((client) => ({ nodeId: client.nodeId, uuid: client.uuid })));
+    for (const client of targets) {
+      const row = live.get(client.uuid);
+      if (row) applyLiveUsage(client, row);
     }
   } catch {
-    /* daemon unreachable — keep zeros */
+    /* keep zeros if the batch fails */
   }
-  return client;
+  return clients;
 }
 
 export async function createServer(body: unknown, actorId: string) {
@@ -463,6 +534,37 @@ export async function updateServer(serverId: string, body: unknown, actorId: str
   }
 
   await server.save();
+  const id = server._id.toString();
+  if (parsed.data.name || parsed.data.description !== undefined) {
+    recordActivity({
+      serverId: id,
+      event: "settings.rename",
+      category: "settings",
+      actor: userActor(actorId),
+      properties: { name: server.name },
+    });
+  }
+  if (parsed.data.environment) {
+    recordActivity({
+      serverId: id,
+      event: "startup.update",
+      category: "startup",
+      actor: userActor(actorId),
+      properties: { keys: Object.keys(parsed.data.environment) },
+    });
+  }
+  const fields = (
+    ["memoryMb", "diskMb", "cpuPercent", "ownerId", "allocationId", "databaseLimit", "backupsEnabled"] as const
+  ).filter((key) => parsed.data[key] !== undefined);
+  if (fields.length) {
+    recordActivity({
+      serverId: id,
+      event: "settings.update",
+      category: "settings",
+      actor: userActor(actorId),
+      properties: { fields },
+    });
+  }
   return toClientServer(server, await related(server), actorId, ["*"]);
 }
 
@@ -476,6 +578,12 @@ export async function reinstallServer(serverId: string, viewerId: string, admin:
   }
   server.status = "installing";
   await server.save();
+  recordActivity({
+    serverId: server._id.toString(),
+    event: "settings.reinstall",
+    category: "settings",
+    actor: userActor(viewerId),
+  });
   void runInstall(server._id.toString());
   return toClientServer(server, docs, viewerId, access.permissions);
 }
@@ -507,6 +615,12 @@ export async function powerServer(
 
   server.status = action === "start" || action === "restart" ? "starting" : "stopping";
   await server.save();
+  recordActivity({
+    serverId: server._id.toString(),
+    event: `power.${action}`,
+    category: "power",
+    actor: userActor(viewerId),
+  });
   const spec = await specFor(server, docs.egg, docs.allocation);
   const nodeId = server.nodeId.toString();
   const id = server._id.toString();
@@ -543,6 +657,9 @@ export async function deleteServer(serverId: string) {
   await Allocation.updateMany({ serverId: server._id }, { $set: { serverId: null } });
   await Subuser.deleteMany({ serverId: server._id });
   await Schedule.deleteMany({ serverId: server._id });
+  const { destroyServerDatabases } = await import("./databases");
+  await destroyServerDatabases(server._id);
+  await destroyServerActivity(server._id);
   await Server.deleteOne({ _id: server._id });
   return { ok: true };
 }
@@ -645,11 +762,14 @@ export async function serverFiles(
     name?: string;
     names?: string[];
     contentBase64?: string;
+    query?: string;
   };
   const action = parsed.action || "list";
   const filePerm: Record<string, ServerPermission> = {
     list: "file.read",
     read: "file.read",
+    search: "file.read",
+    stat: "file.read",
     write: "file.write",
     mkdir: "file.write",
     upload: "file.write",
@@ -662,7 +782,16 @@ export async function serverFiles(
   if (!permission) throw FlutterError.validation("Unknown file action");
   const server = await requireServer(serverId, viewerId, admin, permission);
   const node = await Node.findById(server.nodeId);
-  return filesOnNode(server.nodeId.toString(), server.uuid, {
+  const nodeId = server.nodeId.toString();
+  let change: ReturnType<typeof fileChangePreview> | null = null;
+  if (action === "write") {
+    try {
+      change = await fileWritePreview(nodeId, server.uuid, parsed.path, parsed.content ?? "");
+    } catch {
+      change = null;
+    }
+  }
+  const result = await filesOnNode(nodeId, server.uuid, {
     action,
     path: parsed.path,
     content: parsed.content,
@@ -671,7 +800,58 @@ export async function serverFiles(
     names: parsed.names,
     contentBase64: parsed.contentBase64,
     maxBytes: uploadLimitBytes(node?.uploadLimitMb),
+    query: parsed.query,
   });
+  if (action === "write") {
+    recordFileWrite({
+      serverId: server._id.toString(),
+      path: parsed.path,
+      after: parsed.content ?? "",
+      actor: userActor(viewerId),
+      change,
+    });
+  } else if (action !== "list" && action !== "read" && action !== "search" && action !== "stat") {
+    recordActivity({
+      serverId: server._id.toString(),
+      event: `file.${action}`,
+      category: "files",
+      actor: userActor(viewerId),
+      properties: {
+        path: parsed.path,
+        to: parsed.to,
+        name: parsed.name,
+        names: parsed.names,
+      },
+    });
+  }
+  return result;
+}
+
+export async function downloadServerFiles(
+  serverId: string,
+  viewerId: string,
+  admin: boolean,
+  path: string,
+  names: string[],
+) {
+  const server = await requireServer(serverId, viewerId, admin, "file.read");
+  return downloadOnNode(server.nodeId.toString(), server.uuid, path || "/", names);
+}
+
+async function fileWritePreview(nodeId: string, uuid: string, path: string | undefined, content: string) {
+  if (!path) return fileChangePreview(null, content);
+  try {
+    const prior = await filesOnNode(nodeId, uuid, { action: "read", path });
+    const old =
+      prior && typeof prior === "object" && "content" in prior && typeof (prior as { content?: unknown }).content === "string"
+        ? (prior as { content: string }).content
+        : null;
+    return fileChangePreview(old, content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/binary/i.test(message)) return null;
+    return fileChangePreview(null, content);
+  }
 }
 
 export async function serverBackups(
@@ -703,24 +883,116 @@ export async function serverBackups(
       }
     }
   }
-  return backupsOnNode(server.nodeId.toString(), server.uuid, {
+  const result = await backupsOnNode(server.nodeId.toString(), server.uuid, {
     action,
     id: parsed.id,
+  });
+  if (action === "create" || action === "restore" || action === "delete") {
+    const backup =
+      result && typeof result === "object" && "backup" in result
+        ? (result as { backup?: { id?: string; name?: string } }).backup
+        : undefined;
+    recordActivity({
+      serverId: server._id.toString(),
+      event: `backup.${action}`,
+      category: "backups",
+      actor: userActor(viewerId),
+      properties: { name: backup?.name || backup?.id || parsed.id },
+    });
+  }
+  return result;
+}
+
+async function listNetworkAllocations(server: {
+  _id: { toString(): string };
+  allocationId: { toString(): string };
+  eggId: { toString(): string };
+}) {
+  const [rows, egg] = await Promise.all([
+    Allocation.find({ serverId: server._id }).sort({ port: 1 }),
+    Egg.findById(server.eggId),
+  ]);
+  const eggName = egg?.name ?? "";
+  const eggDescription = egg?.description ?? "";
+  return rows.map((row) => {
+    const display = allocationDisplay(row);
+    return {
+      id: row._id.toString(),
+      ip: row.ip,
+      alias: row.alias || "",
+      port: row.port,
+      notes: row.notes || "",
+      primary: row._id.toString() === server.allocationId.toString(),
+      display,
+      http: allocationIsHttp(eggName, eggDescription, row.port),
+      url: allocationBrowserUrl(row),
+    };
   });
 }
 
 export async function serverNetwork(serverId: string, viewerId: string, admin: boolean) {
   const server = await requireServer(serverId, viewerId, admin, "allocation.read");
-  const rows = await Allocation.find({ serverId: server._id }).sort({ port: 1 });
-  return rows.map((row) => ({
-    id: row._id.toString(),
-    ip: row.ip,
-    alias: row.alias || "",
-    port: row.port,
-    notes: row.notes || "",
-    primary: row._id.toString() === server.allocationId.toString(),
-    display: `${row.alias || row.ip}:${row.port}`,
-  }));
+  return listNetworkAllocations(server);
+}
+
+export async function updateServerAllocation(
+  serverId: string,
+  allocationId: string,
+  viewerId: string,
+  admin: boolean,
+  body: unknown,
+) {
+  const parsed = allocationUpdateSchema.safeParse(body);
+  if (!parsed.success) throw FlutterError.validation("Invalid allocation", parsed.error.flatten());
+  const server = await requireServer(serverId, viewerId, admin, "allocation.update");
+  if (!/^[a-fA-F0-9]{24}$/.test(allocationId)) throw FlutterError.notFound("Allocation not found");
+  const row = await Allocation.findOne({ _id: allocationId, serverId: server._id });
+  if (!row) throw FlutterError.notFound("Allocation not found");
+
+  const fields: string[] = [];
+  if (parsed.data.notes !== undefined) {
+    const notes = parsed.data.notes.trim();
+    if (notes !== (row.notes || "")) {
+      row.notes = notes;
+      fields.push("notes");
+    }
+  }
+  if (parsed.data.alias !== undefined) {
+    const alias = parsed.data.alias.trim();
+    if (alias !== (row.alias || "")) {
+      row.alias = alias;
+      fields.push("alias");
+    }
+  }
+  if (fields.length) await row.save();
+
+  let madePrimary = false;
+  if (parsed.data.primary && row._id.toString() !== server.allocationId.toString()) {
+    server.allocationId = row._id;
+    await server.save();
+    madePrimary = true;
+  }
+
+  const display = allocationDisplay(row);
+  if (madePrimary) {
+    recordActivity({
+      serverId: server._id.toString(),
+      event: "allocation.primary",
+      category: "network",
+      actor: userActor(viewerId),
+      properties: { name: display },
+    });
+  } else if (fields.length) {
+    recordActivity({
+      serverId: server._id.toString(),
+      event: "allocation.update",
+      category: "network",
+      actor: userActor(viewerId),
+      properties: { name: display, fields },
+    });
+  }
+
+  return listNetworkAllocations(server);
 }
 
 export async function consoleSocket(
@@ -754,6 +1026,11 @@ export async function applyPowerDirect(serverId: string, action: PowerAction) {
   await server.save();
   try {
     await powerOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation), action);
+    recordActivity({
+      serverId: server._id.toString(),
+      event: `power.${action}`,
+      category: "power",
+    });
   } catch (error) {
     const row = await Server.findById(serverId);
     if (row && row.status !== "installing" && row.status !== "install_failed") {
@@ -778,5 +1055,16 @@ export async function createBackupDirect(serverId: string) {
   if (server.backupsEnabled === false) {
     throw FlutterError.forbidden("Backups are disabled for this server");
   }
-  return backupsOnNode(server.nodeId.toString(), server.uuid, { action: "create" });
+  const result = await backupsOnNode(server.nodeId.toString(), server.uuid, { action: "create" });
+  const backup =
+    result && typeof result === "object" && "backup" in result
+      ? (result as { backup?: { id?: string; name?: string } }).backup
+      : undefined;
+  recordActivity({
+    serverId: server._id.toString(),
+    event: "backup.create",
+    category: "backups",
+    properties: { name: backup?.name || backup?.id },
+  });
+  return result;
 }

@@ -83,7 +83,7 @@ export default function NodeConfigurationPage() {
         <AdminError message={error} />
         <p className="mb-3 text-xs text-muted-foreground">
           Edits write the daemon&apos;s config.json on this machine. Restart the daemon after changing listen
-          port, host, or token.
+          port, SFTP port, host, or token.
         </p>
       </div>
       <div className="h-[min(70vh,40rem)] border-t border-border bg-background">

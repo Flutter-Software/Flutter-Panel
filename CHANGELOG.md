@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.2.69
+
+### Console
+
+The command box suggests real commands for the server's egg as you type (Minecraft, Paper, Project Zomboid, Valheim, Palworld, Rust, ARK, Terraria, Source, FiveM). Tab or click to fill. Up and down move in the list while it is open; with an empty box they still walk history. Ctrl+Space shows the first suggestions with nothing typed.
+
+## 0.2.68
+
+### Dashboard
+
+The server list fills CPU, RAM, and disk from the node (cached a few seconds, skipped when the node is down or the server is installing). Cards show a crash, a disk at 90%, or a node that missed its heartbeat, and those servers sort to the top. The same alerts show on the admin server list.
+
+## 0.2.67
+
+### Nodes
+
+If UFW is already on, the node installer opens the daemon port and SFTP (2022 by default), not only 8080. Install commands use the node’s daemon port. The About page checks heartbeat, whether the panel can reach the daemon, whether this browser can, and whether the on-disk config matches the node’s ports. `/health` allows that browser check.
+
+## 0.2.66
+
+### Console
+
+The log is still a React list, not xterm. Color codes from the process show as color. Up and down in the command box walk commands you already sent. Click a timestamp to copy that line. Select text for a Copy chip. All / Game / Flutter filters the buffer without hiding Flutter as a different stream.
+
+## 0.2.65
+
+### Files
+
+Search filenames from the current folder. Paste `/home/container/...` or `sftp://` paths to jump to a file or folder. Copy path copies the container path. The editor can compare unsaved edits to the last saved version. Download sends a file to the browser, or a zip when you pick a folder or several items. Archive still leaves a `.tar.gz` on the server.
+
+## 0.2.64
+
+### Console
+
+Install output is written on the node and comes back after a refresh. When a server dies, the console shows why: out of memory, stopped or killed from the panel, a crash with the exit code, or a failed install. Copy last 50 copies the visible lines without ANSI codes.
+
+## 0.2.63
+
+### Network
+
+Allocations are no longer a read-only table. You can copy the address, set notes and an alias, make one primary, and open HTTP ports in the browser. The process uses the primary port after the next start.
+
+## 0.2.62
+
+### Activity
+
+Each server has a timeline of who started it, edited files, restored a backup, changed a subuser, and similar actions. Filter by type, person, or search. File edits can be opened to see the lines that were added or removed. Repeated saves stack as a small pile of cards; hover for half a second to pick one, with edits at the top. File rows use icons for the file type and whether it was edited, created, or deleted.
+
+### API
+
+Account settings can create API keys. Account keys (`flc_`) call `/api/v1/client` as you, optionally limited to certain servers. Admins can also create application keys (`fla_`) for `/api/v1/admin`, with full access or selected scopes. The secret is shown once. Send it as `Authorization: Bearer`.
+
+## 0.2.61
+
+### Databases
+
+Admins can add MySQL or MariaDB hosts. Servers with a database limit can create a database and user on those hosts, copy the connection details, rotate the password, and delete the database.
+
 ## 0.2.60
 
 ### Console

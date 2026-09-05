@@ -2,11 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { LayoutGrid, Table2 } from "lucide-react";
-import { ServerCard, ServerTable } from "@/components/server-card";
+import { ServerCard, ServerTable, serverAttention } from "@/components/server-card";
 import { ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
 import { Badge, Button, Input } from "@/components/ui";
-import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
 import type { ServerRecord } from "@/lib/types";
 import { cn } from "@/lib/cn";
@@ -27,30 +26,17 @@ export default function DashboardPage() {
     return () => window.clearInterval(timer);
   }, [reload]);
 
-  async function onPower(id: string, action: "start" | "stop" | "restart" | "kill") {
-    try {
-      await api(`/api/v1/client/servers/${id}/power`, {
-        method: "POST",
-        body: JSON.stringify({ action }),
-      });
-      await reload();
-    } catch {
-      await reload();
-    }
-  }
-
   const mine = servers.filter((server) => server.owner);
   const other = servers.filter((server) => !server.owner);
   const source = tab === "my" ? mine : other;
-  const filtered = useMemo(
-    () =>
-      source.filter((server) =>
-        `${server.name} ${server.egg} ${server.allocation}`
-          .toLowerCase()
-          .includes(query.toLowerCase()),
-      ),
-    [query, source],
-  );
+  const filtered = useMemo(() => {
+    const needle = query.toLowerCase();
+    return source
+      .filter((server) =>
+        `${server.name} ${server.egg} ${server.allocation}`.toLowerCase().includes(needle),
+      )
+      .sort((a, b) => serverAttention(b) - serverAttention(a) || a.name.localeCompare(b.name));
+  }, [query, source]);
 
   if (error && !data) {
     return (
@@ -64,13 +50,8 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Servers you own and servers shared with you.
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Server List</h1>
         <div className="flex items-center gap-1 rounded-lg border border-border p-1">
           <Button
             size="sm"
@@ -141,7 +122,7 @@ export default function DashboardPage() {
       ) : layout === "grid" ? (
         <div className="grid gap-4 md:grid-cols-2">
           {filtered.map((server) => (
-            <ServerCard key={server.id} server={server} onPower={onPower} />
+            <ServerCard key={server.id} server={server} />
           ))}
         </div>
       ) : (

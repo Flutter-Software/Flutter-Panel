@@ -4,6 +4,7 @@ import {
   daemonServerStateSchema,
   daemonConfigSaveSchema,
   hasServerPermission,
+  lastExitSchema,
   PANEL_VERSION,
   type PowerAction,
 } from "@flutter-software/shared";
@@ -13,6 +14,7 @@ import { Node, Server, Subuser, User } from "./db/models";
 import { authenticateNodeToken, isNodeOnline, panelApiUrl } from "./nodes";
 import { dummyPasswordHash, verifyPassword } from "./auth/crypto";
 import type { Context } from "hono";
+import { recordActivity } from "./activity";
 
 export type InstallSpec = {
   uuid: string;
@@ -38,15 +40,16 @@ export async function configuration(c: Context) {
     (c.req.header("x-forwarded-proto") || "").split(",")[0]?.trim() ||
     (new URL(c.req.url).protocol || "http:").replace(":", "") ||
     "http";
+  const listenPort = Number(node.daemonPort) || 8080;
   return {
     panelUrl: panelApiUrl(host ? `${proto}://${host}` : undefined),
     nodeId: node._id.toString(),
     listenHost: "0.0.0.0",
-    listenPort: 8080,
+    listenPort,
     sftpPort: Number(node.sftpPort) || 2022,
     // Template for `daemon:configure`. The real listenUrl is whatever the
     // operator passed (--listen-url / tunnel); heartbeat overwrites the node row.
-    listenUrl: `http://127.0.0.1:8080`,
+    listenUrl: `http://127.0.0.1:${listenPort}`,
     dataDir: "./data",
     requestSecret: env().DAEMON_REQUEST_SECRET,
   };
@@ -97,21 +100,44 @@ export async function applyServerState(c: Context, uuid: string) {
     throw FlutterError.forbidden("Server is not on this node");
   }
 
+  if (parsed.data.lastExit !== undefined) {
+    server.lastExit = parsed.data.lastExit;
+    server.markModified("lastExit");
+  }
+
   if (parsed.data.install) {
     if (server.status === "installing" || server.status === "install_failed") {
       server.status = parsed.data.install.ok ? "offline" : "install_failed";
+      if (!parsed.data.install.ok && parsed.data.lastExit === undefined) {
+        const fromError = lastExitSchema.safeParse({
+          kind: "install_failed",
+          message: parsed.data.install.error || "Install script failed",
+          at: new Date().toISOString(),
+        });
+        if (fromError.success) {
+          server.lastExit = fromError.data;
+          server.markModified("lastExit");
+        }
+      }
+      if (parsed.data.install.ok && parsed.data.lastExit === undefined) {
+        server.lastExit = null;
+        server.markModified("lastExit");
+      }
       await server.save();
     }
     return { ok: true, status: server.status };
   }
 
   if (server.status === "installing" || server.status === "install_failed") {
+    if (parsed.data.lastExit !== undefined) await server.save();
     return { ok: true, status: server.status };
   }
 
   const next = parsed.data.status;
   if (next) {
     server.status = next;
+  }
+  if (next || parsed.data.lastExit !== undefined) {
     await server.save();
   }
   return { ok: true, status: server.status };
@@ -238,23 +264,105 @@ export async function destroyOnNode(nodeId: string, uuid: string) {
   });
 }
 
-export async function statsOnNode(nodeId: string, uuid: string) {
-  const node = await loadNode(nodeId);
-  return daemonFetch(node, {
-    uuid,
-    op: "stats",
-    path: "stats",
-    timeoutMs: 4_000,
-  }) as Promise<{
-    running?: boolean;
-    diskBytes?: number;
-    stats?: {
-      cpuPercent?: number | null;
-      memoryBytes?: number | null;
-      rxBytes?: number | null;
-      txBytes?: number | null;
-    } | null;
-  }>;
+type LiveStats = {
+  running?: boolean;
+  diskBytes?: number;
+  stats?: {
+    cpuPercent?: number | null;
+    memoryBytes?: number | null;
+    rxBytes?: number | null;
+    txBytes?: number | null;
+  } | null;
+};
+
+const liveStatsCache = new Map<string, { at: number; data: LiveStats }>();
+const liveStatsInflight = new Map<string, Promise<LiveStats>>();
+const LIVE_STATS_CACHE_MS = 8_000;
+
+export async function statsOnNode(
+  nodeId: string,
+  uuid: string,
+  opts?: { timeoutMs?: number; node?: Awaited<ReturnType<typeof loadNode>> },
+) {
+  const cached = liveStatsCache.get(uuid);
+  if (cached && Date.now() - cached.at < LIVE_STATS_CACHE_MS) return cached.data;
+  const pending = liveStatsInflight.get(uuid);
+  if (pending) return pending;
+  const run = (async () => {
+    const node = opts?.node ?? (await loadNode(nodeId));
+    const data = (await daemonFetch(node, {
+      uuid,
+      op: "stats",
+      path: "stats",
+      timeoutMs: opts?.timeoutMs ?? 4_000,
+    })) as LiveStats;
+    liveStatsCache.set(uuid, { at: Date.now(), data });
+    return data;
+  })();
+  liveStatsInflight.set(uuid, run);
+  try {
+    return await run;
+  } finally {
+    if (liveStatsInflight.get(uuid) === run) liveStatsInflight.delete(uuid);
+  }
+}
+
+async function poolMap<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
+  if (!items.length) return;
+  let next = 0;
+  const workers = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(
+    Array.from({ length: workers }, async () => {
+      while (next < items.length) {
+        const index = next;
+        next += 1;
+        await fn(items[index] as T);
+      }
+    }),
+  );
+}
+
+export async function statsForServers(items: { nodeId: string; uuid: string }[]) {
+  const out = new Map<string, LiveStats>();
+  const grouped = new Map<string, string[]>();
+  for (const item of items) {
+    if (!item.nodeId || !item.uuid) continue;
+    const list = grouped.get(item.nodeId) ?? [];
+    list.push(item.uuid);
+    grouped.set(item.nodeId, list);
+  }
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 5_000);
+    void Promise.all(
+      [...grouped.entries()].map(async ([nodeId, uuids]) => {
+        const unique = [...new Set(uuids)];
+        let node: Awaited<ReturnType<typeof loadNode>>;
+        try {
+          node = await loadNode(nodeId);
+        } catch {
+          return;
+        }
+        if (!isNodeOnline(node.lastHeartbeatAt) || !node.daemonListenUrl) return;
+        await poolMap(unique, 8, async (uuid) => {
+          try {
+            out.set(uuid, await statsOnNode(nodeId, uuid, { node, timeoutMs: 2_500 }));
+          } catch {
+            /* keep zeros on the card */
+          }
+        });
+      }),
+    ).then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+    );
+  });
+  return out;
 }
 
 export async function logsOnNode(nodeId: string, uuid: string, tail = 200) {
@@ -296,6 +404,7 @@ export async function filesOnNode(
     names?: string[];
     contentBase64?: string;
     maxBytes?: number;
+    query?: string;
   },
 ) {
   const node = await loadNode(nodeId);
@@ -304,13 +413,89 @@ export async function filesOnNode(
       ? 600_000
       : body.action === "read" || body.action === "write"
         ? 300_000
-        : 30_000;
+        : body.action === "search"
+          ? 60_000
+          : 30_000;
   return daemonFetch(node, {
     uuid,
     op: "files",
     path: "files",
     body,
     timeoutMs,
+  });
+}
+
+function filenameFromDisposition(value: string | null) {
+  if (!value) return "download";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1]);
+    } catch {
+      /* keep going */
+    }
+  }
+  const quoted = /filename="([^"]+)"/i.exec(value);
+  if (quoted?.[1]) return quoted[1];
+  const plain = /filename=([^;]+)/i.exec(value);
+  return (plain?.[1] || "download").trim();
+}
+
+async function daemonFetchBinary(
+  node: { _id: { toString(): string }; daemonListenUrl?: string | null; lastHeartbeatAt?: Date | null },
+  spec: { uuid: string; op: string; path: string; query?: Record<string, string | string[]>; timeoutMs?: number },
+) {
+  if (!isNodeOnline(node.lastHeartbeatAt) || !node.daemonListenUrl) {
+    throw FlutterError.unavailable("Node daemon is offline");
+  }
+  const timeoutMs = spec.timeoutMs ?? 60_000;
+  const ticket = signDaemonRequest(env().DAEMON_REQUEST_SECRET, {
+    nodeId: node._id.toString(),
+    serverUuid: spec.uuid,
+    op: spec.op,
+    ttlMs: timeoutMs,
+  });
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(spec.query ?? {})) {
+    if (Array.isArray(value)) {
+      for (const item of value) params.append(key, item);
+    } else if (value) {
+      params.set(key, value);
+    }
+  }
+  const qs = params.toString();
+  const url = `${node.daemonListenUrl.replace(/\/+$/, "")}/v1/servers/${spec.uuid}/${spec.path}${qs ? `?${qs}` : ""}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${ticket}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    throw FlutterError.unavailable(
+      error instanceof Error ? `Daemon unreachable: ${error.message}` : "Daemon unreachable",
+    );
+  }
+  if (!response.ok) {
+    const json = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+    throw FlutterError.unavailable(json?.error?.message || `Daemon HTTP ${response.status}`);
+  }
+  return {
+    body: Buffer.from(await response.arrayBuffer()),
+    mime: response.headers.get("content-type") || "application/octet-stream",
+    filename: filenameFromDisposition(response.headers.get("content-disposition")),
+  };
+}
+
+export async function downloadOnNode(nodeId: string, uuid: string, path: string, names: string[]) {
+  const node = await loadNode(nodeId);
+  return daemonFetchBinary(node, {
+    uuid,
+    op: "files",
+    path: "files/download",
+    query: { path, names },
+    timeoutMs: 600_000,
   });
 }
 
@@ -386,6 +571,153 @@ export async function saveNodeDaemonConfig(nodeId: string, body: unknown) {
   return daemonNodeOp(node, { method: "PUT", path: "config", body: { content: parsed.data.content } });
 }
 
+function isLoopbackUrl(value: string) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+  } catch {
+    return /localhost|127\.0\.0\.1|::1/i.test(value);
+  }
+}
+
+function browserProbeUrl(node: {
+  daemonListenUrl?: string | null;
+  fqdn?: string | null;
+  scheme?: string | null;
+  daemonPort?: number | null;
+}) {
+  const listen = String(node.daemonListenUrl ?? "").replace(/\/+$/, "");
+  if (listen && !isLoopbackUrl(listen)) return listen;
+  const fqdn = String(node.fqdn ?? "").trim();
+  if (fqdn && !isLoopbackUrl(`http://${fqdn}`)) {
+    const scheme = node.scheme === "http" ? "http" : "https";
+    const port = Number(node.daemonPort) || 8080;
+    return `${scheme}://${fqdn}:${port}`;
+  }
+  return listen || null;
+}
+
+export async function probeNodeHealth(nodeId: string) {
+  const node = await loadNode(nodeId);
+  const listenUrl = node.daemonListenUrl ? String(node.daemonListenUrl).replace(/\/+$/, "") : null;
+  const last = node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt) : null;
+  const ageMs = last ? Date.now() - last.getTime() : null;
+  const online = isNodeOnline(node.lastHeartbeatAt);
+
+  const panelReach: {
+    ok: boolean;
+    url: string | null;
+    error: string | null;
+    version: string | null;
+    nodeId: string | null;
+    docker: { ok: boolean; error?: string } | null;
+  } = {
+    ok: false,
+    url: listenUrl,
+    error: listenUrl ? null : "No listen URL yet (waiting for a heartbeat)",
+    version: null,
+    nodeId: null,
+    docker: null,
+  };
+
+  if (listenUrl) {
+    try {
+      const response = await fetch(`${listenUrl}/health`, { signal: AbortSignal.timeout(5_000) });
+      const json = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        version?: string;
+        nodeId?: string;
+        docker?: { ok?: boolean; error?: string };
+      } | null;
+      if (!response.ok) {
+        panelReach.error = `HTTP ${response.status}`;
+      } else {
+        panelReach.ok = true;
+        panelReach.version = typeof json?.version === "string" ? json.version : null;
+        panelReach.nodeId = typeof json?.nodeId === "string" ? json.nodeId : null;
+        panelReach.docker = json?.docker
+          ? { ok: Boolean(json.docker.ok), error: json.docker.error }
+          : { ok: json?.ok !== false };
+      }
+    } catch (error) {
+      panelReach.error = error instanceof Error ? error.message : "Unreachable";
+    }
+  }
+
+  const issues: string[] = [];
+  const config: {
+    readable: boolean;
+    path: string | null;
+    listenPort: number | null;
+    sftpPort: number | null;
+    listenUrl: string | null;
+    nodeId: string | null;
+    issues: string[];
+  } = {
+    readable: false,
+    path: null,
+    listenPort: null,
+    sftpPort: null,
+    listenUrl: null,
+    nodeId: null,
+    issues,
+  };
+
+  if (online && listenUrl) {
+    try {
+      const file = await getNodeDaemonConfig(nodeId);
+      const parsed = JSON.parse(file.content) as {
+        listenPort?: unknown;
+        sftpPort?: unknown;
+        listenUrl?: unknown;
+        nodeId?: unknown;
+      };
+      const listenPort = Number(parsed.listenPort) || 8080;
+      const sftpPort = Number(parsed.sftpPort) || 2022;
+      const expectedDaemon = Number(node.daemonPort) || 8080;
+      const expectedSftp = Number(node.sftpPort) || 2022;
+      if (listenPort !== expectedDaemon) {
+        issues.push(`Config listenPort is ${listenPort}, this node is set to ${expectedDaemon}`);
+      }
+      if (sftpPort !== expectedSftp) {
+        issues.push(`Config sftpPort is ${sftpPort}, this node is set to ${expectedSftp}`);
+      }
+      if (typeof parsed.nodeId === "string" && parsed.nodeId && parsed.nodeId !== node._id.toString()) {
+        issues.push("Config nodeId does not match this node");
+      }
+      config.readable = true;
+      config.path = file.path;
+      config.listenPort = listenPort;
+      config.sftpPort = sftpPort;
+      config.listenUrl = typeof parsed.listenUrl === "string" ? parsed.listenUrl : null;
+      config.nodeId = typeof parsed.nodeId === "string" ? parsed.nodeId : null;
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : "Could not read daemon config");
+    }
+  } else if (!online) {
+    issues.push("Heartbeat is stale, so the panel cannot read the daemon config");
+  }
+
+  if (panelReach.ok && !online) {
+    issues.unshift("Health responded, but the heartbeat is stale. Check the panel URL on the node.");
+  }
+
+  return {
+    heartbeat: {
+      online,
+      lastHeartbeatAt: last ? last.toISOString() : null,
+      ageMs,
+    },
+    panelReach,
+    config,
+    browserProbeUrl: browserProbeUrl(node),
+    ports: {
+      daemon: Number(node.daemonPort) || 8080,
+      sftp: Number(node.sftpPort) || 2022,
+    },
+  };
+}
+
 const SFTP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseSftpUsername(raw: string) {
@@ -444,6 +776,17 @@ export async function authenticateSftp(c: Context) {
   if (!hasServerPermission(permissions, "file.read")) {
     throw FlutterError.forbidden("You do not have permission to access files on this server");
   }
+
+  recordActivity({
+    serverId: server._id.toString(),
+    event: "sftp.login",
+    category: "sftp",
+    actor: {
+      id: user._id.toString(),
+      username: user.username,
+      kind: "user",
+    },
+  });
 
   return {
     uuid: server.uuid,

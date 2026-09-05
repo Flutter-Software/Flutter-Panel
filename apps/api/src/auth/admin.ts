@@ -11,6 +11,11 @@ import { Allocation, Location, Node, Server } from "../db/models";
 import { hashPassword, randomToken } from "./crypto";
 import { isNodeOnline, panelApiUrl } from "../nodes";
 
+function nodeInstallCommand(panelUrl: string, token: string, nodeId: string, daemonPort: number) {
+  const port = Number.isInteger(daemonPort) && daemonPort > 0 ? daemonPort : 8080;
+  return `curl -fsSL https://raw.githubusercontent.com/Flutter-Software/Flutter-Panel/main/install/ubuntu-node.sh | sudo bash -s -- --panel-url ${panelUrl} --token ${token} --node ${nodeId} --port ${port} --listen-url http://<this-server-public-ip>:${port}`;
+}
+
 export function parsePortsOrThrow(raw: string): number[] {
   const parsed = parsePortSpec(raw);
   if (!parsed.ok) throw FlutterError.validation(parsed.error);
@@ -308,7 +313,7 @@ export async function createNode(body: unknown) {
     token,
     configure:
       process.env.NODE_ENV === "production"
-        ? `curl -fsSL https://raw.githubusercontent.com/Flutter-Software/Flutter-Panel/main/install/ubuntu-node.sh | sudo bash -s -- --panel-url ${panelUrl} --token ${token} --node ${nodeId} --listen-url http://<this-server-public-ip>:8080`
+        ? nodeInstallCommand(panelUrl, token, nodeId, Number(row.daemonPort) || 8080)
         : `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${nodeId}`,
     start:
       process.env.NODE_ENV === "production"
@@ -421,7 +426,7 @@ export async function revealDaemonToken(id: string) {
       preview: token.slice(0, 12),
       configure:
         process.env.NODE_ENV === "production"
-          ? `curl -fsSL https://raw.githubusercontent.com/Flutter-Software/Flutter-Panel/main/install/ubuntu-node.sh | sudo bash -s -- --panel-url ${panelUrl} --token ${token} --node ${id} --listen-url http://<this-server-public-ip>:8080`
+          ? nodeInstallCommand(panelUrl, token, id, Number(node.daemonPort) || 8080)
           : `npm run daemon:configure -- --panel-url ${panelUrl} --token ${token} --node ${id}`,
       start:
         process.env.NODE_ENV === "production"

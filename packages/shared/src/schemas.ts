@@ -238,6 +238,16 @@ export const allocationCreateSchema = z.object({
   notes: z.string().max(240).optional().default(""),
 });
 
+export const allocationUpdateSchema = z
+  .object({
+    notes: z.string().max(240).optional(),
+    alias: z.string().max(255).optional(),
+    primary: z.boolean().optional(),
+  })
+  .refine((data) => data.notes !== undefined || data.alias !== undefined || data.primary === true, {
+    message: "Nothing to update",
+  });
+
 export const nestCreateSchema = z.object({
   name: z.string().min(1).max(64),
   description: z.string().max(240).optional().default(""),
@@ -378,6 +388,17 @@ export const heartbeatSchema = z.object({
     .optional(),
 });
 
+export const LAST_EXIT_KINDS = ["oom", "killed", "crash", "install_failed"] as const;
+export type LastExitKind = (typeof LAST_EXIT_KINDS)[number];
+
+export const lastExitSchema = z.object({
+  kind: z.enum(LAST_EXIT_KINDS),
+  code: z.number().int().optional(),
+  message: z.string().max(500),
+  at: z.string().min(1).max(40),
+});
+export type LastExit = z.infer<typeof lastExitSchema>;
+
 export const daemonServerStateSchema = z.object({
   nodeId: objectIdSchema,
   status: z.enum(["offline", "starting", "running", "stopping"]).optional(),
@@ -387,6 +408,57 @@ export const daemonServerStateSchema = z.object({
       error: z.string().max(2000).optional(),
     })
     .optional(),
+  lastExit: lastExitSchema.nullable().optional(),
+});
+
+export const databaseHostCreateSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  host: z.string().trim().min(1).max(255),
+  port: z.number().int().min(1).max(65535).optional().default(3306),
+  username: z.string().trim().min(1).max(64),
+  password: z.string().min(1).max(256),
+  publicHost: z.string().trim().max(255).optional().default(""),
+  publicPort: z.number().int().min(0).max(65535).optional().default(0),
+  nodeIds: z.array(objectIdSchema).max(200).optional().default([]),
+  maxDatabases: z.number().int().min(0).max(10_000).optional().default(0),
+});
+
+export const databaseHostUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(64).optional(),
+  host: z.string().trim().min(1).max(255).optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+  username: z.string().trim().min(1).max(64).optional(),
+  password: z.union([z.string().min(1).max(256), z.literal("")]).optional(),
+  publicHost: z.string().trim().max(255).optional(),
+  publicPort: z.number().int().min(0).max(65535).optional(),
+  nodeIds: z.array(objectIdSchema).max(200).optional(),
+  maxDatabases: z.number().int().min(0).max(10_000).optional(),
+});
+
+export const databaseHostTestSchema = z.object({
+  hostId: objectIdSchema.optional(),
+  host: z.string().trim().min(1).max(255),
+  port: z.number().int().min(1).max(65535).optional().default(3306),
+  username: z.string().trim().min(1).max(64),
+  password: z.union([z.string().max(256), z.literal("")]).optional().default(""),
+});
+
+export const serverDatabaseCreateSchema = z.object({
+  hostId: objectIdSchema,
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(48)
+    .regex(/^[a-zA-Z0-9_]+$/, "Use letters, numbers, and underscores"),
+  remote: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .regex(/^[a-zA-Z0-9._%\-:]+$/, "Use an IP, hostname, or %")
+    .optional()
+    .default("%"),
 });
 
 export const serverStatusSchema = z.enum([

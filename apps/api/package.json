@@ -1,6 +1,6 @@
 {
   "name": "@flutter-software/api",
-  "version": "0.2.60",
+  "version": "0.2.69",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,6 +20,7 @@
     "dotenv": "^16.6.1",
     "hono": "^4.9.6",
     "mongoose": "^8.18.0",
+    "mysql2": "^3.24.3",
     "nodemailer": "^7.0.5",
     "qrcode": "^1.5.4",
     "redis": "^5.8.0",

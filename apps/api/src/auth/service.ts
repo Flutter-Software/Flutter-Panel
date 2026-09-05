@@ -30,6 +30,7 @@ import {
   createSession,
   destroyOtherSessions,
   destroySession,
+  getAuth,
   getSessionUser,
   listUserSessions,
   revokeUserSession,
@@ -262,11 +263,11 @@ export async function logout(c: Context) {
 }
 
 export async function me(c: Context) {
-  const session = await getSessionUser(c);
-  if (!session) return null;
-  const row = await User.findById(session.user.id);
+  const auth = await getAuth(c);
+  if (!auth) return null;
+  const row = await User.findById(auth.user.id);
   if (row) await attachPendingSubusers(row);
-  return session.user;
+  return auth.user;
 }
 
 export async function changePassword(c: Context, body: unknown) {

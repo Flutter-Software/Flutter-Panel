@@ -5,6 +5,8 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   useEffect,
+  useRef,
+  useState,
   type ComponentPropsWithRef,
   type InputHTMLAttributes,
   type ReactNode,
@@ -210,10 +212,34 @@ export function Modal({
   footer?: ReactNode;
   className?: string;
 }) {
+  const [shown, setShown] = useState(open);
+  const [leaving, setLeaving] = useState(false);
+  const frame = useRef({ title, description, children, footer });
+  if (open) frame.current = { title, description, children, footer };
+  if (open && !shown) {
+    setShown(true);
+    setLeaving(false);
+  }
+
   useEffect(() => {
-    if (!open) return;
+    if (open) {
+      setShown(true);
+      setLeaving(false);
+      return;
+    }
+    if (!shown) return;
+    setLeaving(true);
+    const handle = window.setTimeout(() => {
+      setShown(false);
+      setLeaving(false);
+    }, 200);
+    return () => window.clearTimeout(handle);
+  }, [open, shown]);
+
+  useEffect(() => {
+    if (!shown) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !leaving) onClose();
     };
     window.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
@@ -221,15 +247,20 @@ export function Modal({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [open, onClose]);
+  }, [shown, leaving, onClose]);
 
-  if (!open) return null;
+  if (!shown) return null;
+
+  const view = frame.current;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6", leaving && "pointer-events-none")}>
       <button
         type="button"
-        className="no-press absolute inset-0 bg-background/80 backdrop-blur-sm"
+        className={cn(
+          "no-press absolute inset-0 bg-background/80 backdrop-blur-sm",
+          leaving ? "flutter-modal-backdrop-out" : "flutter-modal-backdrop-in",
+        )}
         aria-label="Close"
         onClick={onClose}
       />
@@ -239,26 +270,27 @@ export function Modal({
         aria-labelledby="flutter-modal-title"
         className={cn(
           "relative flex max-h-[min(92vh,52rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl",
+          leaving ? "flutter-modal-out" : "flutter-modal-in",
           className,
         )}
       >
         <div className="flex shrink-0 items-start gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0 flex-1">
             <h2 id="flutter-modal-title" className="text-base font-semibold">
-              {title}
+              {view.title}
             </h2>
-            {description ? (
-              <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+            {view.description ? (
+              <p className="mt-0.5 text-sm text-muted-foreground">{view.description}</p>
             ) : null}
           </div>
           <Button type="button" size="sm" variant="ghost" className="size-8 px-0" onClick={onClose} aria-label="Close">
             <X className="size-4" />
           </Button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
-        {footer ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">{view.children}</div>
+        {view.footer ? (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
-            {footer}
+            {view.footer}
           </div>
         ) : null}
       </div>

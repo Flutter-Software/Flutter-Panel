@@ -11,6 +11,7 @@ import {
   Cpu,
   Database,
   Folder,
+  History,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -48,6 +49,7 @@ export const SERVER_NAV: NavItem[] = [
   { href: "network", label: "Network", icon: Network },
   { href: "startup", label: "Startup", icon: SlidersHorizontal },
   { href: "settings", label: "Settings", icon: Settings },
+  { href: "activity", label: "Activity", icon: History },
 ];
 
 export const ADMIN_NAV = [
@@ -64,6 +66,10 @@ export const ADMIN_NAV = [
   {
     group: "User",
     items: [{ href: "/admin/users", label: "Users", icon: Users }],
+  },
+  {
+    group: "Data",
+    items: [{ href: "/admin/database-hosts", label: "Databases", icon: Database }],
   },
   {
     group: "Management",
@@ -86,6 +92,7 @@ const ADMIN_PREFETCH: Record<string, string[]> = {
   "/admin/nests": ["/api/v1/admin/nests"],
   "/admin/users": ["/api/v1/admin/users"],
   "/admin/settings": ["/api/v1/admin/settings"],
+  "/admin/database-hosts": ["/api/v1/admin/database-hosts"],
 };
 
 function prefetchAdmin(href: string) {
@@ -102,6 +109,12 @@ function prefetchServer(href: string, serverId: string) {
   }
   if (href.endsWith("/users")) {
     prefetchQuery(`/api/v1/client/servers/${serverId}/users`);
+  }
+  if (href.endsWith("/databases")) {
+    prefetchQuery(`/api/v1/client/servers/${serverId}/databases`);
+  }
+  if (href.endsWith("/activity")) {
+    prefetchQuery(`/api/v1/client/servers/${serverId}/activity`);
   }
 }
 

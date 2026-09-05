@@ -472,6 +472,7 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
   fi
   if [[ "$INSTALL_DAEMON" -eq 1 ]]; then
     ufw allow 8080/tcp >/dev/null
+    ufw allow 2022/tcp >/dev/null
   fi
 fi
 

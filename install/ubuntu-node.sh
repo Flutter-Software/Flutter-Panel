@@ -17,6 +17,7 @@
 #   --node ID          Node id from Admin → Nodes
 #   --listen-url URL   URL the panel API can reach (not 127.0.0.1)
 #   --port PORT        Daemon listen port (default 8080)
+#   --sftp-port PORT   SFTP listen port (default 2022)
 #   --host HOST        Bind address (default 0.0.0.0)
 #   --prefix DIR       Install directory (default /opt/flutter-node)
 #   --data-dir DIR     Game server files (default /var/lib/flutter)
@@ -31,6 +32,7 @@ DATA_DIR="${FLUTTER_DATA_DIR:-/var/lib/flutter}"
 SERVICE_USER="${FLUTTER_USER:-flutter}"
 NODE_MAJOR=22
 DAEMON_PORT="${FLUTTER_DAEMON_PORT:-8080}"
+SFTP_PORT="${FLUTTER_SFTP_PORT:-2022}"
 DAEMON_HOST="${FLUTTER_DAEMON_HOST:-0.0.0.0}"
 PANEL_URL="${FLUTTER_PANEL_URL:-}"
 NODE_TOKEN="${FLUTTER_NODE_TOKEN:-}"
@@ -45,7 +47,7 @@ warn() { printf '[flutter-node] warning: %s\n' "$*" >&2; }
 die() { printf '[flutter-node] error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,28p' "$0"
+  sed -n '2,30p' "$0"
   exit 0
 }
 
@@ -59,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --node) NODE_ID="${2:?}"; shift ;;
     --listen-url) LISTEN_URL="${2:?}"; shift ;;
     --port) DAEMON_PORT="${2:?}"; shift ;;
+    --sftp-port) SFTP_PORT="${2:?}"; shift ;;
     --host) DAEMON_HOST="${2:?}"; shift ;;
     --prefix) PREFIX="${2:?}"; shift ;;
     --data-dir) DATA_DIR="${2:?}"; shift ;;
@@ -122,6 +125,7 @@ ask NODE_TOKEN "Node token (flt_...)" ""
 ask NODE_ID "Node id" ""
 ask LISTEN_URL "URL the panel should use to reach this daemon" "http://${PUBLIC_IP}:${DAEMON_PORT}"
 ask DAEMON_PORT "Daemon port" "$DAEMON_PORT"
+ask SFTP_PORT "SFTP port" "$SFTP_PORT"
 
 PANEL_URL="${PANEL_URL%/}"
 [[ -n "$PANEL_URL" ]] || die "A --panel-url is required"
@@ -286,6 +290,7 @@ if [[ "$SKIP_CONFIGURE" -eq 0 ]]; then
     --node $(printf '%q' "$NODE_ID") \
     --host $(printf '%q' "$DAEMON_HOST") \
     --port $(printf '%q' "$DAEMON_PORT") \
+    --sftp-port $(printf '%q' "$SFTP_PORT") \
     --listen-url $(printf '%q' "$LISTEN_URL") \
     --data-dir $(printf '%q' "$DATA_DIR") \
     --config $(printf '%q' "$PREFIX/apps/daemon/data/config.json")"
@@ -304,8 +309,9 @@ else
 fi
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
-  log "Opening daemon port ${DAEMON_PORT}/tcp"
+  log "Opening daemon ${DAEMON_PORT}/tcp and SFTP ${SFTP_PORT}/tcp"
   ufw allow "${DAEMON_PORT}/tcp" >/dev/null
+  ufw allow "${SFTP_PORT}/tcp" >/dev/null
 fi
 
 if [[ "$SKIP_CONFIGURE" -eq 0 ]]; then
@@ -326,7 +332,7 @@ Flutter node installed (no panel on this machine).
   Listen      ${LISTEN_URL:-"(configure first)"}
   Panel       ${PANEL_URL}
 
-Allow ${DAEMON_PORT}/tcp from the panel host, plus each game allocation port.
+Allow ${DAEMON_PORT}/tcp from the panel host, ${SFTP_PORT}/tcp for SFTP, plus each game allocation port.
 
 Useful commands:
   systemctl status flutter-daemon

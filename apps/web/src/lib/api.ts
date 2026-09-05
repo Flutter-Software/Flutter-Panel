@@ -46,6 +46,7 @@ function seedListCache(path: string, json: unknown) {
     ["/api/v1/client/servers", "servers", "server"],
     ["/api/v1/admin/servers", "servers", "server"],
     ["/api/v1/admin/locations", "locations", "location"],
+    ["/api/v1/admin/database-hosts", "hosts", "host"],
     ["/api/v1/admin/nests", "nests", "nest"],
     ["/api/v1/admin/users", "users", "user"],
   ];
@@ -91,6 +92,42 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   return json as T;
+}
+
+function filenameFromDisposition(value: string | null) {
+  if (!value) return "download";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1]);
+    } catch {
+      /* keep going */
+    }
+  }
+  const quoted = /filename="([^"]+)"/i.exec(value);
+  if (quoted?.[1]) return quoted[1];
+  const plain = /filename=([^;]+)/i.exec(value);
+  return (plain?.[1] || "download").trim();
+}
+
+export async function apiDownload(path: string): Promise<{ blob: Blob; filename: string }> {
+  const headers = new Headers();
+  const csrf = csrfToken();
+  if (csrf) headers.set(CSRF_HEADER, csrf);
+  let response: Response;
+  try {
+    response = await fetch(path, { credentials: "include", headers });
+  } catch {
+    throw new HttpError("We cannot reach the panel API right now.", 503, "UNAVAILABLE");
+  }
+  if (!response.ok) {
+    const json = (await response.json().catch(() => null)) as ApiError | null;
+    throw httpErrorFrom(json, response.status);
+  }
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get("content-disposition")),
+  };
 }
 
 function invalidateMutating(path: string) {

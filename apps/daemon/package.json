@@ -1,6 +1,6 @@
 {
   "name": "@flutter-software/daemon",
-  "version": "0.2.60",
+  "version": "0.2.69",
   "private": true,
   "type": "module",
   "scripts": {

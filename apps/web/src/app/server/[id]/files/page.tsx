@@ -20,6 +20,7 @@ import {
   ArchiveRestore,
   ArrowUp,
   Copy,
+  Download,
   FilePlus,
   Folder,
   FolderInput,
@@ -29,6 +30,7 @@ import {
   MoreVertical,
   Pencil,
   RefreshCw,
+  Search,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -37,13 +39,14 @@ import { FileIdeModal } from "@/components/file-ide";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { toast } from "@/components/toast";
 import { Button, Card, Field, Input, Modal } from "@/components/ui";
-import { api, apiUpload } from "@/lib/api";
+import { api, apiDownload, apiUpload } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useServerRecord } from "@/components/server-frame";
 import { can } from "@/lib/access";
 import { FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } from "@flutter-software/shared";
 
 type Entry = { name: string; kind: "file" | "dir"; size: number; modifiedAt: string };
+type SearchHit = { path: string; name: string; kind: "file" | "dir"; size: number };
 
 type Menu =
   | { x: number; y: number; kind: "entry"; entry: Entry }
@@ -81,6 +84,37 @@ function parentPath(dir: string) {
 function displayContainerPath(dir: string) {
   const cleaned = normalizeDir(dir);
   return cleaned === "/" ? "/home/container" : `/home/container${cleaned}`;
+}
+
+function looksLikePath(raw: string) {
+  const value = raw.trim();
+  if (!value) return false;
+  if (/^sftp:\/\//i.test(value)) return true;
+  if (value.includes("/") || value.includes("\\")) return true;
+  return /^home\/container(\/|$)/i.test(value);
+}
+
+function parseContainerPath(raw: string, currentDir = "/") {
+  let value = raw.trim();
+  if (!value) return "/";
+  if (/^sftp:\/\//i.test(value)) {
+    try {
+      value = decodeURIComponent(new URL(value).pathname || "/");
+    } catch {
+      value = value.replace(/^sftp:\/\/[^/]*/i, "") || "/";
+    }
+  }
+  value = value.replace(/\\/g, "/");
+  const lower = value.toLowerCase();
+  const marker = "/home/container";
+  const index = lower.indexOf(marker);
+  if (index >= 0) {
+    value = value.slice(index + marker.length) || "/";
+  } else if (/^home\/container(\/|$)/i.test(value)) {
+    value = value.slice("home/container".length) || "/";
+  }
+  if (!value.startsWith("/")) value = joinPath(currentDir, value);
+  return normalizeDir(value);
 }
 
 function parseEntryName(value: string): { name: string } | { error: string } {
@@ -368,6 +402,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const moveSeq = useRef(0);
   const clickGuard = useRef<ClickGuard | null>(null);
   const localNav = useRef<string | null>(null);
+  const pendingOpen = useRef<string | null>(null);
+  const openedUrlFile = useRef<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [listing, setListing] = useState(true);
   const [editing, setEditing] = useState<{ path: string; content: string } | null>(null);
@@ -388,6 +424,9 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const [moveError, setMoveError] = useState<string | null>(null);
   const [moveLoading, setMoveLoading] = useState(false);
   const [movePending, setMovePending] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchHits, setSearchHits] = useState<{ matches: SearchHit[]; truncated: boolean } | null>(null);
 
   async function files(body: Record<string, unknown>) {
     return api<{ data: unknown }>(`/api/v1/client/servers/${id}/files`, {
@@ -422,6 +461,11 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
         setPath(listed);
         router.replace(filesHref(pathname, listed), { scroll: false });
       }
+      const openPath = pendingOpen.current;
+      if (openPath) {
+        pendingOpen.current = null;
+        void openFileAt(openPath);
+      }
     } catch (err) {
       if (seq !== listSeq.current) return;
       showError(err, "Failed to list files");
@@ -436,6 +480,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     setEditing(null);
     setMenu(null);
     setSelected(new Set());
+    setSearchHits(null);
     lastIndex.current = null;
     if (dir === path) {
       void load(dir, { keepEntries: true });
@@ -461,6 +506,13 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     lastIndex.current = null;
     void load(path, { syncUrl: true });
   }, [id, path]);
+
+  const urlFile = search.get("file");
+  useEffect(() => {
+    if (!urlFile || openedUrlFile.current === urlFile) return;
+    openedUrlFile.current = urlFile;
+    void openByPath(urlFile);
+  }, [urlFile]);
 
   useEffect(() => {
     if (!menu) return;
@@ -514,8 +566,12 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       return;
     }
     if (listing) return;
+    void openFileAt(next);
+  }
+
+  async function openFileAt(full: string) {
     try {
-      const result = await files({ action: "read", path: next });
+      const result = await files({ action: "read", path: full });
       const data = result.data as { path: string; content: string };
       setEditing({ path: data.path, content: data.content });
     } catch (err) {
@@ -772,11 +828,107 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   }
 
   async function copyPath(entry: Entry) {
-    const full = joinPath(path, entry.name);
+    const full = displayContainerPath(joinPath(path, entry.name));
     try {
       await navigator.clipboard.writeText(full);
     } catch {
       toast("Could not copy path");
+    }
+  }
+
+  async function openByPath(raw: string) {
+    const parsed = parseContainerPath(raw, path);
+    try {
+      const result = await files({ action: "stat", path: parsed });
+      const data = result.data as { path: string; kind: "file" | "dir" };
+      if (data.kind === "dir") {
+        if (normalizeDir(data.path) === path) {
+          router.replace(filesHref(pathname, path), { scroll: false });
+          return;
+        }
+        browse(data.path);
+        return;
+      }
+      const dir = parentPath(data.path);
+      pendingOpen.current = data.path;
+      if (dir !== path) {
+        browse(dir);
+        return;
+      }
+      pendingOpen.current = null;
+      await openFileAt(data.path);
+      router.replace(filesHref(pathname, path), { scroll: false });
+    } catch (err) {
+      pendingOpen.current = null;
+      showError(err, "Path not found");
+      router.replace(filesHref(pathname, path), { scroll: false });
+    }
+  }
+
+  async function runSearch() {
+    const value = query.trim();
+    if (!value) {
+      setSearchHits(null);
+      return;
+    }
+    if (looksLikePath(value)) {
+      setSearchHits(null);
+      await openByPath(value);
+      return;
+    }
+    setSearching(true);
+    try {
+      const result = await files({ action: "search", path, query: value });
+      const data = result.data as { matches?: SearchHit[]; truncated?: boolean };
+      setSearchHits({ matches: data.matches ?? [], truncated: Boolean(data.truncated) });
+    } catch (err) {
+      showError(err, "Search failed");
+      setSearchHits(null);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function openSearchHit(hit: SearchHit) {
+    setSearchHits(null);
+    if (hit.kind === "dir") {
+      browse(hit.path);
+      return;
+    }
+    const dir = parentPath(hit.path);
+    pendingOpen.current = hit.path;
+    if (dir !== path) {
+      browse(dir);
+      return;
+    }
+    pendingOpen.current = null;
+    void openFileAt(hit.path);
+  }
+
+  async function downloadItems(items: Entry[]) {
+    if (!items.length) return;
+    const names = items.map((entry) => entry.name);
+    const label = names.length === 1 ? names[0] : `${names.length} items`;
+    const timer = startFakeProgress(`Downloading ${label}`);
+    try {
+      const params = new URLSearchParams();
+      params.set("path", path);
+      for (const name of names) params.append("names", name);
+      const { blob, filename } = await apiDownload(`/api/v1/client/servers/${id}/files/download?${params}`);
+      window.clearInterval(timer);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      finishProgress(true);
+    } catch (err) {
+      window.clearInterval(timer);
+      showError(err, "Download failed");
+      finishProgress(false);
     }
   }
 
@@ -947,7 +1099,26 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <form
+            className="relative min-w-[12rem] flex-1 sm:max-w-xs"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void runSearch();
+            }}
+          >
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search or paste a path"
+              className="h-9 pl-8 pr-8"
+              aria-label="Search files or open a path"
+            />
+            {searching ? (
+              <Loader2 className="absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
+            ) : null}
+          </form>
           <input
             ref={inputRef}
             type="file"
@@ -969,6 +1140,16 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               </p>
               <Button type="button" variant="ghost" size="sm" onClick={() => selectAll(false)}>
                 Clear
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={pending}
+                onClick={() => void downloadItems(entries.filter((entry) => selected.has(entry.name)))}
+              >
+                <Download className="size-3.5" />
+                Download
               </Button>
               {canWrite ? (
                 <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openMove(entries.filter((entry) => selected.has(entry.name)))}>
@@ -1007,6 +1188,45 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
           ) : null}
         </div>
       </div>
+
+      {searchHits ? (
+        <Card className="overflow-hidden p-0">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              {searchHits.matches.length === 0
+                ? `No matches in ${displayContainerPath(path)}`
+                : `${searchHits.matches.length} match${searchHits.matches.length === 1 ? "" : "es"} in ${displayContainerPath(path)}`}
+              {searchHits.truncated ? " · results are capped" : ""}
+            </p>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setSearchHits(null)}>
+              Close
+            </Button>
+          </div>
+          {searchHits.matches.length ? (
+            <ul className="max-h-56 overflow-auto py-1">
+              {searchHits.matches.map((hit) => (
+                <li key={hit.path}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-sm hover:bg-muted/50"
+                    onClick={() => openSearchHit(hit)}
+                  >
+                    {hit.kind === "dir" ? (
+                      <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <FileTypeIcon name={hit.name} className="size-3.5 shrink-0" />
+                    )}
+                    <span className="min-w-0 truncate font-medium">{hit.name}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                      {displayContainerPath(hit.path)}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </Card>
+      ) : null}
 
       <div
         className="relative"
@@ -1211,6 +1431,17 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                   void copyPath(entry);
                 }}
               />
+              <MenuItem
+                icon={<Download className="size-3.5" />}
+                label={selected.size > 1 && selected.has(menu.entry.name) ? `Download ${selected.size} items` : "Download"}
+                disabled={pending}
+                onClick={() => {
+                  const entry = menu.entry;
+                  const bulk = selected.size > 1 && selected.has(entry.name);
+                  setMenu(null);
+                  void downloadItems(bulk ? entries.filter((item) => selected.has(item.name)) : [entry]);
+                }}
+              />
               {canArchive ? (
                 <MenuItem
                   icon={<Archive className="size-3.5" />}
@@ -1288,6 +1519,18 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               />
               <div className="my-1 h-px bg-border" />
               </>
+              ) : null}
+              {selected.size > 0 ? (
+                <MenuItem
+                  icon={<Download className="size-3.5" />}
+                  label={selected.size === 1 ? "Download" : `Download ${selected.size} items`}
+                  disabled={pending}
+                  onClick={() => {
+                    const items = entries.filter((entry) => selected.has(entry.name));
+                    setMenu(null);
+                    void downloadItems(items);
+                  }}
+                />
               ) : null}
               {canArchive && selected.size > 0 ? (
                 <MenuItem

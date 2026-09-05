@@ -146,7 +146,7 @@ After a deploy, hard-refresh the browser if the login page fails to load JS chun
 
 ### 6. Firewall and game ports
 
-If UFW was already active, the installer opens SSH, 80/443 (or 3010 without nginx), and 8080 when the local daemon is installed. Publish game ports as you add allocations:
+If UFW was already active, the installer opens SSH, 80/443 (or 3010 without nginx), and 8080 plus 2022 when the local daemon is installed. Publish game ports as you add allocations:
 
 ```bash
 sudo ufw allow 25565/tcp

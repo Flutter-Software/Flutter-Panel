@@ -19,6 +19,12 @@ export type ServerRecord = {
   allocation: string;
   allocationId?: string;
   status: ServerStatus;
+  lastExit?: {
+    kind: "oom" | "killed" | "crash" | "install_failed";
+    code?: number;
+    message: string;
+    at: string;
+  } | null;
   owner: boolean;
   ownerId?: string;
   ownerName?: string;
