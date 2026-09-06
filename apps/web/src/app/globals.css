@@ -182,6 +182,45 @@ html.light {
     transform: translateY(0) scale(0.97);
     filter: brightness(0.92);
   }
+
+  .flutter-tooltip {
+    --tooltip-bg: var(--card);
+    --tooltip-color: var(--foreground);
+    overflow: visible !important;
+    background-color: var(--card) !important;
+    color: var(--foreground) !important;
+    border: none !important;
+    box-shadow: none !important;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 9px;
+    filter:
+      drop-shadow(0 1px 0 var(--border))
+      drop-shadow(0 -1px 0 var(--border))
+      drop-shadow(1px 0 0 var(--border))
+      drop-shadow(-1px 0 0 var(--border))
+      drop-shadow(0 8px 16px rgb(0 0 0 / 0.45));
+  }
+
+  .flutter-tooltip-arrow {
+    background: var(--card) !important;
+    border: none !important;
+  }
+
+  .console-dollar {
+    color: inherit;
+    background-image: linear-gradient(
+      105deg,
+      currentColor 0 38%,
+      color-mix(in oklab, white 88%, var(--primary)) 50%,
+      currentColor 62% 100%
+    );
+    background-size: 280% 100%;
+    background-position: 140% 0;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
 }
 
 html[data-reduce-motion="off"],
@@ -237,6 +276,22 @@ html[data-reduce-motion="off"] button {
 .console-bg-magenta { background-color: color-mix(in oklab, #c084fc 22%, transparent); }
 .console-bg-cyan { background-color: color-mix(in oklab, #22d3ee 22%, transparent); }
 .console-bg-white { background-color: color-mix(in oklab, var(--foreground) 14%, transparent); }
+
+@keyframes console-dollar-shine {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -140% 0;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html:not([data-reduce-motion="off"]) .console-dollar-btn:hover .console-dollar,
+  html:not([data-reduce-motion="off"]) .console-dollar-btn:focus-visible .console-dollar {
+    animation: console-dollar-shine 1.2s linear infinite;
+  }
+}
 
 @keyframes flutter-save-circle {
   to {

@@ -21,5 +21,26 @@ export const flutterMantineTheme = createTheme({
     NumberInput: { defaultProps: { size: "sm" } },
     Select: { defaultProps: { size: "sm" } },
     Switch: { defaultProps: { size: "sm" } },
+    Tooltip: {
+      defaultProps: {
+        withArrow: true,
+        arrowSize: 6,
+        offset: 5,
+      },
+      styles: {
+        tooltip: {
+          "--tooltip-bg": "var(--card)",
+          "--tooltip-color": "var(--foreground)",
+          backgroundColor: "var(--card)",
+          color: "var(--foreground)",
+          border: "none",
+          boxShadow: "none",
+          fontSize: "12px",
+          fontWeight: 500,
+          filter:
+            "drop-shadow(0 1px 0 var(--border)) drop-shadow(0 -1px 0 var(--border)) drop-shadow(1px 0 0 var(--border)) drop-shadow(-1px 0 0 var(--border)) drop-shadow(0 8px 16px rgb(0 0 0 / 0.45))",
+        },
+      },
+    },
   },
 });

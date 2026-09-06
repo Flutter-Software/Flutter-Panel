@@ -10,6 +10,8 @@ import { Button, Field, Input, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
 import { parseEggJson } from "./egg-json";
+import { cn } from "@/lib/cn";
+import { startupPreviewParts } from "@/lib/startup-preview";
 
 export type EggVariable = {
   key: string;
@@ -373,7 +375,7 @@ export function EggForm({
           title="Process & install"
           description="How the container starts, stops, and is first installed."
         >
-          <Field label="Startup" hint="Optional. Command run as the game process. Leave blank if the image has an entrypoint.">
+          <Field label="Startup" hint="Optional. Command run as the game process. Leave blank if the image has an entrypoint. Use {{KEY}} for variables.">
             <Textarea
               value={startup}
               onChange={(event) => setStartup(event.target.value)}
@@ -381,6 +383,25 @@ export function EggForm({
               className="min-h-[72px] font-mono"
               maxLength={2000}
             />
+            {startup.includes("{{") ? (
+              <p className="mt-2 whitespace-pre-wrap break-all rounded-md border border-border bg-background px-3 py-2 font-mono text-xs">
+                {startupPreviewParts(
+                  startup,
+                  Object.fromEntries(variables.map((row) => [row.key, row.default])),
+                ).map((part, index) =>
+                  part.kind === "text" ? (
+                    <span key={index}>{part.text}</span>
+                  ) : (
+                    <span
+                      key={index}
+                      className={cn(part.missing ? "text-status-warn" : "text-primary")}
+                    >
+                      {part.value}
+                    </span>
+                  ),
+                )}
+              </p>
+            ) : null}
           </Field>
           <Field label="Stop command" hint='Sent to stdin. Use "stop" for most game servers.'>
             <Input

@@ -1,10 +1,16 @@
 # Changelog
 
+## 0.2.70
+
+### Startup
+
+Egg variables show their description above the field. The startup command preview fills in `{{KEY}}` as you type. A port-named variable that is not on this server’s allocations warns “This port isn’t allocated.”
+
 ## 0.2.69
 
 ### Console
 
-The command box suggests real commands for the server's egg as you type (Minecraft, Paper, Project Zomboid, Valheim, Palworld, Rust, ARK, Terraria, Source, FiveM). Tab or click to fill. Up and down move in the list while it is open; with an empty box they still walk history. Ctrl+Space shows the first suggestions with nothing typed.
+The command box suggests real commands for the server's egg as you type (Minecraft, Paper, Project Zomboid, Valheim, Palworld, Rust, ARK, Terraria, Source, FiveM). Tab or click to fill. Up and down move in the list while it is open; with an empty box they still walk history. Click $ or press Ctrl+Space to show every command for that egg.
 
 ## 0.2.68
 

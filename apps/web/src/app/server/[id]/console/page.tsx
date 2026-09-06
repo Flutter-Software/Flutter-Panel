@@ -2,6 +2,7 @@
 
 import { use, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type UIEvent } from "react";
 import { Check, ChevronDown, ChevronUp, Copy, Loader2, Search, X } from "lucide-react";
+import { Tooltip } from "@mantine/core";
 import { Button, Card } from "@/components/ui";
 import { StatGraph } from "@/components/status";
 import { PowerButtons } from "@/components/power-buttons";
@@ -324,7 +325,9 @@ export default function ConsolePage({
   const [series, setSeries] = useState<StatSeries>(emptySeries);
 
   const commandCatalog = server ? commandsForServer(server) : [];
-  const commandMatches = filterConsoleCommands(commandCatalog, browseAll && !command.trim() ? "" : command);
+  const commandMatches = browseAll
+    ? commandCatalog
+    : filterConsoleCommands(commandCatalog, command);
 
   statusRef.current = server?.status;
 
@@ -827,6 +830,18 @@ export default function ConsolePage({
     commandInput.current?.focus();
   }
 
+  function toggleAllCommands() {
+    if (server?.status === "installing" || !commandCatalog.length) return;
+    if (browseAll && suggestFocused) {
+      setBrowseAll(false);
+      return;
+    }
+    setBrowseAll(true);
+    setSuggestFocused(true);
+    setSuggestIndex(0);
+    commandInput.current?.focus();
+  }
+
   function onCommandKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
       if (browseAll || suggestFocused) {
@@ -838,13 +853,11 @@ export default function ConsolePage({
     }
     if ((event.key === " " && event.ctrlKey) || (event.key === " " && event.metaKey)) {
       event.preventDefault();
-      setBrowseAll(true);
-      setSuggestFocused(true);
-      setSuggestIndex(0);
+      toggleAllCommands();
       return;
     }
     const installing = server?.status === "installing";
-    const matches = filterConsoleCommands(commandCatalog, browseAll && !command.trim() ? "" : command);
+    const matches = browseAll ? commandCatalog : filterConsoleCommands(commandCatalog, command);
     const listOpen = Boolean(!installing && matches.length && (command.trim() || browseAll) && suggestFocused);
     if (listOpen) {
       if (event.key === "ArrowDown") {
@@ -1203,13 +1216,16 @@ export default function ConsolePage({
               </div>
             </div>
           </div>
-          <form className="relative flex items-center border-t border-border" onSubmit={(event) => void sendCommand(event)}>
+          <form className="relative flex items-center border-t border-border pl-1" onSubmit={(event) => void sendCommand(event)}>
             {suggestOpen ? (
               <ul
                 ref={suggestList}
                 id="console-command-suggest"
                 role="listbox"
-                className="absolute inset-x-0 bottom-full z-20 max-h-56 overflow-auto border-t border-border bg-card py-1 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.45)]"
+                className={cn(
+                  "absolute inset-x-0 bottom-full z-20 overflow-auto border-t border-border bg-card py-1 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.45)]",
+                  browseAll ? "max-h-72" : "max-h-56",
+                )}
               >
                 {commandMatches.map((item, index) => {
                   const active = index === suggestIndex;
@@ -1239,9 +1255,32 @@ export default function ConsolePage({
                 })}
               </ul>
             ) : null}
-            <span className="pl-4 font-mono text-sm font-semibold text-primary" aria-hidden>
-              $
-            </span>
+            <Tooltip
+              label="Show all Commands"
+              position="top"
+              withArrow
+              arrowSize={6}
+              offset={4}
+              openDelay={150}
+              zIndex={80}
+              classNames={{ tooltip: "flutter-tooltip", arrow: "flutter-tooltip-arrow" }}
+              transitionProps={{ duration: 120, transition: "pop" }}
+            >
+              <button
+                type="button"
+                className={cn(
+                  "console-dollar-btn no-press flex size-7 shrink-0 items-center justify-center font-mono text-sm font-semibold outline-none",
+                  browseAll && suggestOpen ? "text-primary" : "text-primary/80 hover:text-primary",
+                  "disabled:pointer-events-none disabled:opacity-40",
+                )}
+                aria-label="Show all Commands"
+                disabled={!canType || commandCatalog.length === 0}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => toggleAllCommands()}
+              >
+                <span className="console-dollar">$</span>
+              </button>
+            </Tooltip>
             <input
               ref={commandInput}
               value={command}
