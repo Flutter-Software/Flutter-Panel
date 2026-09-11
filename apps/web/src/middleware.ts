@@ -62,15 +62,34 @@ function redirectTo(request: NextRequest, path: string, nextPath?: string) {
   return NextResponse.next();
 }
 
+function clientIp(request: NextRequest) {
+  const forwarded =
+    request.headers.get("cf-connecting-ip")?.trim() ||
+    request.headers.get("x-real-ip")?.trim() ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "";
+  if (forwarded) return forwarded;
+  const ip = (request as NextRequest & { ip?: string | null }).ip;
+  return typeof ip === "string" ? ip.trim() : "";
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (
-    pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||
     PUBLIC_FILE.test(pathname)
   ) {
     return NextResponse.next();
+  }
+
+  if (pathname.startsWith("/api")) {
+    const ip = clientIp(request);
+    if (!ip) return NextResponse.next();
+    const headers = new Headers(request.headers);
+    if (!headers.get("x-forwarded-for")) headers.set("x-forwarded-for", ip);
+    if (!headers.get("x-real-ip")) headers.set("x-real-ip", ip);
+    return NextResponse.next({ request: { headers } });
   }
 
   const session = request.cookies.get(SESSION_COOKIE)?.value;
@@ -87,6 +106,6 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:ico|png|jpe?g|gif|webp|svg)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:ico|png|jpe?g|gif|webp|svg)$).*)",
   ],
 };

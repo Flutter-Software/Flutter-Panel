@@ -124,3 +124,13 @@ export {
   type CronFields,
 } from "./cron";
 export { parsePortSpec } from "./ports";
+export {
+  clientHintsFrom,
+  describeDevice,
+  describeUserAgent,
+  hasClientHints,
+  type ClientHints,
+  type DeviceKind,
+  type DeviceSummary,
+  type HeaderReader,
+} from "./user-agent";

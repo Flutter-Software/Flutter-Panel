@@ -5,7 +5,7 @@ import { runConfigure } from "./configure";
 import { createDaemonApp } from "./http";
 import { sendHeartbeat } from "./heartbeat";
 import { bypassHttpProxyForPanel } from "./panel-fetch";
-import { hydrateProcessStates, recoverInstallJobs } from "./docker";
+import { hydrateProcessStates, recoverInstallJobs, startProcessWatch } from "./docker";
 import { startSftp } from "./sftp";
 import { setPanelStateReporter } from "./process-state";
 import { reportServerState } from "./panel-state";
@@ -146,6 +146,7 @@ async function main() {
   await hydrateProcessStates(config).catch((error) => {
     console.error("[daemon] hydrate states failed:", error instanceof Error ? error.message : error);
   });
+  startProcessWatch();
 
   const beat = async () => {
     try {

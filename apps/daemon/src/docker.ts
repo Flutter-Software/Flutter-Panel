@@ -4,7 +4,7 @@ import Docker from "dockerode";
 import { appendFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { DaemonConfig } from "./config";
-import { getProcessState, setProcessState, type ProcessState } from "./process-state";
+import { getProcessState, knownProcessUuids, setProcessState, type ProcessState } from "./process-state";
 import { reportServerState } from "./panel-state";
 import type { LastExit } from "@flutter-software/shared";
 
@@ -942,7 +942,7 @@ export async function recoverInstallJobs(config: DaemonConfig) {
   }
 }
 
-export async function hydrateProcessStates(config: DaemonConfig) {
+async function listRunningServerUuids() {
   const running = new Set<string>();
   const list = await docker.listContainers({
     filters: { label: ["flutter.server"] },
@@ -952,6 +952,118 @@ export async function hydrateProcessStates(config: DaemonConfig) {
     if (!uuid || row.Labels?.["flutter.role"] === "install") continue;
     if (row.State === "running") running.add(uuid);
   }
+  return running;
+}
+
+function serverUuidFromLabels(labels: Record<string, string> | undefined) {
+  const uuid = labels?.["flutter.server"];
+  if (!uuid || labels?.["flutter.role"] === "install") return null;
+  return uuid;
+}
+
+function reconcileObservedState(uuid: string, running: boolean) {
+  if (isInstallRunning(uuid)) return;
+  const process = getProcessState(uuid);
+  if (running) {
+    if (process === "offline" || process === "starting") setProcessState(uuid, "running");
+    return;
+  }
+  if (process === "running" || process === "stopping") setProcessState(uuid, "offline");
+}
+
+async function markUnexpectedStop(uuid: string) {
+  if (isInstallRunning(uuid)) return;
+  const process = getProcessState(uuid);
+  if (process === "starting" || process === "stopping") return;
+  invalidateInspect(uuid);
+  stopStatsStream(uuid);
+  const info = await inspectContainer(uuid, true).catch(() => null);
+  if (info?.State.Running) return;
+  if (process === "running") {
+    const exit = classifyContainerExit(info?.State, false);
+    if (exit) void recordLastExit(uuid, exit);
+  }
+  setProcessState(uuid, "offline");
+}
+
+type DockerContainerEvent = {
+  Action?: string;
+  status?: string;
+  Actor?: { Attributes?: Record<string, string> };
+};
+
+function handleDockerContainerEvent(event: DockerContainerEvent) {
+  const uuid = serverUuidFromLabels(event.Actor?.Attributes);
+  if (!uuid) return;
+  const action = event.Action || event.status || "";
+  if (action === "start") {
+    invalidateInspect(uuid);
+    void ensureStatsStream(uuid).catch(() => undefined);
+    reconcileObservedState(uuid, true);
+    return;
+  }
+  if (action === "die" || action === "oom" || action === "destroy") {
+    void markUnexpectedStop(uuid);
+  }
+}
+
+async function dockerEventsStream() {
+  return docker.getEvents({
+    filters: {
+      type: ["container"],
+      event: ["die", "start", "oom", "destroy"],
+      label: ["flutter.server"],
+    },
+  });
+}
+
+async function watchDockerEvents() {
+  let buffer = "";
+  const stream = await dockerEventsStream();
+  const onData = (chunk: Buffer | string) => {
+    buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line) {
+        try {
+          handleDockerContainerEvent(JSON.parse(line) as DockerContainerEvent);
+        } catch {
+          /* ignore a partial/corrupt frame */
+        }
+      }
+      newline = buffer.indexOf("\n");
+    }
+    const leftover = buffer.trim();
+    if (!leftover) return;
+    try {
+      handleDockerContainerEvent(JSON.parse(leftover) as DockerContainerEvent);
+      buffer = "";
+    } catch {
+      /* wait for the rest of the object */
+    }
+  };
+  await new Promise<void>((resolve, reject) => {
+    stream.on("data", onData);
+    stream.once("end", resolve);
+    stream.once("error", reject);
+    stream.once("close", resolve);
+  });
+}
+
+async function syncObservedProcessStates() {
+  const running = await listRunningServerUuids();
+  for (const uuid of new Set([...knownProcessUuids(), ...running])) {
+    if (isInstallRunning(uuid)) continue;
+    reconcileObservedState(uuid, running.has(uuid));
+    if (running.has(uuid)) void ensureStatsStream(uuid).catch(() => undefined);
+    else stopStatsStream(uuid);
+  }
+}
+
+export async function hydrateProcessStates(config: DaemonConfig) {
+  const running = await listRunningServerUuids();
   const rootDir = resolve(config.dataDir, "servers");
   let uuids: string[] = [];
   try {
@@ -966,6 +1078,22 @@ export async function hydrateProcessStates(config: DaemonConfig) {
     setProcessState(uuid, running.has(uuid) ? "running" : "offline");
     if (running.has(uuid)) void ensureStatsStream(uuid).catch(() => undefined);
   }
+}
+
+export function startProcessWatch() {
+  const retry = (delayMs: number) => {
+    setTimeout(() => {
+      void watchDockerEvents()
+        .catch((error) => {
+          console.error("[daemon] docker events failed:", error instanceof Error ? error.message : error);
+        })
+        .finally(() => retry(5_000));
+    }, delayMs);
+  };
+  retry(0);
+  setInterval(() => {
+    void syncObservedProcessStates().catch(() => undefined);
+  }, 8_000);
 }
 
 export async function destroyServer(config: DaemonConfig, uuid: string) {
@@ -1481,6 +1609,7 @@ export async function liveResources(config: DaemonConfig, uuid: string) {
   const info = await inspectContainer(uuid);
   const running = Boolean(info?.State.Running);
   const startedAt = running && info?.State.StartedAt ? info.State.StartedAt : null;
+  reconcileObservedState(uuid, running);
 
   if (running) await ensureStatsStream(uuid).catch(() => undefined);
   else stopStatsStream(uuid);
@@ -1522,8 +1651,8 @@ const statsStreams = new Map<string, { destroy: () => void; previous: DockerStat
 export function stopStatsStream(uuid: string) {
   const current = statsStreams.get(uuid);
   if (!current) return;
-  current.destroy();
   statsStreams.delete(uuid);
+  current.destroy();
 }
 
 export async function ensureStatsStream(uuid: string) {
@@ -1550,7 +1679,22 @@ export async function ensureStatsStream(uuid: string) {
     entry.previous = parsed;
   });
   stream.on("data", onStats);
-  const stop = () => stopStatsStream(uuid);
+  const stop = () => {
+    if (!statsStreams.has(uuid)) return;
+    stopStatsStream(uuid);
+    invalidateInspect(uuid);
+    void inspectContainer(uuid, true)
+      .then((info) => {
+        if (info?.State.Running) return;
+        const process = getProcessState(uuid);
+        if (process === "running") {
+          const exit = classifyContainerExit(info?.State, false);
+          if (exit) void recordLastExit(uuid, exit);
+        }
+        if (process === "running" || process === "stopping") setProcessState(uuid, "offline");
+      })
+      .catch(() => undefined);
+  };
   stream.on("end", stop);
   stream.on("error", stop);
 }

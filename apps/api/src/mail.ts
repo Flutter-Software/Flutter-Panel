@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import nodemailer from "nodemailer";
 import {
   PERMISSION_GROUPS,
+  describeUserAgent,
   hasServerPermission,
   type ServerPermission,
   type SmtpEncryption,
@@ -240,32 +241,6 @@ export type VerificationMail = {
   ip?: string;
   userAgent?: string;
 };
-
-export function describeUserAgent(userAgent?: string) {
-  const ua = userAgent ?? "";
-  if (!ua.trim()) return "Unknown browser";
-  const browser = ua.includes("Edg/")
-    ? "Edge"
-    : ua.includes("Chrome/")
-      ? "Chrome"
-      : ua.includes("Firefox/")
-        ? "Firefox"
-        : ua.includes("Safari/") && !ua.includes("Chrome/")
-          ? "Safari"
-          : "a browser";
-  const os = /Windows/i.test(ua)
-    ? "Windows"
-    : /Mac OS X|Macintosh/i.test(ua)
-      ? "macOS"
-      : /Android/i.test(ua)
-        ? "Android"
-        : /iPhone|iPad|iPod/i.test(ua)
-          ? "iOS"
-          : /Linux/i.test(ua)
-            ? "Linux"
-            : "unknown";
-  return `${browser} on ${os}`;
-}
 
 function formatUtcStamp(date = new Date()) {
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

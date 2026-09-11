@@ -5,12 +5,17 @@ import {
   FlutterError,
   SESSION_COOKIE,
   SESSION_TTL_MS,
+  clientHintsFrom,
+  describeDevice,
+  hasClientHints,
+  type ClientHints,
 } from "@flutter-software/shared";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { Session, User } from "../db/models";
 import { env } from "../env";
 import { publicUser, randomToken, sha256 } from "./crypto";
+import { requestIp } from "../activity";
 import {
   assertApplicationScope,
   bearerApiKey,
@@ -66,6 +71,10 @@ export function assertCsrf(c: Context) {
   }
 }
 
+function requestHints(c: Context): ClientHints {
+  return clientHintsFrom((name) => c.req.header(name));
+}
+
 export async function createSession(
   c: Context,
   userId: string,
@@ -76,12 +85,14 @@ export async function createSession(
   // refresh token; logout deletes this row.
   const ttl = remember ? SESSION_TTL_MS * 2 : SESSION_TTL_MS;
   const expiresAt = new Date(Date.now() + ttl);
+  const hints = requestHints(c);
   await Session.create({
     userId,
     tokenHash: sha256(token),
     expiresAt,
     userAgent: c.req.header("user-agent") ?? null,
-    ip: c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    ip: requestIp(c),
+    clientHints: hasClientHints(hints) ? hints : null,
   });
   setCookie(c, SESSION_COOKIE, token, {
     ...sessionCookieOptions(),
@@ -181,20 +192,40 @@ export async function destroyOtherSessions(userId: string, keepSessionId: string
   await Session.deleteMany({ userId, _id: { $ne: keepSessionId } });
 }
 
-export async function listUserSessions(userId: string, currentSessionId: string) {
+export async function listUserSessions(c: Context, userId: string, currentSessionId: string) {
+  const liveUa = c.req.header("user-agent") ?? null;
+  const liveIp = requestIp(c);
+  const liveHints = requestHints(c);
+  const currentPatch: Record<string, unknown> = {};
+  if (liveUa) currentPatch.userAgent = liveUa;
+  if (liveIp) currentPatch.ip = liveIp;
+  if (hasClientHints(liveHints)) currentPatch.clientHints = liveHints;
+  if (Object.keys(currentPatch).length) {
+    await Session.updateOne({ _id: currentSessionId, userId }, { $set: currentPatch });
+  }
+
   const rows = await Session.find({
     userId,
     expiresAt: { $gt: new Date() },
   }).sort({ createdAt: -1 });
-  return rows.map((row) => ({
-    id: row._id.toString(),
-    current: row._id.toString() === currentSessionId,
-    ip: row.ip,
-    userAgent: row.userAgent,
-    // timestamps.createdAt is on new rows; fall back so old session docs still list.
-    createdAt: (row as { createdAt?: Date }).createdAt?.toISOString() ?? row.expiresAt.toISOString(),
-    expiresAt: row.expiresAt.toISOString(),
-  }));
+  return rows.map((row) => {
+    const current = row._id.toString() === currentSessionId;
+    const userAgent = current && liveUa ? liveUa : row.userAgent;
+    const ip = current && liveIp ? liveIp : row.ip;
+    const hints = (current && hasClientHints(liveHints)
+      ? liveHints
+      : (row as { clientHints?: ClientHints | null }).clientHints) ?? null;
+    const device = describeDevice(userAgent, hints);
+    return {
+      id: row._id.toString(),
+      current,
+      ip,
+      userAgent,
+      device,
+      createdAt: (row as { createdAt?: Date }).createdAt?.toISOString() ?? row.expiresAt.toISOString(),
+      expiresAt: row.expiresAt.toISOString(),
+    };
+  });
 }
 
 export async function revokeUserSession(userId: string, sessionId: string, currentSessionId: string) {

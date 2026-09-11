@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.71
+
+### Dashboard
+
+Server cards pick up live Docker state. A process that has stopped no longer stays on Running until you open the console.
+
+### Account
+
+Sessions name the browser and OS from the user-agent (and the device model when the browser sends it). The current session backfills IP when you open the page.
+
+### Schedules
+
+Task type and power dropdowns keep a single chevron and stay on one line in the editor.
+
 ## 0.2.70
 
 ### Startup

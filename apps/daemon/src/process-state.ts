@@ -17,6 +17,10 @@ export function getProcessState(uuid: string): ProcessState {
   return states.get(uuid) ?? "offline";
 }
 
+export function knownProcessUuids(): string[] {
+  return [...states.keys()];
+}
+
 export function setProcessState(uuid: string, state: ProcessState) {
   if (states.get(uuid) === state) return false;
   states.set(uuid, state);

@@ -502,7 +502,8 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
                   <div className="flex flex-wrap items-center gap-2">
                     <Select
                       value={task.action}
-                      className="max-w-40"
+                      compact
+                      className="max-w-44"
                       onChange={(event) => {
                         const action = event.target.value as TaskAction;
                         updateTask(task.key, {
@@ -518,6 +519,7 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
                     {task.action === "power" ? (
                       <Select
                         value={task.payload || "start"}
+                        compact
                         className="max-w-36"
                         onChange={(event) => updateTask(task.key, { payload: event.target.value })}
                       >

@@ -39,6 +39,7 @@ import { resolveSmtp, sendVerificationEmail } from "../mail";
 import { attachPendingSubusers } from "../subusers";
 import { env } from "../env";
 import { getSiteName } from "../settings";
+import { requestIp } from "../activity";
 import {
   generateTotpSecret,
   otpauthUrl,
@@ -52,15 +53,6 @@ export type AuthPayload =
   | { user: ReturnType<typeof publicUser>; needsVerification: false; needsTotp?: false }
   | { user: null; needsVerification: true; email: string }
   | { user: null; needsVerification: false; needsTotp: true; totpToken: string };
-
-function requestIp(c: Context) {
-  return (
-    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
-    c.req.header("x-real-ip") ||
-    c.req.header("cf-connecting-ip") ||
-    "Unknown IP"
-  );
-}
 
 function isVerified(user: { emailVerified?: boolean | null }) {
   return user.emailVerified !== false;
@@ -98,7 +90,7 @@ async function issueVerificationCode(
   const sent = await sendVerificationEmail({
     to: user.email,
     code,
-    ip: requestIp(c),
+    ip: requestIp(c) ?? undefined,
     userAgent: c.req.header("user-agent") ?? undefined,
   });
   if (!sent) {
@@ -324,7 +316,7 @@ export async function updateProfile(c: Context, body: unknown) {
 export async function listSessions(c: Context) {
   const session = await getSessionUser(c);
   if (!session) throw FlutterError.unauthorized();
-  return { sessions: await listUserSessions(session.user.id, session.sessionId) };
+  return { sessions: await listUserSessions(c, session.user.id, session.sessionId) };
 }
 
 export async function revokeSession(c: Context, sessionId: string) {

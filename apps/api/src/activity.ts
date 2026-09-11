@@ -1,3 +1,4 @@
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Context } from "hono";
 import mongoose from "mongoose";
@@ -40,13 +41,35 @@ export function currentActivityActor(): ActivityActor {
   return actorStore.getStore() ?? { kind: "system" };
 }
 
+function normalizeIp(value: string) {
+  const ip = value.trim();
+  if (!ip || ip.toLowerCase() === "unknown") return null;
+  if (ip.startsWith("::ffff:")) return ip.slice(7) || null;
+  if (ip === "::1") return "127.0.0.1";
+  return ip;
+}
+
+function isLoopbackIp(ip: string) {
+  return ip === "127.0.0.1" || ip === "0.0.0.0" || ip === "localhost";
+}
+
+function socketIp(c: Context) {
+  try {
+    return normalizeIp(getConnInfo(c).remote.address ?? "");
+  } catch {
+    return null;
+  }
+}
+
 export function requestIp(c: Context) {
-  return (
-    c.req.header("cf-connecting-ip")?.trim() ||
-    c.req.header("x-real-ip")?.trim() ||
-    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
-    null
-  );
+  const candidates = [
+    c.req.header("cf-connecting-ip"),
+    c.req.header("x-real-ip"),
+    ...(c.req.header("x-forwarded-for")?.split(",") ?? []),
+    socketIp(c),
+  ];
+  const ips = candidates.map((value) => normalizeIp(value ?? "")).filter((value): value is string => Boolean(value));
+  return ips.find((ip) => !isLoopbackIp(ip)) ?? ips[0] ?? null;
 }
 
 function clip(value: unknown) {

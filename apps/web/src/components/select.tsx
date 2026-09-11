@@ -15,7 +15,7 @@ import {
   type SelectHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronsUpDown, Search, X } from "lucide-react";
+import { Check, ChevronsUpDown, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 export type SelectOption = {
@@ -216,7 +216,7 @@ export function SearchSelect({
       ) : null}
       <div
         className={cn(
-          "flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-input bg-input/60 outline-none ring-offset-background",
+          "flex w-full items-center gap-1.5 rounded-lg border border-input bg-input/60 outline-none ring-offset-background",
           compact ? "min-h-8 px-2 py-0.5 text-xs" : "min-h-10 px-2.5 py-1 text-sm",
           open && "border-primary ring-2 ring-primary/30",
           disabled && "pointer-events-none opacity-50",
@@ -227,29 +227,28 @@ export function SearchSelect({
           setOpen(true);
         }}
       >
-        {multiple
-          ? selectedRows.map((option) => (
-              <span
-                key={option.value}
-                className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-xs text-primary"
-              >
-                {option.label}
-                <button
-                  type="button"
-                  className="no-press rounded p-0.5 hover:bg-primary/20"
-                  aria-label={`Remove ${option.label}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onChange(selectedValues.filter((id) => id !== option.value));
-                  }}
+        <div className={cn("flex min-w-0 flex-1 items-center gap-1.5", multiple && "flex-wrap")}>
+          {multiple
+            ? selectedRows.map((option) => (
+                <span
+                  key={option.value}
+                  className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-xs text-primary"
                 >
-                  <X className="size-3" />
-                </button>
-              </span>
-            ))
-          : null}
-        <span className={cn("flex flex-1 items-center gap-1.5", compact ? "min-w-0" : "min-w-[8rem]")}>
-          <Search className={cn("shrink-0 text-muted-foreground", compact ? "size-3" : "size-3.5")} />
+                  {option.label}
+                  <button
+                    type="button"
+                    className="no-press rounded p-0.5 hover:bg-primary/20"
+                    aria-label={`Remove ${option.label}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onChange(selectedValues.filter((id) => id !== option.value));
+                    }}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))
+            : null}
           <input
             ref={inputRef}
             value={inputValue}
@@ -262,8 +261,9 @@ export function SearchSelect({
             aria-controls={listId}
             aria-autocomplete="list"
             className={cn(
-              "min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground",
+              "min-w-0 flex-1 truncate bg-transparent outline-none placeholder:text-muted-foreground",
               compact ? "h-6 text-xs" : "h-8 text-sm",
+              multiple && "min-w-16",
               className?.includes("font-mono") && "font-mono",
             )}
             onChange={(event) => {
@@ -283,8 +283,10 @@ export function SearchSelect({
             }}
             onKeyDown={onKeyDown}
           />
-        </span>
-        <ChevronsUpDown className={cn("shrink-0 text-muted-foreground", compact ? "size-3" : "size-3.5")} />
+        </div>
+        <ChevronsUpDown
+          className={cn("shrink-0 text-muted-foreground", compact ? "size-3" : "size-3.5")}
+        />
       </div>
       {open && menuStyle && typeof document !== "undefined"
         ? createPortal(

@@ -46,6 +46,10 @@ export function createApp() {
   );
   app.use("*", async (c, next) => {
     ensureCsrfCookie(c);
+    c.header(
+      "Accept-CH",
+      "Sec-CH-UA, Sec-CH-UA-Mobile, Sec-CH-UA-Model, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version",
+    );
     const method = c.req.method.toUpperCase();
     const path = c.req.path;
     // Cookie is set on this response, so a first-hit POST would fail the

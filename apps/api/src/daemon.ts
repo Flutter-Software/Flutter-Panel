@@ -140,6 +140,7 @@ export async function applyServerState(c: Context, uuid: string) {
   if (next || parsed.data.lastExit !== undefined) {
     await server.save();
   }
+  if (next) forgetLiveStats(uuid);
   return { ok: true, status: server.status };
 }
 
@@ -277,7 +278,11 @@ type LiveStats = {
 
 const liveStatsCache = new Map<string, { at: number; data: LiveStats }>();
 const liveStatsInflight = new Map<string, Promise<LiveStats>>();
-const LIVE_STATS_CACHE_MS = 8_000;
+const LIVE_STATS_CACHE_MS = 2_000;
+
+export function forgetLiveStats(uuid: string) {
+  liveStatsCache.delete(uuid);
+}
 
 export async function statsOnNode(
   nodeId: string,

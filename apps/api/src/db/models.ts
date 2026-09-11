@@ -22,6 +22,7 @@ const sessionSchema = new Schema(
     expiresAt: { type: Date, required: true, index: true },
     userAgent: { type: String, default: null },
     ip: { type: String, default: null },
+    clientHints: { type: Schema.Types.Mixed, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

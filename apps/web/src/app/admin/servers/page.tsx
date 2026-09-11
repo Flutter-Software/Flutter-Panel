@@ -48,7 +48,7 @@ export default function AdminServersPage() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       void reload();
-    }, 5000);
+    }, 3000);
     return () => window.clearInterval(timer);
   }, [reload]);
 

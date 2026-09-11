@@ -34,6 +34,11 @@ const nextConfig: NextConfig = {
             key: "Cache-Control",
             value: "private, no-cache, no-store, max-age=0, must-revalidate",
           },
+          {
+            key: "Accept-CH",
+            value:
+              "Sec-CH-UA, Sec-CH-UA-Mobile, Sec-CH-UA-Model, Sec-CH-UA-Platform, Sec-CH-UA-Platform-Version",
+          },
         ],
       },
     ];

@@ -26,6 +26,7 @@ import {
   powerOnNode,
   statsOnNode,
   statsForServers,
+  forgetLiveStats,
   type InstallSpec,
 } from "./daemon";
 import { env, consoleWsUrl } from "./env";
@@ -194,7 +195,7 @@ export function toClientServer(
     ownerId: server.ownerId.toString(),
     ownerName: owner?.username ?? "unknown",
     permissions,
-    uptime: status === "running" ? "Running" : status === "installing" ? "Installing" : "Offline",
+    uptime: uptimeFor(status),
     cpu: { used: 0, limit: server.cpuPercent },
     memory: { usedMb: 0, limitMb: server.memoryMb },
     disk: { usedMb: 0, limitMb: server.diskMb },
@@ -386,6 +387,10 @@ export async function getClientServer(serverId: string, viewerId: string, admin:
   return client;
 }
 
+function uptimeFor(status: ServerStatus) {
+  return status === "running" ? "Running" : status === "installing" ? "Installing" : "Offline";
+}
+
 function applyLiveUsage(
   client: ReturnType<typeof toClientServer>,
   live: Awaited<ReturnType<typeof statsOnNode>>,
@@ -400,8 +405,20 @@ function applyLiveUsage(
       client.memory.usedMb = Math.round((stats.memoryBytes / 1024 / 1024) * 10) / 10;
     }
   }
-  if (live.running && (client.status === "offline" || client.status === "starting")) {
+  const previous = client.status;
+  if (live.running === true && (client.status === "offline" || client.status === "starting")) {
     client.status = "running";
+  } else if (live.running === false && (client.status === "running" || client.status === "stopping")) {
+    client.status = "offline";
+    client.cpu.used = 0;
+    client.memory.usedMb = 0;
+  }
+  if (client.status !== previous) {
+    client.uptime = uptimeFor(client.status);
+    if (client.uuid) {
+      forgetLiveStats(client.uuid);
+      void Server.updateOne({ uuid: client.uuid }, { $set: { status: client.status } }).catch(() => undefined);
+    }
   }
 }
 
