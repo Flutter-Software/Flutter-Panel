@@ -26,9 +26,9 @@ git clone https://github.com/Flutter-Software/Flutter-Panel.git /usr/local/src/f
 sudo bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh
 ```
 
-The script asks for the public panel URL, whether to issue a Let's Encrypt certificate, and whether to install the game-node daemon on this machine. It then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`.
+The installer is an interactive TUI (arrow keys to move, enter to confirm). It asks whether you are switching from Pterodactyl or Pelican, the public panel URL, nginx / Let's Encrypt, whether to run a local game-node daemon, and whether to create a personal admin account. It then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`, creates the admin user, and prints a summary table (URL, admin login, database URL, ports).
 
-If this machine already ran **Pterodactyl or Pelican**, Wings still binds **8080** and Docker game ports. Remove it first:
+Coming from **Pterodactyl or Pelican**, choose Yes in the installer to optionally import eggs and recreate servers (they reinstall from the egg; world files are not copied) and/or wipe the old panel. You can still run the wipe script by itself:
 
 ```bash
 sudo bash /usr/local/src/flutter-panel/install/wipe-pterodactyl.sh --yes
@@ -41,16 +41,22 @@ sudo FLUTTER_URL=https://panel.example.com FLUTTER_EMAIL=you@example.com \
   FLUTTER_LETSENCRYPT=1 bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh --yes
 ```
 
-| Flag / env            | Meaning                                               |
-| --------------------- | ----------------------------------------------------- |
-| `--yes`               | Do not prompt; use flags and `FLUTTER_*` env vars     |
+| Flag / env | Meaning |
+| ---------- | ------- |
+| `--yes` | Do not prompt; use flags and `FLUTTER_*` env vars |
 | `--url URL` / `FLUTTER_URL` | Public panel URL (`http://IP` or `https://hostname`) |
 | `--letsencrypt` / `FLUTTER_LETSENCRYPT=1` | Issue a Let's Encrypt certificate (hostname required) |
-| `--email EMAIL` / `FLUTTER_EMAIL` | Contact email for Let's Encrypt                  |
-| `--no-nginx` / `FLUTTER_NO_NGINX=1` | Skip nginx; panel listens on port 3010         |
-| `--no-daemon` / `FLUTTER_NO_DAEMON=1` | Panel only (attach a node later)             |
-| `--prefix DIR` / `FLUTTER_PREFIX` | Install directory (default `/opt/flutter`)      |
-| `--force`             | Allow distros other than Ubuntu 24.04                 |
+| `--email EMAIL` / `FLUTTER_EMAIL` | Contact email for Let's Encrypt |
+| `--admin-email` / `FLUTTER_ADMIN_EMAIL` | Admin account email (default `admin@{hostname}`) |
+| `--admin-password` / `FLUTTER_ADMIN_PASSWORD` | Admin password (generated if omitted) |
+| `--admin-username` / `FLUTTER_ADMIN_USERNAME` | Admin username (default `Administrator`) |
+| `--from-pterodactyl` / `FLUTTER_FROM_PTERODACTYL=1` | This host is switching from Pterodactyl/Pelican |
+| `--migrate-servers` / `FLUTTER_MIGRATE_SERVERS=1` | Import eggs and recreate servers on the local node |
+| `--wipe-pterodactyl` / `FLUTTER_WIPE_PTERODACTYL=1` | Remove Pterodactyl/Pelican after exporting data |
+| `--no-nginx` / `FLUTTER_NO_NGINX=1` | Skip nginx; panel listens on port 3010 |
+| `--no-daemon` / `FLUTTER_NO_DAEMON=1` | Panel only (attach a node later) |
+| `--prefix DIR` / `FLUTTER_PREFIX` | Install directory (default `/opt/flutter`) |
+| `--force` | Allow distros other than Ubuntu 24.04 |
 
 Re-running the installer keeps an existing `/opt/flutter/.env` (secrets are not rotated) and refreshes `APP_URL` / `COOKIE_SECURE`.
 
@@ -67,7 +73,7 @@ Re-running the installer keeps an existing `/opt/flutter/.env` (secrets are not 
 | nginx `sites-enabled/flutter`       | Public HTTP(S) → web + `/api/`            |
 | Docker Compose (`mongo`, `redis`)   | Bound to localhost only                   |
 
-Open the URL the installer prints and create the **first account** — that user is the admin.
+Log in at the URL the installer prints. The admin email and password are in the summary table at the end of the install.
 
 ```bash
 systemctl status flutter-api flutter-web flutter-daemon

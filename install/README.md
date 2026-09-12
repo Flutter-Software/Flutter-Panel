@@ -10,7 +10,7 @@ Run these as **root** on Ubuntu. Pick one script — do not stack the panel inst
 | [`wipe-local.sh`](wipe-local.sh) | A test box you want to reset | Full wipe, or `--daemon-only` to remove the game node on this Linux host |
 | [`wipe-pterodactyl.sh`](wipe-pterodactyl.sh) | A host that still has Pterodactyl or Pelican | Force-remove Wings, panel, Docker game containers, and port bindings (8080 / 2022) |
 
-**Panel walkthrough** (DNS, Let's Encrypt, first admin): [../README.md](../README.md).
+**Panel walkthrough** (DNS, Let's Encrypt, admin account): [../README.md](../README.md).
 
 **Game node walkthrough** (create the node in the UI, then attach a VPS or a home machine): [REMOTE_NODE.md](REMOTE_NODE.md).
 
@@ -57,7 +57,14 @@ sudo bash install/wipe-local.sh --yes --daemon-only
 
 ## Coming from Pterodactyl
 
-Wings owns **8080** (same port as the Flutter daemon) and Docker game-port bindings. Wipe it before installing Flutter:
+The panel installer asks if you are switching from Pterodactyl or Pelican. You can import eggs and recreate servers on this host (they reinstall from the egg; world files are not copied) and/or wipe the old panel. Non-interactive:
+
+```bash
+sudo bash install/ubuntu-24.04.sh --yes --from-pterodactyl --migrate-servers --wipe-pterodactyl \
+  --url https://panel.example.com --letsencrypt --email you@example.com
+```
+
+Wings owns **8080** (same port as the Flutter daemon). The installer stops it when a local daemon is selected. To wipe by hand:
 
 ```bash
 sudo bash install/wipe-pterodactyl.sh --yes

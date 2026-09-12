@@ -9,18 +9,23 @@
 #     FLUTTER_LETSENCRYPT=1 bash install/ubuntu-24.04.sh --yes
 #
 # Options:
-#   --yes              Use defaults / env vars, do not prompt
-#   --url URL          Public panel URL (http://IP or https://hostname)
-#   --email EMAIL      Email for Let's Encrypt
-#   --letsencrypt      Request a Let's Encrypt certificate (https URL + hostname)
-#   --no-nginx         Skip nginx reverse proxy
-#   --no-daemon        Skip installing the local game-node daemon
-#   --force            Continue on a distro that is not Ubuntu 24.04
-#   --prefix DIR       Install directory (default /opt/flutter)
+#   --yes                 Use defaults / env vars, do not prompt
+#   --url URL             Public panel URL (http://IP or https://hostname)
+#   --email EMAIL         Email for Let's Encrypt
+#   --letsencrypt         Request a Let's Encrypt certificate (https URL + hostname)
+#   --no-nginx            Skip nginx reverse proxy
+#   --no-daemon           Skip installing the local game-node daemon
+#   --admin-email EMAIL   Admin account email
+#   --admin-password PW   Admin account password
+#   --admin-username NAME Admin username (default Administrator)
+#   --from-pterodactyl    This host is switching from Pterodactyl/Pelican
+#   --migrate-servers     Import eggs and recreate servers (requires local daemon)
+#   --wipe-pterodactyl    Remove Pterodactyl/Pelican after dumping data
+#   --force               Continue on a distro that is not Ubuntu 24.04
+#   --prefix DIR          Install directory (default /opt/flutter)
 #
 # Remote game nodes: run install/ubuntu-node.sh on those hosts (no panel).
 # Wipe a test install: sudo bash install/wipe-local.sh --yes
-# Coming from Pterodactyl: sudo bash install/wipe-pterodactyl.sh --yes
 set -euo pipefail
 
 FLUTTER_REPO="${FLUTTER_REPO:-https://github.com/Flutter-Software/Flutter-Panel.git}"
@@ -34,8 +39,20 @@ FORCE=0
 INSTALL_NGINX=1
 INSTALL_DAEMON=1
 LETSENCRYPT=0
+FROM_PTERO=0
+MIGRATE_SERVERS=0
+WIPE_PTERO=0
 APP_URL="${FLUTTER_URL:-}"
 LE_EMAIL="${FLUTTER_EMAIL:-}"
+ADMIN_EMAIL="${FLUTTER_ADMIN_EMAIL:-}"
+ADMIN_PASSWORD="${FLUTTER_ADMIN_PASSWORD:-}"
+ADMIN_USERNAME="${FLUTTER_ADMIN_USERNAME:-Administrator}"
+ADMIN_GENERATED=0
+ADMIN_CREATED=0
+PTERO_DUMP=""
+MIGRATED_EGGS=0
+MIGRATED_SERVERS=0
+SKIPPED_REMOTE=0
 
 if [[ "${FLUTTER_LETSENCRYPT:-}" == "1" ]]; then
   LETSENCRYPT=1
@@ -46,13 +63,24 @@ fi
 if [[ "${FLUTTER_NO_DAEMON:-}" == "1" ]]; then
   INSTALL_DAEMON=0
 fi
+if [[ "${FLUTTER_FROM_PTERODACTYL:-}" == "1" ]]; then
+  FROM_PTERO=1
+fi
+if [[ "${FLUTTER_MIGRATE_SERVERS:-}" == "1" ]]; then
+  FROM_PTERO=1
+  MIGRATE_SERVERS=1
+fi
+if [[ "${FLUTTER_WIPE_PTERODACTYL:-}" == "1" ]]; then
+  FROM_PTERO=1
+  WIPE_PTERO=1
+fi
 
 log() { printf '[flutter] %s\n' "$*"; }
 warn() { printf '[flutter] warning: %s\n' "$*" >&2; }
 die() { printf '[flutter] error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,24p' "$0"
+  sed -n '2,32p' "$0"
   exit 0
 }
 
@@ -63,8 +91,14 @@ while [[ $# -gt 0 ]]; do
     --no-nginx) INSTALL_NGINX=0 ;;
     --no-daemon) INSTALL_DAEMON=0 ;;
     --letsencrypt) LETSENCRYPT=1 ;;
+    --from-pterodactyl) FROM_PTERO=1 ;;
+    --migrate-servers) FROM_PTERO=1; MIGRATE_SERVERS=1 ;;
+    --wipe-pterodactyl) FROM_PTERO=1; WIPE_PTERO=1 ;;
     --url) APP_URL="${2:?}"; shift ;;
     --email) LE_EMAIL="${2:?}"; shift ;;
+    --admin-email) ADMIN_EMAIL="${2:?}"; shift ;;
+    --admin-password) ADMIN_PASSWORD="${2:?}"; shift ;;
+    --admin-username) ADMIN_USERNAME="${2:?}"; shift ;;
     --prefix) PREFIX="${2:?}"; shift ;;
     --help|-h) usage ;;
     *) die "Unknown option: $1 (see --help)" ;;
@@ -74,49 +108,11 @@ done
 
 [[ "$(id -u)" -eq 0 ]] || die "Run as root: sudo bash install/ubuntu-24.04.sh"
 
-ask() {
-  local __name="$1" __prompt="$2" __default="${3:-}"
-  local __current="${!__name:-}"
-  if [[ -n "$__current" ]]; then
-    return 0
-  fi
-  if [[ "$YES" -eq 1 ]]; then
-    printf -v "$__name" '%s' "$__default"
-    return 0
-  fi
-  local __input=""
-  local __display="$__prompt"
-  if [[ -n "$__default" ]]; then
-    __display="$__prompt [$__default]"
-  fi
-  if [[ -e /dev/tty ]]; then
-    read -r -p "$__display: " __input </dev/tty || true
-  elif [[ -t 0 ]]; then
-    read -r -p "$__display: " __input || true
-  else
-    __input="$__default"
-  fi
-  if [[ -z "$__input" ]]; then
-    __input="$__default"
-  fi
-  printf -v "$__name" '%s' "$__input"
-}
-
-confirm() {
-  local __prompt="$1" __default="${2:-y}" CONFIRM_ANSWER=""
-  if [[ "$YES" -eq 1 ]]; then
-    [[ "$__default" == "y" ]]
-    return $?
-  fi
-  ask CONFIRM_ANSWER "$__prompt" "$__default"
-  case "${CONFIRM_ANSWER,,}" in
-    y|yes) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=lib/ui.sh
+source "$SCRIPT_DIR/lib/ui.sh"
+
 SOURCE=""
 if [[ -f "$REPO_ROOT/package.json" ]] && grep -q '"name": "flutter-panel"' "$REPO_ROOT/package.json"; then
   SOURCE="$REPO_ROOT"
@@ -129,73 +125,297 @@ else
   die "Cannot read /etc/os-release"
 fi
 
+PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+PUBLIC_IP="${PUBLIC_IP:-127.0.0.1}"
+URL_SCHEME=""
+URL_HOST=""
+IS_IP=0
+COOKIE_SECURE=false
+
+detect_ptero() {
+  [[ -d /etc/pterodactyl || -d /var/www/pterodactyl || -d /etc/pelican || -d /var/www/pelican ]] && return 0
+  [[ -x /usr/local/bin/wings || -x /usr/bin/wings ]] && return 0
+  systemctl is-active --quiet wings 2>/dev/null && return 0
+  pgrep -x wings >/dev/null 2>&1 && return 0
+  return 1
+}
+
+wings_running() {
+  systemctl is-active --quiet wings 2>/dev/null || pgrep -x wings >/dev/null 2>&1
+}
+
+parse_app_url() {
+  if [[ "$APP_URL" != http://* && "$APP_URL" != https://* ]]; then
+    APP_URL="http://${APP_URL}"
+  fi
+  APP_URL="${APP_URL%/}"
+  URL_SCHEME="${APP_URL%%://*}"
+  URL_HOST="${APP_URL#*://}"
+  URL_HOST="${URL_HOST%%/*}"
+  URL_HOST="${URL_HOST%%:*}"
+  [[ -n "$URL_HOST" ]] || die "Could not parse hostname from $APP_URL"
+  IS_IP=0
+  if [[ "$URL_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    IS_IP=1
+  fi
+  COOKIE_SECURE=false
+  if [[ "$URL_SCHEME" == "https" ]]; then
+    COOKIE_SECURE=true
+  fi
+}
+
+valid_email() {
+  [[ "$1" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]
+}
+
+username_from_email() {
+  local local_part="${1%%@*}"
+  local_part="$(printf '%s' "$local_part" | tr -cd 'A-Za-z0-9_')"
+  if [[ ${#local_part} -ge 3 && ${#local_part} -le 32 ]]; then
+    printf '%s\n' "$local_part"
+  else
+    printf 'Administrator\n'
+  fi
+}
+
+generate_password() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import secrets,string; alphabet=string.ascii_letters+string.digits; print("".join(secrets.choice(alphabet) for _ in range(20)))'
+    return
+  fi
+  local pw
+  pw="$(openssl rand -hex 16)"
+  printf '%s\n' "${pw:0:20}"
+}
+
+default_admin_email() {
+  if [[ "$IS_IP" -eq 1 ]]; then
+    printf 'admin@flutter.local\n'
+  else
+    printf 'admin@%s\n' "$URL_HOST"
+  fi
+}
+
+apply_letsencrypt_rules() {
+  if [[ "$LETSENCRYPT" -eq 1 ]]; then
+    [[ "$INSTALL_NGINX" -eq 1 ]] || die "Let's Encrypt requires nginx"
+    [[ "$IS_IP" -eq 0 ]] || die "Let's Encrypt needs a hostname, not an IP address"
+    [[ -n "$LE_EMAIL" ]] || die "An email address is required for Let's Encrypt"
+    if [[ "$URL_SCHEME" != "https" ]]; then
+      APP_URL="https://${URL_HOST}"
+      URL_SCHEME=https
+      COOKIE_SECURE=true
+    fi
+  fi
+}
+
+prepare_admin_account() {
+  if [[ -z "$ADMIN_EMAIL" ]]; then
+    ADMIN_EMAIL="$(default_admin_email)"
+    ADMIN_USERNAME="${ADMIN_USERNAME:-Administrator}"
+  fi
+  if [[ -z "$ADMIN_PASSWORD" ]]; then
+    ADMIN_PASSWORD="$(generate_password)"
+    ADMIN_GENERATED=1
+  fi
+  if [[ ${#ADMIN_PASSWORD} -lt 10 ]]; then
+    die "Admin password must be at least 10 characters"
+  fi
+  if [[ "$ADMIN_GENERATED" -eq 0 && "$ADMIN_USERNAME" == "Administrator" ]]; then
+    ADMIN_USERNAME="$(username_from_email "$ADMIN_EMAIL")"
+  fi
+  valid_email "$ADMIN_EMAIL" || die "Admin email is not valid: $ADMIN_EMAIL"
+}
+
+run_wizard() {
+  ensure_gum || true
+  printf '\n'
+  if ui_gum_ready; then
+    ui_gum style --foreground 196 --bold --align center --padding "1 2" --border double --border-foreground 196 \
+      "Flutter installer"$'\n'"Arrow keys to move · space to select · enter to confirm"
+  else
+    log "Flutter installer"
+  fi
+
+  local ptero_default="No"
+  if detect_ptero; then
+    ptero_default="Yes"
+  fi
+  local answer
+  answer="$(ui_choose "Are you switching from Pterodactyl or Pelican?" "$ptero_default" "Yes" "No")"
+  if [[ "$answer" == "Yes" ]]; then
+    FROM_PTERO=1
+    if [[ "$ptero_default" != "Yes" ]]; then
+      warn "No Pterodactyl/Pelican install was detected on this host."
+    fi
+    answer="$(ui_choose "Transfer servers and eggs to Flutter? Servers reinstall from their eggs (existing world files are not copied)." "Yes" "Yes" "No")"
+    if [[ "$answer" == "Yes" ]]; then
+      MIGRATE_SERVERS=1
+    fi
+    answer="$(ui_choose "Wipe Pterodactyl/Pelican from this host? This deletes the PHP panel, Wings, game containers, and the MySQL database." "Yes" "Yes" "No")"
+    if [[ "$answer" == "Yes" ]]; then
+      WIPE_PTERO=1
+    fi
+  else
+    FROM_PTERO=0
+    MIGRATE_SERVERS=0
+    WIPE_PTERO=0
+  fi
+
+  APP_URL="$(ui_input "What will be the panel URL?" "https://panel.example.com" "${APP_URL:-http://${PUBLIC_IP}}")"
+  [[ -n "$APP_URL" ]] || die "Panel URL is required"
+  parse_app_url
+
+  if ui_confirm "Install nginx as a reverse proxy in front of the panel?" "Yes"; then
+    INSTALL_NGINX=1
+  else
+    INSTALL_NGINX=0
+    LETSENCRYPT=0
+  fi
+
+  if [[ "$INSTALL_NGINX" -eq 1 && "$IS_IP" -eq 0 ]]; then
+    local le_default="No"
+    if [[ "$URL_SCHEME" == "https" || "$LETSENCRYPT" -eq 1 ]]; then
+      le_default="Yes"
+    fi
+    if ui_confirm "Issue a Let's Encrypt certificate for ${URL_HOST}?" "$le_default"; then
+      LETSENCRYPT=1
+      LE_EMAIL="$(ui_input "Email for Let's Encrypt" "you@example.com" "$LE_EMAIL")"
+    else
+      LETSENCRYPT=0
+    fi
+  fi
+
+  local daemon_default="Yes"
+  if [[ "$INSTALL_DAEMON" -eq 0 ]]; then
+    daemon_default="No"
+  fi
+  if ui_confirm "Install the game-node daemon on this machine?" "$daemon_default"; then
+    INSTALL_DAEMON=1
+  else
+    INSTALL_DAEMON=0
+    if [[ "$MIGRATE_SERVERS" -eq 1 ]]; then
+      warn "Server transfer needs the local daemon. Eggs can still be imported; servers will be skipped."
+    fi
+  fi
+
+  if ui_confirm "Do you want to initialize a personal admin account (or keep the default Administrator account)?" "No"; then
+    ADMIN_EMAIL="$(ui_input "Admin email" "you@example.com" "$ADMIN_EMAIL")"
+    valid_email "$ADMIN_EMAIL" || die "That email address is not valid"
+    ADMIN_USERNAME="$(username_from_email "$ADMIN_EMAIL")"
+    while true; do
+      ADMIN_PASSWORD="$(ui_password "Admin password (at least 10 characters)")"
+      if [[ ${#ADMIN_PASSWORD} -ge 10 ]]; then
+        break
+      fi
+      warn "Password must be at least 10 characters."
+    done
+    ADMIN_GENERATED=0
+  else
+    ADMIN_EMAIL=""
+    ADMIN_PASSWORD=""
+    ADMIN_USERNAME="Administrator"
+    ADMIN_GENERATED=1
+  fi
+
+  apply_letsencrypt_rules
+  prepare_admin_account
+
+  local nginx_label="No" daemon_label="No" le_label="No" ptero_label="No" transfer_label="No" wipe_label="No" admin_label
+  [[ "$INSTALL_NGINX" -eq 1 ]] && nginx_label="Yes"
+  [[ "$INSTALL_DAEMON" -eq 1 ]] && daemon_label="Yes"
+  [[ "$LETSENCRYPT" -eq 1 ]] && le_label="Yes"
+  [[ "$FROM_PTERO" -eq 1 ]] && ptero_label="Yes"
+  [[ "$MIGRATE_SERVERS" -eq 1 ]] && transfer_label="Yes"
+  [[ "$WIPE_PTERO" -eq 1 ]] && wipe_label="Yes"
+  if [[ "$ADMIN_GENERATED" -eq 1 ]]; then
+    admin_label="${ADMIN_USERNAME} <${ADMIN_EMAIL}> (password shown at the end)"
+  else
+    admin_label="${ADMIN_USERNAME} <${ADMIN_EMAIL}> (your password)"
+  fi
+
+  printf '\n'
+  ui_kv_table \
+    "Panel URL" "$APP_URL" \
+    "Nginx" "$nginx_label" \
+    "Let's Encrypt" "$le_label" \
+    "Local daemon" "$daemon_label" \
+    "From Pterodactyl/Pelican" "$ptero_label" \
+    "Transfer servers" "$transfer_label" \
+    "Wipe Pterodactyl/Pelican" "$wipe_label" \
+    "Admin" "$admin_label" \
+    "Install dir" "$PREFIX"
+
+  ui_confirm "Start installation with these settings?" "Yes" || die "Aborted."
+}
+
 if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "24.04" ]]; then
   warn "This installer targets Ubuntu 24.04. Detected ${PRETTY_NAME:-unknown}."
   if [[ "$FORCE" -ne 1 ]]; then
-    confirm "Continue anyway?" "n" || die "Aborted. Re-run with --force to skip this check."
+    if [[ "$YES" -eq 1 ]]; then
+      die "Aborted. Re-run with --force to skip this check."
+    fi
+    ensure_gum || true
+    ui_confirm "Continue anyway?" "No" || die "Aborted. Re-run with --force to skip this check."
   fi
 fi
 
-PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-PUBLIC_IP="${PUBLIC_IP:-127.0.0.1}"
-ask APP_URL "Public panel URL" "http://${PUBLIC_IP}"
-
-if [[ "$APP_URL" != http://* && "$APP_URL" != https://* ]]; then
-  APP_URL="http://${APP_URL}"
-fi
-APP_URL="${APP_URL%/}"
-URL_SCHEME="${APP_URL%%://*}"
-URL_HOST="${APP_URL#*://}"
-URL_HOST="${URL_HOST%%/*}"
-URL_HOST="${URL_HOST%%:*}"
-
-[[ -n "$URL_HOST" ]] || die "Could not parse hostname from $APP_URL"
-
-IS_IP=0
-if [[ "$URL_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-  IS_IP=1
+if [[ "$YES" -eq 1 ]]; then
+  [[ -n "$APP_URL" ]] || APP_URL="http://${PUBLIC_IP}"
+  parse_app_url
+  apply_letsencrypt_rules
+  prepare_admin_account
+else
+  run_wizard
 fi
 
-COOKIE_SECURE=false
-if [[ "$URL_SCHEME" == "https" ]]; then
-  COOKIE_SECURE=true
+if [[ "$MIGRATE_SERVERS" -eq 1 && "$INSTALL_DAEMON" -eq 0 ]]; then
+  warn "Skipping egg/server transfer because the local daemon is not being installed."
+  MIGRATE_SERVERS=0
 fi
 
-if [[ "$INSTALL_NGINX" -eq 1 && "$LETSENCRYPT" -eq 0 && "$URL_SCHEME" == "https" && "$IS_IP" -eq 0 && "$YES" -eq 0 ]]; then
-  if confirm "Issue a Let's Encrypt certificate for ${URL_HOST}?" "y"; then
-    LETSENCRYPT=1
-  fi
+if [[ "$FROM_PTERO" -eq 0 ]] && wings_running && [[ "$INSTALL_DAEMON" -eq 1 ]]; then
+  die "Pterodactyl Wings is running (it binds :8080). Re-run and choose to switch from Pterodactyl/Pelican, or: sudo bash ${SCRIPT_DIR}/wipe-pterodactyl.sh --yes"
 fi
-
-if [[ "$LETSENCRYPT" -eq 1 ]]; then
-  [[ "$INSTALL_NGINX" -eq 1 ]] || die "Let's Encrypt requires nginx"
-  [[ "$IS_IP" -eq 0 ]] || die "Let's Encrypt needs a hostname, not an IP address"
-  ask LE_EMAIL "Email for Let's Encrypt" ""
-  [[ -n "$LE_EMAIL" ]] || die "An email address is required for Let's Encrypt"
-  if [[ "$URL_SCHEME" != "https" ]]; then
-    APP_URL="https://${URL_HOST}"
-    URL_SCHEME=https
-    COOKIE_SECURE=true
-  fi
-fi
-
-if [[ "$INSTALL_DAEMON" -eq 1 && "$YES" -eq 0 ]]; then
-  if ! confirm "Install the game-node daemon on this machine?" "y"; then
-    INSTALL_DAEMON=0
-  fi
-fi
-
-if systemctl is-active --quiet wings 2>/dev/null || pgrep -x wings >/dev/null 2>&1; then
-  die "Pterodactyl Wings is running (it binds :8080). Remove it first: sudo bash ${SCRIPT_DIR}/wipe-pterodactyl.sh --yes"
-fi
-if [[ -d /etc/pterodactyl || -d /var/www/pterodactyl || -x /usr/local/bin/wings ]]; then
-  warn "Pterodactyl files are still on this host. Recommended: sudo bash ${SCRIPT_DIR}/wipe-pterodactyl.sh --yes"
-fi
-
-log "Installing Flutter to ${PREFIX}"
-log "Public URL: ${APP_URL}"
 
 export DEBIAN_FRONTEND=noninteractive
+
+if [[ "$MIGRATE_SERVERS" -eq 1 ]]; then
+  ui_phase "EXPORTING PTERODACTYL DATA...."
+  apt-get update -y
+  apt-get install -y --no-install-recommends ca-certificates
+  apt-get install -y --no-install-recommends mariadb-client || apt-get install -y --no-install-recommends mysql-client || true
+  PANEL_ENV=""
+  for candidate in /var/www/pterodactyl/.env /var/www/pelican/.env; do
+    if [[ -f "$candidate" ]]; then
+      PANEL_ENV="$candidate"
+      break
+    fi
+  done
+  [[ -n "$PANEL_ENV" ]] || die "Could not find a Pterodactyl/Pelican .env to read the database credentials"
+  WINGS_CFG=""
+  for candidate in /etc/pterodactyl/config.yml /etc/pelican/config.yml; do
+    if [[ -f "$candidate" ]]; then
+      WINGS_CFG="$candidate"
+      break
+    fi
+  done
+  PTERO_DUMP="/root/flutter-ptero-export.json"
+  bash "$SCRIPT_DIR/dump-pterodactyl.sh" --env "$PANEL_ENV" --out "$PTERO_DUMP" ${WINGS_CFG:+--wings-config "$WINGS_CFG"}
+  chmod 600 "$PTERO_DUMP"
+  log "Wrote ${PTERO_DUMP}"
+fi
+
+if [[ "$WIPE_PTERO" -eq 1 ]]; then
+  ui_phase "WIPING PTERODACTYL / PELICAN...."
+  bash "$SCRIPT_DIR/wipe-pterodactyl.sh" --yes --drop-db
+elif [[ "$INSTALL_DAEMON" -eq 1 ]] && { wings_running || [[ -d /etc/pterodactyl || -d /etc/pelican || -x /usr/local/bin/wings ]]; }; then
+  ui_phase "STOPPING WINGS...."
+  log "Stopping Wings so Flutter can use port 8080"
+  bash "$SCRIPT_DIR/wipe-pterodactyl.sh" --yes --wings-only --keep-data
+fi
+
+ui_phase "INSTALLING DEPENDENCIES...."
 apt-get update -y
 apt-get install -y --no-install-recommends \
   ca-certificates curl gnupg git rsync tar unzip \
@@ -238,6 +458,7 @@ install_compose_binary() {
   ln -sfn "$dest" /usr/libexec/docker/cli-plugins/docker-compose
 }
 
+ui_phase "INSTALLING DOCKER...."
 if ! command -v docker >/dev/null 2>&1; then
   log "Installing Docker Engine"
   if ! curl -fsSL https://get.docker.com | sh; then
@@ -261,6 +482,7 @@ fi
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is not available"
 systemctl enable --now docker
 
+ui_phase "INSTALLING NODE.JS...."
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -p 'process.versions.node.split(".")[0]')" -lt "$NODE_MAJOR" ]]; then
   log "Installing Node.js ${NODE_MAJOR}"
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -
@@ -276,6 +498,7 @@ usermod -aG docker "$SERVICE_USER"
 mkdir -p "$PREFIX" "$DATA_DIR" /usr/local/src
 chown "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
 
+ui_phase "INSTALLING PANEL...."
 if [[ -z "$SOURCE" ]]; then
   log "Cloning ${FLUTTER_REPO}"
   SOURCE="/usr/local/src/flutter-panel"
@@ -309,6 +532,8 @@ mkdir -p "$PREFIX/apps/daemon/data"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$PREFIX"
 
 ENV_FILE="$PREFIX/.env"
+DATABASE_URL="mongodb://127.0.0.1:27017/flutter?replicaSet=rs0"
+REDIS_URL="redis://127.0.0.1:6379"
 if [[ ! -f "$ENV_FILE" ]]; then
   log "Writing ${ENV_FILE}"
   SESSION_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
@@ -320,8 +545,8 @@ API_INTERNAL_URL=http://127.0.0.1:4000
 API_WS_URL=ws://127.0.0.1:4000
 PORT=4000
 HOST=127.0.0.1
-DATABASE_URL=mongodb://127.0.0.1:27017/flutter?replicaSet=rs0
-REDIS_URL=redis://127.0.0.1:6379
+DATABASE_URL=${DATABASE_URL}
+REDIS_URL=${REDIS_URL}
 SESSION_SECRET=${SESSION_SECRET}
 DAEMON_REQUEST_SECRET=${DAEMON_REQUEST_SECRET}
 COOKIE_SECURE=${COOKIE_SECURE}
@@ -333,12 +558,13 @@ EOF
   chmod 640 "$ENV_FILE"
 else
   log "Keeping existing ${ENV_FILE}"
-  # Keep secrets; refresh public URL and cookie flag for this install.
   sed -i "s|^APP_URL=.*|APP_URL=${APP_URL}|" "$ENV_FILE"
   sed -i "s|^COOKIE_SECURE=.*|COOKIE_SECURE=${COOKIE_SECURE}|" "$ENV_FILE"
   grep -q '^HOST=' "$ENV_FILE" || echo 'HOST=127.0.0.1' >> "$ENV_FILE"
   grep -q '^DAEMON_DATA_DIR=' "$ENV_FILE" || echo "DAEMON_DATA_DIR=${DATA_DIR}" >> "$ENV_FILE"
   grep -q '^DAEMON_CONFIG=' "$ENV_FILE" || echo "DAEMON_CONFIG=${PREFIX}/apps/daemon/data/config.json" >> "$ENV_FILE"
+  DATABASE_URL="$(awk -F= '$1=="DATABASE_URL"{sub(/^[^=]+=/,""); print; exit}' "$ENV_FILE")"
+  REDIS_URL="$(awk -F= '$1=="REDIS_URL"{sub(/^[^=]+=/,""); print; exit}' "$ENV_FILE")"
 fi
 
 cat > "$PREFIX/apps/web/.env.local" <<EOF
@@ -358,6 +584,7 @@ as_flutter_docker() {
 log "Installing npm packages"
 as_flutter bash -lc "cd $(printf '%q' "$PREFIX") && npm ci"
 
+ui_phase "INSTALLING DATABASE...."
 log "Starting MongoDB and Redis"
 as_flutter_docker "cd $(printf '%q' "$PREFIX") && docker compose up -d"
 
@@ -380,7 +607,7 @@ log "Building the panel"
 as_flutter bash -lc "cd $(printf '%q' "$PREFIX") && API_INTERNAL_URL=http://127.0.0.1:4000 npm run build -w @flutter-software/web"
 
 if [[ "$INSTALL_DAEMON" -eq 1 ]]; then
-  log "Configuring local daemon"
+  ui_phase "INSTALLING NODE DAEMON...."
   as_flutter bash -lc "cd $(printf '%q' "$PREFIX") && node scripts/ensure-daemon.mjs"
 fi
 
@@ -390,7 +617,6 @@ if [[ "$INSTALL_DAEMON" -eq 1 ]]; then
   install -m 644 "$PREFIX/install/systemd/flutter-daemon.service" /etc/systemd/system/flutter-daemon.service
 fi
 
-# Point unit files at a custom prefix if it is not /opt/flutter.
 if [[ "$PREFIX" != "/opt/flutter" ]]; then
   sed -i "s|/opt/flutter|${PREFIX}|g" /etc/systemd/system/flutter-api.service /etc/systemd/system/flutter-web.service
   if [[ -f /etc/systemd/system/flutter-daemon.service ]]; then
@@ -435,10 +661,9 @@ start_nginx() {
 }
 
 if [[ "$INSTALL_NGINX" -eq 1 ]]; then
-  log "Configuring nginx"
+  ui_phase "CONFIGURING NGINX...."
   install -m 644 "$PREFIX/install/nginx/upgrade-map.conf" /etc/nginx/conf.d/flutter-upgrade.conf
   sed "s/__SERVER_NAME__/${URL_HOST}/g" "$PREFIX/install/nginx/flutter.conf" > /etc/nginx/sites-available/flutter
-  # Hosts with IPv6 disabled fail at start (not during nginx -t) on listen [::]:80
   if [[ ! -s /proc/net/if_inet6 ]]; then
     sed -i '/listen \[::\]:80;/d' /etc/nginx/sites-available/flutter
   fi
@@ -476,6 +701,64 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
   fi
 fi
 
+api_ready=0
+for _ in $(seq 1 45); do
+  if curl -fsS "http://127.0.0.1:4000/api/v1/health" >/dev/null 2>&1; then
+    api_ready=1
+    break
+  fi
+  sleep 2
+done
+[[ "$api_ready" -eq 1 ]] || warn "API did not become ready on 127.0.0.1:4000"
+
+ui_phase "CREATING ADMIN ACCOUNT...."
+admin_json="$(
+  as_flutter bash -lc "cd $(printf '%q' "$PREFIX") && \
+    FLUTTER_ADMIN_EMAIL=$(printf '%q' "$ADMIN_EMAIL") \
+    FLUTTER_ADMIN_PASSWORD=$(printf '%q' "$ADMIN_PASSWORD") \
+    FLUTTER_ADMIN_USERNAME=$(printf '%q' "$ADMIN_USERNAME") \
+    node scripts/bootstrap-admin.mjs"
+)" || die "Failed to create the admin account"
+if printf '%s' "$admin_json" | grep -q '"created":true'; then
+  ADMIN_CREATED=1
+else
+  ADMIN_CREATED=0
+  warn "An admin account already exists; leaving it in place."
+fi
+
+if [[ "$MIGRATE_SERVERS" -eq 1 && -n "$PTERO_DUMP" && -f "$PTERO_DUMP" ]]; then
+  ui_phase "MIGRATING SERVERS...."
+  install -m 600 "$PTERO_DUMP" "$PREFIX/ptero-export.json"
+  chown "$SERVICE_USER:$SERVICE_USER" "$PREFIX/ptero-export.json"
+  migrate_ok=1
+  migrate_json="$(
+    as_flutter bash -lc "cd $(printf '%q' "$PREFIX") && \
+      FLUTTER_PTERO_DUMP=$(printf '%q' "$PREFIX/ptero-export.json") \
+      FLUTTER_ADMIN_EMAIL=$(printf '%q' "$ADMIN_EMAIL") \
+      FLUTTER_ADMIN_PASSWORD=$(printf '%q' "$ADMIN_PASSWORD") \
+      node scripts/migrate-pterodactyl.mjs"
+  )" || migrate_ok=0
+  if [[ "$migrate_ok" -ne 1 ]]; then
+    warn "Pterodactyl/Pelican migration reported errors"
+  fi
+  if [[ -n "${migrate_json:-}" ]]; then
+    MIGRATED_EGGS="$(printf '%s' "$migrate_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("eggsImported",0))' 2>/dev/null || echo 0)"
+    MIGRATED_SERVERS="$(printf '%s' "$migrate_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("serversCreated",0))' 2>/dev/null || echo 0)"
+    SKIPPED_REMOTE="$(printf '%s' "$migrate_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("skippedRemote",0))' 2>/dev/null || echo 0)"
+    migrate_errors="$(printf '%s' "$migrate_json" | python3 -c 'import json,sys; e=json.load(sys.stdin).get("errors") or []; print(len(e))' 2>/dev/null || echo 0)"
+    if [[ "$migrate_errors" != "0" ]]; then
+      migrate_ok=0
+      warn "Some eggs or servers could not be imported. See the migrate-pterodactyl output above."
+    fi
+  fi
+  rm -f "$PREFIX/ptero-export.json"
+  if [[ "$migrate_ok" -eq 1 ]]; then
+    rm -f "$PTERO_DUMP"
+  else
+    warn "Keeping ${PTERO_DUMP} so you can retry the import."
+  fi
+fi
+
 sleep 2
 if systemctl is-active --quiet flutter-api && systemctl is-active --quiet flutter-web; then
   log "API and panel are running"
@@ -483,16 +766,56 @@ else
   warn "One or more services failed to start. Check: journalctl -u flutter-api -u flutter-web -e"
 fi
 
+WEB_PORT="3010"
+if [[ "$INSTALL_NGINX" -eq 1 ]]; then
+  if [[ "$LETSENCRYPT" -eq 1 || "$URL_SCHEME" == "https" ]]; then
+    WEB_PORT="80 / 443"
+  else
+    WEB_PORT="80"
+  fi
+fi
+
+DAEMON_LABEL="not installed"
+SFTP_LABEL="not installed"
+if [[ "$INSTALL_DAEMON" -eq 1 ]]; then
+  DAEMON_LABEL="8080"
+  SFTP_LABEL="2022"
+fi
+
+PASSWORD_NOTE="$ADMIN_PASSWORD"
+if [[ "$ADMIN_CREATED" -eq 0 ]]; then
+  PASSWORD_NOTE="(existing account kept)"
+elif [[ "$ADMIN_GENERATED" -eq 1 ]]; then
+  PASSWORD_NOTE="$ADMIN_PASSWORD"
+fi
+
+ui_banner_flutter
+ui_kv_table \
+  "Panel URL" "$APP_URL" \
+  "Admin username" "$ADMIN_USERNAME" \
+  "Admin email" "$ADMIN_EMAIL" \
+  "Admin password" "$PASSWORD_NOTE" \
+  "Database URL" "${DATABASE_URL:-mongodb://127.0.0.1:27017/flutter?replicaSet=rs0}" \
+  "Redis URL" "${REDIS_URL:-redis://127.0.0.1:6379}" \
+  "API" "127.0.0.1:4000" \
+  "Web ports" "$WEB_PORT" \
+  "Daemon port" "$DAEMON_LABEL" \
+  "SFTP port" "$SFTP_LABEL" \
+  "Install dir" "$PREFIX" \
+  "Data dir" "$DATA_DIR" \
+  "Nginx" "$([[ "$INSTALL_NGINX" -eq 1 ]] && echo Yes || echo No)" \
+  "Let's Encrypt" "$([[ "$LETSENCRYPT" -eq 1 ]] && echo Yes || echo No)" \
+  "Migrated eggs" "$MIGRATED_EGGS" \
+  "Migrated servers" "$MIGRATED_SERVERS"
+
+if [[ "$ADMIN_CREATED" -eq 1 && "$ADMIN_GENERATED" -eq 1 ]]; then
+  printf '\n%sSave this admin password now — it will not be shown again.%s\n' "$RED$BOLD" "$RESET"
+fi
+if [[ "$SKIPPED_REMOTE" != "0" ]]; then
+  warn "Skipped ${SKIPPED_REMOTE} server(s) that were on another Pterodactyl/Pelican node."
+fi
+
 cat <<EOF
-
-Flutter is installed.
-
-  Panel     ${APP_URL}
-  API       127.0.0.1:4000 (proxied at ${APP_URL}/api/)
-  Install   ${PREFIX}
-  Data      ${DATA_DIR}
-
-Open ${APP_URL} and create the first admin account.
 
 Useful commands:
   systemctl status flutter-api flutter-web flutter-daemon
