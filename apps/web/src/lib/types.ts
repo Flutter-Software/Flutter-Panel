@@ -1,10 +1,6 @@
-export type ServerStatus =
-  | "running"
-  | "starting"
-  | "stopping"
-  | "offline"
-  | "installing"
-  | "install_failed";
+import type { ServerStatus } from "@flutter-software/shared";
+
+export type { ServerStatus };
 
 export type ServerRecord = {
   id: string;
@@ -48,13 +44,6 @@ export type ServerRecord = {
   permissions?: string[];
 };
 
-export type AdminRow = {
-  id: string;
-  name: string;
-  meta: string;
-  status: string;
-};
-
 export function formatMb(value: number) {
   if (value >= 1024) {
     return `${(value / 1024).toFixed(1)} GB`;
@@ -65,10 +54,6 @@ export function formatMb(value: number) {
 
 export function formatLimitMb(value: number) {
   return value > 0 ? formatMb(value) : "";
-}
-
-export function formatCpuLimit(value: number) {
-  return value > 0 ? `${value}%` : "";
 }
 
 export function formatGiB(mb: number) {
@@ -86,4 +71,10 @@ export function formatCompact(mb: number) {
     return `${value.replace(/\.0$/, "")}G`;
   }
   return `${mb}M`;
+}
+
+export function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

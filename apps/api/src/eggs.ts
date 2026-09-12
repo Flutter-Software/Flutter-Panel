@@ -32,6 +32,14 @@ async function serverCountsByEgg() {
   return counts;
 }
 
+export function inferRequiresAllocation(name: string, description = "") {
+  const hay = `${name} ${description}`.toLowerCase();
+  if (/\bsleep\b/.test(hay)) return false;
+  if (/\bdiscord\b/.test(hay)) return false;
+  if (/\bbot\b/.test(hay) && /\b(telegram|slack|whatsapp)\b/.test(hay)) return false;
+  return true;
+}
+
 export function publicEgg(
   egg: {
     _id: { toString(): string };
@@ -44,6 +52,7 @@ export function publicEgg(
     installScript: string;
     installImage: string;
     variables: unknown;
+    requiresAllocation?: boolean | null;
     createdAt: Date;
   },
   serverCount = 0,
@@ -68,6 +77,7 @@ export function publicEgg(
           };
         })
       : [],
+    requiresAllocation: egg.requiresAllocation !== false,
     serverCount,
     createdAt: egg.createdAt,
   };
@@ -195,6 +205,7 @@ export async function updateEgg(id: string, body: unknown) {
   if (parsed.data.stopCommand !== undefined) egg.stopCommand = parsed.data.stopCommand;
   if (parsed.data.installScript !== undefined) egg.installScript = unixNewlines(parsed.data.installScript);
   if (parsed.data.installImage !== undefined) egg.installImage = parsed.data.installImage;
+  if (parsed.data.requiresAllocation !== undefined) egg.requiresAllocation = parsed.data.requiresAllocation;
   if (parsed.data.variables !== undefined) {
     egg.variables = parsed.data.variables;
     egg.markModified("variables");
@@ -337,21 +348,51 @@ export async function importEgg(body: unknown) {
 
   const install = pickInstall(raw);
   const name = (asString(raw.name, "Imported egg") || "Imported egg").slice(0, 64);
+  const description = asString(raw.description).slice(0, 2000);
   const row = await Egg.create({
     nestId: parsed.data.nestId,
     name,
-    description: asString(raw.description).slice(0, 2000),
+    description,
     dockerImage,
     startup: asString(raw.startup),
     stopCommand: pickStopCommand(raw) || "stop",
     installScript: install.script,
     installImage: install.image,
     variables: mapImportedVariables(raw),
+    requiresAllocation:
+      typeof raw.requiresAllocation === "boolean"
+        ? raw.requiresAllocation
+        : inferRequiresAllocation(name, description),
   });
   return publicEgg(row);
 }
 
+async function migrateServerAllocationIndex() {
+  try {
+    const indexes = await Server.collection.indexes();
+    const legacy = indexes.find(
+      (idx) => idx.name === "allocationId_1" && idx.unique && !idx.partialFilterExpression,
+    );
+    if (legacy) await Server.collection.dropIndex("allocationId_1");
+  } catch {
+    /* collection or index may not exist yet */
+  }
+  await Server.syncIndexes();
+}
+
+async function backfillEggAllocations() {
+  const eggs = await Egg.find({
+    $or: [{ requiresAllocation: { $exists: false } }, { requiresAllocation: null }],
+  });
+  for (const egg of eggs) {
+    egg.requiresAllocation = inferRequiresAllocation(egg.name, egg.description ?? "");
+    await egg.save();
+  }
+}
+
 export async function seedDefaults() {
+  await migrateServerAllocationIndex();
+  await backfillEggAllocations();
   // Idempotent. If someone renamed Generic we leave it; we only insert when
   // the well-known names are missing so a wipe-and-reinstall still has a
   // working test egg.
@@ -373,7 +414,13 @@ export async function seedDefaults() {
       installScript: "echo installed > /mnt/server/.flutter-installed",
       installImage: "alpine:3.20",
       variables: [],
+      requiresAllocation: false,
     });
+  } else {
+    await Egg.updateOne(
+      { nestId: generic._id, name: "Sleep" },
+      { $set: { requiresAllocation: false } },
+    );
   }
 
   let minecraft = await Nest.findOne({ name: "Minecraft" });

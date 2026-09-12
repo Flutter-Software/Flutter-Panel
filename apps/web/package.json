@@ -12,7 +12,6 @@
   "dependencies": {
     "@flutter-software/shared": "file:../../packages/shared",
     "@mantine/core": "^8.3.18",
-    "@mantine/hooks": "^8.3.18",
     "@monaco-editor/react": "^4.7.0",
     "@tabler/icons-react": "^3.46.0",
     "@tailwindcss/postcss": "^4.1.11",

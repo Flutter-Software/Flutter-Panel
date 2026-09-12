@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { PANEL_VERSION } from "@flutter-software/shared";
+import { DAEMON_HEARTBEAT_MS, PANEL_VERSION } from "@flutter-software/shared";
 
 export const DAEMON_VERSION = PANEL_VERSION;
 
@@ -82,7 +82,7 @@ export async function loadConfig(): Promise<DaemonConfig> {
     `http://127.0.0.1:${listenPort}`
   ).replace(/\/+$/, "");
   const dataDir = resolve(env("DAEMON_DATA_DIR") || file?.dataDir || resolve(process.cwd(), "data"));
-  const heartbeatMs = Number(process.env.DAEMON_HEARTBEAT_MS ?? 15_000);
+  const heartbeatMs = Number(process.env.DAEMON_HEARTBEAT_MS ?? DAEMON_HEARTBEAT_MS);
   const sftpPort = parsePort(process.env.DAEMON_SFTP_PORT, file?.sftpPort ?? 2022);
 
   if (!panelUrl || !nodeId || !daemonToken || !requestSecret) {
@@ -103,7 +103,7 @@ export async function loadConfig(): Promise<DaemonConfig> {
     listenPort,
     listenUrl,
     dataDir,
-    heartbeatMs: Number.isFinite(heartbeatMs) && heartbeatMs >= 5_000 ? heartbeatMs : 15_000,
+    heartbeatMs: Number.isFinite(heartbeatMs) && heartbeatMs >= 5_000 ? heartbeatMs : DAEMON_HEARTBEAT_MS,
     sftpPort,
   };
 }

@@ -1,6 +1,7 @@
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { isLoopbackHost } from "@flutter-software/shared";
 
 config({ path: resolve(process.cwd(), "../../.env") });
 config();
@@ -33,6 +34,9 @@ const envSchema = z.object({
   SMTP_USER: z.preprocess(emptyToUndef, z.string().min(1).optional()),
   SMTP_PASS: z.preprocess(emptyToUndef, z.string().optional()),
   SMTP_FROM: z.preprocess(emptyToUndef, z.string().min(1).optional()),
+  OIDC_ISSUER: z.preprocess(emptyToUndef, z.string().url().optional()),
+  OIDC_CLIENT_ID: z.preprocess(emptyToUndef, z.string().min(1).optional()),
+  OIDC_CLIENT_SECRET: z.preprocess(emptyToUndef, z.string().min(1).optional()),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -50,11 +54,6 @@ export function env(): Env {
   return cached;
 }
 
-export function isLoopbackHost(hostname: string) {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
 function hostnameOf(origin: string) {
   try {
     const http = origin.replace(/^ws/i, "http");
@@ -64,21 +63,29 @@ function hostnameOf(origin: string) {
   }
 }
 
-function toWsConsoleUrl(origin: string) {
+function toWsUrl(origin: string, path: string) {
   const base = origin.replace(/\/+$/, "");
   const ws = base.startsWith("ws") ? base : base.replace(/^http/, "ws");
-  return `${ws}/api/v1/ws/console`;
+  return `${ws}${path}`;
+}
+
+function publicWsUrl(path: string, requestOrigin?: string) {
+  const app = env().APP_URL.replace(/\/+$/, "");
+  const origin = requestOrigin?.replace(/\/+$/, "") || "";
+  const originHost = origin ? hostnameOf(origin) : "";
+  if (originHost && !isLoopbackHost(originHost)) return toWsUrl(origin, path);
+  if (!isLoopbackHost(hostnameOf(app))) return toWsUrl(app, path);
+  const fallback = (env().API_WS_URL || env().API_INTERNAL_URL).replace(/\/+$/, "");
+  return toWsUrl(fallback, path);
 }
 
 /** Browser-facing console URL. Never advertise 127.0.0.1 to a remote client. */
 export function consoleWsUrl(requestOrigin?: string) {
-  const app = env().APP_URL.replace(/\/+$/, "");
-  const origin = requestOrigin?.replace(/\/+$/, "") || "";
-  const originHost = origin ? hostnameOf(origin) : "";
-  if (originHost && !isLoopbackHost(originHost)) return toWsConsoleUrl(origin);
-  if (!isLoopbackHost(hostnameOf(app))) return toWsConsoleUrl(app);
-  const fallback = (env().API_WS_URL || env().API_INTERNAL_URL).replace(/\/+$/, "");
-  return toWsConsoleUrl(fallback);
+  return publicWsUrl("/api/v1/ws/console", requestOrigin);
+}
+
+export function panelWsUrl(requestOrigin?: string) {
+  return publicWsUrl("/api/v1/ws/panel", requestOrigin);
 }
 
 export function requestOrigin(headers: { host?: string | null; proto?: string | null }) {

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/cn";
+import { DEFAULT_CONSOLE_TAG, normalizeConsoleTag } from "@flutter-software/shared";
 
 const FG: Record<number, string> = {
   30: "console-fg-black",
@@ -41,25 +42,86 @@ const BG: Record<number, string> = {
 export function stripConsoleAnsi(value: string) {
   return value
     .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
-    .replace(/\[{1,2}\d*(?:;\d+)*[GHfKJ]/g, "")
+    .replace(/\[{1,2}\d+(?:;\d+)*[GHfKJ]/g, "")
     .replace(/\[{1,2}\d+(?:;\d+)*m/g, "")
     .replace(/\u001b./g, "");
 }
 
-export function splitConsoleLine(line: string) {
+const DOCKER_RFC3339 =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const tagPatternCache = new Map<string, RegExp>();
+
+export function consoleTags(tag?: string | null) {
+  return [...new Set([normalizeConsoleTag(tag), DEFAULT_CONSOLE_TAG])];
+}
+
+function tagPattern(tags?: string | string[] | null) {
+  const list = (Array.isArray(tags) ? tags : consoleTags(tags)).map((item) => normalizeConsoleTag(item));
+  const unique = [...new Set(list.filter(Boolean))];
+  const key = unique.join("\0").toLowerCase();
+  const cached = tagPatternCache.get(key);
+  if (cached) return cached;
+  const pattern = new RegExp(`^\\[(${unique.map(escapeRegExp).join("|")})\\]\\s+`, "i");
+  tagPatternCache.set(key, pattern);
+  return pattern;
+}
+
+export function splitConsoleLine(line: string, tags?: string | string[] | null) {
   const stamped = /^\[(\d{2}:\d{2}:\d{2})\]\s+/.exec(line);
   let rest = stamped ? line.slice(stamped[0].length) : line;
-  const flutter = /^\[Flutter\]\s+/.test(stripConsoleAnsi(rest));
-  if (flutter) rest = rest.replace(/^\[Flutter\]\s+/, "");
+  const pattern = tagPattern(tags);
+  const stripped = stripConsoleAnsi(rest);
+  const flutterMatch = pattern.exec(stripped);
+  const flutter = Boolean(flutterMatch);
+  let tag: string | null = null;
+  if (flutter) {
+    const direct = pattern.exec(rest);
+    tag = direct?.[1] || flutterMatch?.[1] || null;
+    rest = direct ? rest.slice(direct[0].length) : stripped.replace(pattern, "");
+  }
   return {
     time: stamped?.[1] ?? null,
     flutter,
+    tag,
     body: rest,
   };
 }
 
-export function isFlutterConsoleLine(line: string) {
-  return splitConsoleLine(line).flutter;
+export function isFlutterConsoleLine(line: string, tags?: string | string[] | null) {
+  return splitConsoleLine(line, tags).flutter;
+}
+
+export function isBareDockerTimestampLine(line: string, tags?: string | string[] | null) {
+  return DOCKER_RFC3339.test(stripConsoleAnsi(splitConsoleLine(line, tags).body).trim());
+}
+
+export function scrubDockerTimestamps(line: string) {
+  return line
+    .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g, "")
+    .replace(/[ \t]{2,}/g, " ");
+}
+
+export function isConsoleHaltNotice(line: string, tags?: string | string[] | null) {
+  const parts = splitConsoleLine(line, tags);
+  if (!parts.flutter) return false;
+  return /^(Stopping server|Killing server|Restarting server)\.\.\./i.test(stripConsoleAnsi(parts.body).trim());
+}
+
+export function isConsoleResumeNotice(line: string, tags?: string | string[] | null) {
+  const parts = splitConsoleLine(line, tags);
+  if (!parts.flutter) return false;
+  return /^Starting server\.\.\./i.test(stripConsoleAnsi(parts.body).trim());
+}
+
+export function isConsoleRunningHeartbeat(line: string, tags?: string | string[] | null) {
+  const parts = splitConsoleLine(line, tags);
+  if (!parts.flutter) return false;
+  return /^(?:\d{2}:\d{2}:\d{2}\s+)?running\s*$/i.test(stripConsoleAnsi(parts.body).trim());
 }
 
 type AnsiStyle = {

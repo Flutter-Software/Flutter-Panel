@@ -4,7 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Box, FileJson, Plus, Terminal, Trash2, Upload, Variable } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { AdminCreateHeader, AdminSection, SaveIsland, Segmented, isDirty } from "@/components/admin-create";
+import { AdminCreateHeader, AdminSection, SaveIsland, Segmented, Switch, isDirty } from "@/components/admin-create";
 import { confirm } from "@/components/confirm-dialog";
 import { Button, Field, Input, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -30,6 +30,7 @@ export type EggRecord = {
   installScript: string;
   installImage: string;
   variables: EggVariable[];
+  requiresAllocation?: boolean;
   serverCount?: number;
 };
 
@@ -67,6 +68,7 @@ export function EggForm({
   const [variables, setVariables] = useState<EggVariable[]>(
     initial?.variables?.length ? initial.variables : [],
   );
+  const [requiresAllocation, setRequiresAllocation] = useState(initial?.requiresAllocation !== false);
   const [source, setSource] = useState<"manual" | "import">("manual");
   const [jsonText, setJsonText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
@@ -81,6 +83,7 @@ export function EggForm({
       installImage,
       installScript,
       variables,
+      requiresAllocation,
       source,
       jsonText,
     },
@@ -94,6 +97,7 @@ export function EggForm({
       installImage: initial?.installImage || "alpine:3.20",
       installScript: initial?.installScript ?? "",
       variables: initial?.variables?.length ? initial.variables : [],
+      requiresAllocation: initial?.requiresAllocation !== false,
       source: "manual",
       jsonText: "",
     },
@@ -118,6 +122,7 @@ export function EggForm({
     setInstallImage(initial?.installImage || "alpine:3.20");
     setInstallScript(initial?.installScript ?? "");
     setVariables((initial?.variables?.length ? initial.variables : []).map((row) => ({ ...row })));
+    setRequiresAllocation(initial?.requiresAllocation !== false);
     setSource("manual");
     setJsonText("");
     setFileName(null);
@@ -186,6 +191,7 @@ export function EggForm({
       installScript,
       installImage: installImage.trim() || "alpine:3.20",
       variables: nextVariables,
+      requiresAllocation,
     };
     try {
       if (creating) {
@@ -358,6 +364,15 @@ export function EggForm({
               className="min-h-[72px]"
             />
           </Field>
+          <div className="flex items-start justify-between gap-4 pt-1">
+            <div>
+              <p className="text-sm">Requires a public port</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Turn off for Discord bots and other processes that do not listen on a game port.
+              </p>
+            </div>
+            <Switch checked={requiresAllocation} onChange={setRequiresAllocation} />
+          </div>
           <Field label="Docker image" required hint="Image pulled on the node for the game process.">
             <Input
               value={dockerImage}

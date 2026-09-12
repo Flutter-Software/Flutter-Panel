@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, Terminal, X } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
 import { Button } from "@mantine/core";
 import { AdminSection } from "@/components/admin-create";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
 
 type UpdateJob = {
   state: "idle" | "running" | "ok" | "failed";
@@ -38,33 +39,30 @@ function shortDate(value: string) {
   return date.toLocaleString();
 }
 
-export function UpdatesSection() {
+export function UpdatesSection({ framed = true }: { framed?: boolean }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);
   const [showLog, setShowLog] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     const result = await api<{ data: UpdateStatus }>("/api/v1/admin/settings/update");
     setStatus(result.data);
     return result.data;
-  }
+  }, []);
 
   useEffect(() => {
     setChecking(true);
     void load()
       .catch((err) => setError(err instanceof Error ? err.message : "Could not check for updates"))
       .finally(() => setChecking(false));
-  }, []);
+  }, [load]);
 
-  useEffect(() => {
-    if (status?.job.state !== "running") return;
-    const timer = window.setInterval(() => {
-      void load().catch(() => undefined);
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [status?.job.state]);
+  usePanelEvent("update.job", (payload) => {
+    setStatus((current) => (current ? { ...current, job: payload as UpdateJob } : current));
+  });
+  useLiveReload(load, 1500, status?.job.state === "running");
 
   async function onCheck() {
     setError(null);
@@ -109,8 +107,8 @@ export function UpdatesSection() {
       ? status.checkError
       : "This panel is up to date.";
 
-  return (
-    <AdminSection icon={<RefreshCw className="size-4" />} title="Updates" description={description}>
+  const body = (
+    <div className="space-y-4">
       {error ? (
         <p className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-destructive">{error}</p>
       ) : null}
@@ -180,6 +178,13 @@ export function UpdatesSection() {
         running={running}
         job={status?.job ?? { state: "idle", log: [] }}
       />
+    </div>
+  );
+
+  if (!framed) return body;
+  return (
+    <AdminSection icon={<RefreshCw className="size-4" />} title="Updates" description={description}>
+      {body}
     </AdminSection>
   );
 }

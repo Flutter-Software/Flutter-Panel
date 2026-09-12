@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Shield, UserRound } from "lucide-react";
+import { Eye, EyeOff, LogIn, Shield, UserRound } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import {
   AdminCreateHeader,
@@ -31,6 +31,7 @@ export function UserForm({
   const [confirm, setConfirm] = useState("");
   const [role, setRole] = useState<"user" | "admin">(initial?.role ?? "user");
   const [showPassword, setShowPassword] = useState(false);
+  const [ssoPending, setSsoPending] = useState(false);
 
   const creating = mode === "create";
   const dirty = isDirty(
@@ -52,6 +53,21 @@ export function UserForm({
     setRole(initial?.role ?? "user");
     setShowPassword(false);
     setError(null);
+  }
+
+  async function openAsUser() {
+    if (!initial) return;
+    setError(null);
+    setSsoPending(true);
+    try {
+      const result = await api<{ data: { url: string } }>(`/api/v1/admin/users/${initial.id}/sso`, {
+        method: "POST",
+      });
+      window.location.assign(result.data.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open the panel as this user");
+      setSsoPending(false);
+    }
   }
 
   function generatePassword() {
@@ -219,6 +235,12 @@ export function UserForm({
               ? "Admins can create locations, nodes, eggs, servers, and other users. Full access to the panel."
               : "Users can sign in and manage only the servers assigned to this account."}
           </p>
+          {!creating && initial ? (
+            <Button type="button" variant="secondary" disabled={ssoPending} onClick={() => void openAsUser()}>
+              <LogIn className="size-3.5" />
+              {ssoPending ? "Opening…" : "Open panel as this user"}
+            </Button>
+          ) : null}
         </AdminSection>
       </div>
 

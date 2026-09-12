@@ -35,6 +35,13 @@ import { log } from "./log";
 import { signConsoleTicket } from "./console-ticket";
 import { destroyServerActivity, recordActivity, recordFileWrite, userActor } from "./activity";
 import { fileChangePreview } from "./file-preview";
+import {
+  grantServerAccess,
+  publishServerRemoved,
+  publishServerStatus,
+  publishServersChanged,
+  revokeServerAccess,
+} from "./panel-hub";
 
 function publicLastExit(value: unknown): LastExit | null {
   const parsed = lastExitSchema.safeParse(value);
@@ -72,6 +79,16 @@ function eggDefaults(egg: { variables?: unknown }): Record<string, string> {
   return out;
 }
 
+const UNASSIGNED_ALLOCATION = { ip: "0.0.0.0", port: 0 };
+
+function idString(value: { toString(): string } | null | undefined) {
+  return value ? value.toString() : "";
+}
+
+function eggNeedsPort(egg: { requiresAllocation?: boolean | null } | null | undefined) {
+  return egg?.requiresAllocation !== false;
+}
+
 const HTTP_PORTS = new Set([80, 443, 3000, 3001, 5000, 5173, 8000, 8080, 8081, 8443, 8888, 9000]);
 const HTTP_EGG_RE =
   /\b(nginx|apache|caddy|httpd|website|webserver|web server|gitea|wordpress|nextcloud|ghost|code-?server|phpmyadmin)\b/i;
@@ -104,19 +121,21 @@ async function relatedMany(
   servers: {
     eggId: { toString(): string };
     nodeId: { toString(): string };
-    allocationId: { toString(): string };
+    allocationId?: { toString(): string } | null;
     ownerId: { toString(): string };
   }[],
 ) {
   if (servers.length === 0) return [];
   const eggIds = [...new Set(servers.map((row) => row.eggId.toString()))];
   const nodeIds = [...new Set(servers.map((row) => row.nodeId.toString()))];
-  const allocationIds = [...new Set(servers.map((row) => row.allocationId.toString()))];
+  const allocationIds = [
+    ...new Set(servers.map((row) => idString(row.allocationId)).filter(Boolean)),
+  ];
   const ownerIds = [...new Set(servers.map((row) => row.ownerId.toString()))];
   const [eggs, nodes, allocations, owners] = await Promise.all([
     Egg.find({ _id: { $in: eggIds } }),
     Node.find({ _id: { $in: nodeIds } }),
-    Allocation.find({ _id: { $in: allocationIds } }),
+    allocationIds.length ? Allocation.find({ _id: { $in: allocationIds } }) : Promise.resolve([]),
     User.find({ _id: { $in: ownerIds } }),
   ]);
   const locationIds = [...new Set(nodes.map((node) => node.locationId.toString()))];
@@ -128,10 +147,11 @@ async function relatedMany(
   const locationsById = new Map(locations.map((row) => [row._id.toString(), row]));
   return servers.map((server) => {
     const node = nodesById.get(server.nodeId.toString()) ?? null;
+    const allocationId = idString(server.allocationId);
     return {
       egg: eggsById.get(server.eggId.toString()) ?? null,
       node,
-      allocation: allocationsById.get(server.allocationId.toString()) ?? null,
+      allocation: allocationId ? allocationsById.get(allocationId) ?? null : null,
       owner: ownersById.get(server.ownerId.toString()) ?? null,
       location: node ? locationsById.get(node.locationId.toString()) ?? null : null,
     };
@@ -141,7 +161,7 @@ async function relatedMany(
 async function related(server: {
   eggId: { toString(): string };
   nodeId: { toString(): string };
-  allocationId: { toString(): string };
+  allocationId?: { toString(): string } | null;
   ownerId: { toString(): string };
 }) {
   return (await relatedMany([server]))[0];
@@ -156,7 +176,7 @@ export function toClientServer(
     ownerId: { toString(): string };
     nodeId: { toString(): string };
     eggId: { toString(): string };
-    allocationId: { toString(): string };
+    allocationId?: { toString(): string } | null;
     memoryMb: number;
     diskMb: number;
     cpuPercent: number;
@@ -188,7 +208,7 @@ export function toClientServer(
     nodeId: server.nodeId.toString(),
     nodeLocation: location?.shortCode ?? "",
     allocation: allocation ? allocationDisplay(allocation) : "unassigned",
-    allocationId: server.allocationId.toString(),
+    allocationId: idString(server.allocationId),
     status,
     lastExit: publicLastExit(server.lastExit),
     owner: server.ownerId.toString() === viewerId,
@@ -318,20 +338,25 @@ function toSpec(
 }
 
 async function extraAllocationsFor(serverId: string, primaryId: string) {
-  const rows = await Allocation.find({ serverId, _id: { $ne: primaryId } }).sort({ port: 1 });
+  const filter: Record<string, unknown> = { serverId };
+  if (/^[a-fA-F0-9]{24}$/.test(primaryId)) filter._id = { $ne: primaryId };
+  const rows = await Allocation.find(filter).sort({ port: 1 });
   return rows.map((row) => ({ ip: row.ip, port: row.port }));
 }
 
 async function specFor(
-  server: Parameters<typeof toSpec>[0] & { _id: { toString(): string }; allocationId: { toString(): string } },
+  server: Parameters<typeof toSpec>[0] & {
+    _id: { toString(): string };
+    allocationId?: { toString(): string } | null;
+  },
   egg: Parameters<typeof toSpec>[1],
-  allocation: Parameters<typeof toSpec>[2],
+  allocation?: Parameters<typeof toSpec>[2] | null,
 ) {
   return toSpec(
     server,
     egg,
-    allocation,
-    await extraAllocationsFor(server._id.toString(), server.allocationId.toString()),
+    allocation ?? UNASSIGNED_ALLOCATION,
+    await extraAllocationsFor(server._id.toString(), idString(server.allocationId)),
   );
 }
 
@@ -341,7 +366,10 @@ async function assignExtraAllocations(
   primaryId: string,
   extraIds: string[],
 ) {
-  const unique = [...new Set(extraIds)].filter((id) => id !== primaryId);
+  const unique = [...new Set(extraIds)].filter((id) => id && id !== primaryId);
+  if (!primaryId && unique.length) {
+    throw FlutterError.validation("Assign a primary allocation before extra ports");
+  }
   const rows = unique.length ? await Allocation.find({ _id: { $in: unique } }) : [];
   if (rows.length !== unique.length) throw FlutterError.notFound("Allocation not found");
   for (const row of rows) {
@@ -352,10 +380,12 @@ async function assignExtraAllocations(
       throw FlutterError.conflict("Allocation is already assigned");
     }
   }
-  await Allocation.updateMany(
-    { serverId, _id: { $nin: [primaryId, ...unique] } },
-    { $set: { serverId: null } },
-  );
+  const keep = [primaryId, ...unique].filter((id) => /^[a-fA-F0-9]{24}$/.test(id));
+  if (keep.length) {
+    await Allocation.updateMany({ serverId, _id: { $nin: keep } }, { $set: { serverId: null } });
+  } else {
+    await Allocation.updateMany({ serverId }, { $set: { serverId: null } });
+  }
   if (unique.length) {
     await Allocation.updateMany({ _id: { $in: unique } }, { $set: { serverId } });
   }
@@ -419,6 +449,7 @@ function applyLiveUsage(
       forgetLiveStats(client.uuid);
       void Server.updateOne({ uuid: client.uuid }, { $set: { status: client.status } }).catch(() => undefined);
     }
+    publishServerStatus({ id: client.id, status: client.status, lastExit: client.lastExit });
   }
 }
 
@@ -453,17 +484,22 @@ export async function createServer(body: unknown, actorId: string) {
   const [egg, node, allocation, owner] = await Promise.all([
     Egg.findById(parsed.data.eggId),
     Node.findById(parsed.data.nodeId),
-    Allocation.findById(parsed.data.allocationId),
+    parsed.data.allocationId ? Allocation.findById(parsed.data.allocationId) : Promise.resolve(null),
     User.findById(ownerId),
   ]);
   if (!egg) throw FlutterError.notFound("Egg not found");
   if (!node) throw FlutterError.notFound("Node not found");
-  if (!allocation) throw FlutterError.notFound("Allocation not found");
   if (!owner) throw FlutterError.notFound("Owner not found");
-  if (allocation.nodeId.toString() !== node._id.toString()) {
-    throw FlutterError.validation("Allocation does not belong to this node");
+  if (eggNeedsPort(egg) && !allocation) {
+    throw FlutterError.validation("This egg requires a primary allocation");
   }
-  if (allocation.serverId) throw FlutterError.conflict("Allocation is already assigned");
+  if (parsed.data.allocationId && !allocation) throw FlutterError.notFound("Allocation not found");
+  if (allocation) {
+    if (allocation.nodeId.toString() !== node._id.toString()) {
+      throw FlutterError.validation("Allocation does not belong to this node");
+    }
+    if (allocation.serverId) throw FlutterError.conflict("Allocation is already assigned");
+  }
   if (!isNodeOnline(node.lastHeartbeatAt) || !node.daemonListenUrl) {
     throw FlutterError.unavailable("Node daemon is offline. Start the daemon before creating a server.");
   }
@@ -476,7 +512,7 @@ export async function createServer(body: unknown, actorId: string) {
     ownerId,
     nodeId: node._id,
     eggId: egg._id,
-    allocationId: allocation._id,
+    ...(allocation ? { allocationId: allocation._id } : {}),
     memoryMb: parsed.data.memoryMb,
     diskMb: parsed.data.diskMb,
     cpuPercent: parsed.data.cpuPercent ?? 100,
@@ -489,14 +525,19 @@ export async function createServer(body: unknown, actorId: string) {
     status: "installing",
     environment,
   });
-  await Allocation.updateOne({ _id: allocation._id }, { $set: { serverId: row._id } });
+  if (allocation) {
+    await Allocation.updateOne({ _id: allocation._id }, { $set: { serverId: row._id } });
+  }
   await assignExtraAllocations(
     row._id.toString(),
     node._id.toString(),
-    allocation._id.toString(),
+    allocation ? allocation._id.toString() : "",
     parsed.data.allocationIds ?? [],
   );
   void runInstall(row._id.toString());
+  grantServerAccess(row._id.toString(), [ownerId]);
+  publishServersChanged("created", row._id.toString());
+  publishServerStatus({ id: row._id.toString(), status: row.status, lastExit: row.lastExit });
   return toClientServer(row, await related(row), actorId, ["*"]);
 }
 
@@ -527,7 +568,17 @@ export async function updateServer(serverId: string, body: unknown, actorId: str
     server.ownerId = owner._id;
   }
 
-  if (parsed.data.allocationId && parsed.data.allocationId !== server.allocationId.toString()) {
+  const egg = await Egg.findById(server.eggId);
+  const previousAllocationId = idString(server.allocationId);
+  if (parsed.data.allocationId === null) {
+    if (eggNeedsPort(egg)) {
+      throw FlutterError.validation("This egg requires a primary allocation");
+    }
+    if (previousAllocationId) {
+      await Allocation.updateOne({ _id: previousAllocationId }, { $set: { serverId: null } });
+    }
+    server.set("allocationId", undefined);
+  } else if (parsed.data.allocationId && parsed.data.allocationId !== previousAllocationId) {
     const next = await Allocation.findById(parsed.data.allocationId);
     if (!next) throw FlutterError.notFound("Allocation not found");
     if (next.nodeId.toString() !== server.nodeId.toString()) {
@@ -536,7 +587,9 @@ export async function updateServer(serverId: string, body: unknown, actorId: str
     if (next.serverId && next.serverId.toString() !== server._id.toString()) {
       throw FlutterError.conflict("Allocation is already assigned");
     }
-    await Allocation.updateOne({ _id: server.allocationId }, { $set: { serverId: null } });
+    if (previousAllocationId) {
+      await Allocation.updateOne({ _id: previousAllocationId }, { $set: { serverId: null } });
+    }
     await Allocation.updateOne({ _id: next._id }, { $set: { serverId: server._id } });
     server.allocationId = next._id;
   }
@@ -545,13 +598,14 @@ export async function updateServer(serverId: string, body: unknown, actorId: str
     await assignExtraAllocations(
       server._id.toString(),
       server.nodeId.toString(),
-      server.allocationId.toString(),
+      idString(server.allocationId),
       parsed.data.allocationIds,
     );
   }
 
   await server.save();
   const id = server._id.toString();
+  if (parsed.data.ownerId) grantServerAccess(id, [parsed.data.ownerId]);
   if (parsed.data.name || parsed.data.description !== undefined) {
     recordActivity({
       serverId: id,
@@ -582,6 +636,7 @@ export async function updateServer(serverId: string, body: unknown, actorId: str
       properties: { fields },
     });
   }
+  publishServersChanged("updated", id);
   return toClientServer(server, await related(server), actorId, ["*"]);
 }
 
@@ -589,12 +644,14 @@ export async function reinstallServer(serverId: string, viewerId: string, admin:
   const access = await requireAccess(serverId, viewerId, admin, "settings.reinstall");
   const server = access.server;
   const docs = await related(server);
-  if (!docs.egg || !docs.allocation) throw FlutterError.notFound("Server is missing egg or allocation");
+  if (!docs.egg) throw FlutterError.notFound("Server is missing egg");
+  if (eggNeedsPort(docs.egg) && !docs.allocation) throw FlutterError.notFound("Server is missing allocation");
   if (!isNodeOnline(docs.node?.lastHeartbeatAt) || !docs.node?.daemonListenUrl) {
     throw FlutterError.unavailable("Node daemon is offline");
   }
   server.status = "installing";
   await server.save();
+  publishServerStatus({ id: server._id.toString(), status: server.status, lastExit: server.lastExit });
   recordActivity({
     serverId: server._id.toString(),
     event: "settings.reinstall",
@@ -625,13 +682,15 @@ export async function powerServer(
   const access = await requireAccess(serverId, viewerId, admin, permission);
   const server = access.server;
   const docs = await related(server);
-  if (!docs.egg || !docs.allocation) throw FlutterError.notFound("Server is missing egg or allocation");
+  if (!docs.egg) throw FlutterError.notFound("Server is missing egg");
+  if (eggNeedsPort(docs.egg) && !docs.allocation) throw FlutterError.notFound("Server is missing allocation");
   if (server.status === "installing") {
     throw FlutterError.conflict("Wait for install to finish before sending power actions");
   }
 
   server.status = action === "start" || action === "restart" ? "starting" : "stopping";
   await server.save();
+  publishServerStatus({ id: server._id.toString(), status: server.status, lastExit: server.lastExit });
   recordActivity({
     serverId: server._id.toString(),
     event: `power.${action}`,
@@ -659,6 +718,7 @@ async function finishPower(serverId: string, nodeId: string, spec: InstallSpec, 
     if (row.status === "starting" || row.status === "stopping") {
       row.status = "offline";
       await row.save();
+      publishServerStatus({ id: row._id.toString(), status: row.status, lastExit: row.lastExit });
     }
   }
 }
@@ -678,6 +738,8 @@ export async function deleteServer(serverId: string) {
   await destroyServerDatabases(server._id);
   await destroyServerActivity(server._id);
   await Server.deleteOne({ _id: server._id });
+  revokeServerAccess(server._id.toString());
+  publishServerRemoved(server._id.toString());
   return { ok: true };
 }
 
@@ -690,18 +752,21 @@ async function runInstall(serverId: string) {
     const server = await Server.findById(serverId);
     if (!server) return;
     const docs = await related(server);
-    if (!docs.egg || !docs.allocation) {
+    if (!docs.egg || (eggNeedsPort(docs.egg) && !docs.allocation)) {
       server.status = "install_failed";
       await server.save();
+      publishServerStatus({ id: server._id.toString(), status: server.status, lastExit: server.lastExit });
       return;
     }
     server.status = "installing";
     await server.save();
+    publishServerStatus({ id: server._id.toString(), status: server.status, lastExit: server.lastExit });
     await installOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation));
     const row = await Server.findById(serverId);
     if (row && (row.status === "installing" || row.status === "install_failed")) {
       row.status = "offline";
       await row.save();
+      publishServerStatus({ id: row._id.toString(), status: row.status, lastExit: row.lastExit });
     }
   } catch (error) {
     log("error", "server install failed", {
@@ -712,6 +777,7 @@ async function runInstall(serverId: string) {
     if (server && server.status === "installing") {
       server.status = "install_failed";
       await server.save();
+      publishServerStatus({ id: server._id.toString(), status: server.status, lastExit: server.lastExit });
     }
   } finally {
     installing.delete(serverId);
@@ -892,7 +958,7 @@ export async function serverBackups(
   }
   if (action === "restore") {
     const docs = await related(server);
-    if (docs.egg && docs.allocation) {
+    if (docs.egg) {
       try {
         await powerOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation), "stop");
       } catch {
@@ -922,7 +988,7 @@ export async function serverBackups(
 
 async function listNetworkAllocations(server: {
   _id: { toString(): string };
-  allocationId: { toString(): string };
+  allocationId?: { toString(): string } | null;
   eggId: { toString(): string };
 }) {
   const [rows, egg] = await Promise.all([
@@ -931,6 +997,7 @@ async function listNetworkAllocations(server: {
   ]);
   const eggName = egg?.name ?? "";
   const eggDescription = egg?.description ?? "";
+  const primaryId = idString(server.allocationId);
   return rows.map((row) => {
     const display = allocationDisplay(row);
     return {
@@ -939,7 +1006,7 @@ async function listNetworkAllocations(server: {
       alias: row.alias || "",
       port: row.port,
       notes: row.notes || "",
-      primary: row._id.toString() === server.allocationId.toString(),
+      primary: Boolean(primaryId) && row._id.toString() === primaryId,
       display,
       http: allocationIsHttp(eggName, eggDescription, row.port),
       url: allocationBrowserUrl(row),
@@ -984,7 +1051,7 @@ export async function updateServerAllocation(
   if (fields.length) await row.save();
 
   let madePrimary = false;
-  if (parsed.data.primary && row._id.toString() !== server.allocationId.toString()) {
+  if (parsed.data.primary && row._id.toString() !== idString(server.allocationId)) {
     server.allocationId = row._id;
     await server.save();
     madePrimary = true;
@@ -1035,12 +1102,14 @@ export async function applyPowerDirect(serverId: string, action: PowerAction) {
     throw FlutterError.conflict("Wait for install to finish before sending power actions");
   }
   const docs = await related(server);
-  if (!docs.egg || !docs.allocation) throw FlutterError.notFound("Server is missing egg or allocation");
+  if (!docs.egg) throw FlutterError.notFound("Server is missing egg");
+  if (eggNeedsPort(docs.egg) && !docs.allocation) throw FlutterError.notFound("Server is missing allocation");
   if (!isNodeOnline(docs.node?.lastHeartbeatAt) || !docs.node?.daemonListenUrl) {
     throw FlutterError.unavailable("Node daemon is offline");
   }
   server.status = action === "start" || action === "restart" ? "starting" : "stopping";
   await server.save();
+  publishServerStatus({ id: server._id.toString(), status: server.status, lastExit: server.lastExit });
   try {
     await powerOnNode(server.nodeId.toString(), await specFor(server, docs.egg, docs.allocation), action);
     recordActivity({
@@ -1054,6 +1123,7 @@ export async function applyPowerDirect(serverId: string, action: PowerAction) {
       if (row.status === "starting" || row.status === "stopping") {
         row.status = "offline";
         await row.save();
+        publishServerStatus({ id: row._id.toString(), status: row.status, lastExit: row.lastExit });
       }
     }
     throw error;

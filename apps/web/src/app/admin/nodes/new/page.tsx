@@ -16,7 +16,7 @@ import {
   Server,
 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
-import { SaveIsland, isDirty } from "@/components/admin-create";
+import { SaveIsland, Segmented, Switch, isDirty } from "@/components/admin-create";
 import { Button, ButtonLink, Card, Field, Input, Select, Textarea } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -549,59 +549,6 @@ function UnitInput({
         {unit}
       </span>
     </div>
-  );
-}
-
-function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (value: T) => void;
-  options: { value: T; label: string; icon?: ReactNode }[];
-}) {
-  return (
-    <div className="grid grid-cols-2 rounded-lg border border-input bg-input/40 p-0.5">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onChange(option.value)}
-          className={cn(
-            "inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors",
-            value === option.value
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {option.icon}
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Switch({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-        checked ? "bg-primary" : "bg-muted",
-      )}
-    >
-      <span
-        className={cn(
-          "absolute top-0.5 left-0.5 block size-5 rounded-full bg-card transition-transform",
-          checked && "translate-x-5",
-        )}
-      />
-    </button>
   );
 }
 

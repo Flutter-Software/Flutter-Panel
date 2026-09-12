@@ -6,14 +6,10 @@ import { confirm } from "@/components/confirm-dialog";
 import { Button, Card } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
+import { formatBytes } from "@/lib/types";
 import { ServerSection } from "@/components/server-section";
 
 type Backup = { id: string; name: string; size: number; createdAt: string };
-
-function formatSize(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export default function BackupsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -96,7 +92,7 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
               backups.map((backup) => (
                 <tr key={backup.id} className="border-t border-border">
                   <td className="px-4 py-3 font-mono text-xs">{backup.name}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{formatSize(backup.size)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{formatBytes(backup.size)}</td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {new Date(backup.createdAt).toLocaleString()}
                   </td>

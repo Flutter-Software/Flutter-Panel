@@ -4,6 +4,7 @@ import { ColorSchemeScript, mantineHtmlProps } from "@mantine/core";
 import { ThemeProvider } from "@/components/theme-provider";
 import { MotionProvider } from "@/components/motion-provider";
 import { AuthProvider } from "@/components/auth-provider";
+import { PanelSocketProvider } from "@/components/panel-socket";
 import { BrandingProvider } from "@/components/branding-provider";
 import { ConfirmProvider } from "@/components/confirm-dialog";
 import { ToastProvider } from "@/components/toast";
@@ -50,9 +51,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <ThemeProvider>
             <BrandingProvider>
               <AuthProvider>
-                <ConfirmProvider>
-                  <ToastProvider>{children}</ToastProvider>
-                </ConfirmProvider>
+                <PanelSocketProvider>
+                  <ConfirmProvider>
+                    <ToastProvider>{children}</ToastProvider>
+                  </ConfirmProvider>
+                </PanelSocketProvider>
               </AuthProvider>
             </BrandingProvider>
           </ThemeProvider>

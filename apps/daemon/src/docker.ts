@@ -7,6 +7,7 @@ import type { DaemonConfig } from "./config";
 import { getProcessState, knownProcessUuids, setProcessState, type ProcessState } from "./process-state";
 import { reportServerState } from "./panel-state";
 import type { LastExit } from "@flutter-software/shared";
+import { consoleTagged } from "./branding";
 
 export type InstallSpec = {
   uuid: string;
@@ -100,8 +101,10 @@ function sanitizeConsoleOutput(text: string) {
   value = value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
   value = value.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
   value = value.replace(/\x1b./g, "");
-  value = value.replace(/\[{1,2}\d*(?:;\d+)*[GHf]/g, "\r");
-  value = value.replace(/\[{1,2}\d*[KJ]/g, "");
+  // Orphan CSI (ESC already gone) must include a parameter. Bare `[f` / `[H`
+  // would eat the Sleep egg's `[flutter] … running` heartbeat.
+  value = value.replace(/\[{1,2}\d+(?:;\d+)*[GHf]/g, "\r");
+  value = value.replace(/\[{1,2}\d+[KJ]/g, "");
   value = value.replace(/\[{1,2}\d+(?:;\d+)*m/g, "");
   value = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
   return value.replace(/\uE000(\d+)\uE001/g, (_, index) => colors[Number(index)] ?? "");
@@ -123,6 +126,20 @@ function isProgressJunk(line: string) {
   return false;
 }
 
+/** Empty docker log frames still carry `--timestamps` with no message. */
+const DOCKER_RFC3339 =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+
+function isDockerTimestampOnly(value: string) {
+  return DOCKER_RFC3339.test(withoutAnsi(value).trim());
+}
+
+function stripDockerTimestamps(value: string) {
+  return value
+    .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g, "")
+    .replace(/[ \t]{2,}/g, " ");
+}
+
 function collapseConsoleBuffer(text: string) {
   const prepared = sanitizeConsoleOutput(text);
   const chunks = prepared.split("\n");
@@ -135,11 +152,12 @@ export function formatDockerLogLine(line: string) {
   const trimmed = stripAttachNoise(line);
   if (!trimmed) return "";
   if (trimmed.startsWith("{") && trimmed.includes('"hijack"')) return "";
+  if (isDockerTimestampOnly(trimmed)) return "";
   const match = trimmed.match(/^(\d{4}-\d{2}-\d{2}T[^\s]+)\s+(.*)$/s);
   const stamp = match ? parseDockerTime(match[1]) : null;
   const body = match ? match[2] : trimmed;
-  const visible = visibleConsoleLine(sanitizeConsoleOutput(body));
-  if (!withoutAnsi(visible).trim() || isProgressJunk(visible)) return "";
+  const visible = stripDockerTimestamps(visibleConsoleLine(sanitizeConsoleOutput(body)));
+  if (!withoutAnsi(visible).trim() || isProgressJunk(visible) || isDockerTimestampOnly(visible)) return "";
   return `[${stamp ? clock(stamp) : clock()}] ${visible.trim()}`;
 }
 
@@ -217,7 +235,7 @@ async function capInstallLog(root: string) {
 }
 
 async function appendInstallLog(root: string, message: string) {
-  const line = `[${clock()}] [Flutter] ${message.replace(/\s+/g, " ").trim()}\n`;
+  const line = `[${clock()}] ${consoleTagged(message)}\n`;
   if (!line.trim()) return;
   await mkdir(flutterDir(root), { recursive: true });
   await appendFile(installLogPath(root), line, "utf8").catch(() => undefined);
@@ -358,10 +376,6 @@ export async function inspectContainer(uuid: string, fresh = false) {
   }
 }
 
-export function dockerContainer(uuid: string) {
-  return docker.getContainer(containerName(uuid));
-}
-
 export async function killContainer(uuid: string) {
   invalidateInspect(uuid);
   const info = await inspectContainer(uuid, true);
@@ -384,8 +398,8 @@ function cpuLayout(cpuPercent: number, cpuPinning: number, salt = "") {
   const host = hostCpuCount();
   const unlimited = !(cpuPercent > 0);
   const pinCount = cpuPinning > 0 ? Math.min(host, Math.max(1, Math.floor(cpuPinning))) : 0;
-  const quotaCores = unlimited ? 0 : Math.min(host, Math.max(1, Math.ceil(cpuPercent / 100)));
-  const cores = pinCount || quotaCores || host;
+  const allotted = unlimited ? 0 : Math.min(host, Math.max(cpuPercent / 100, 0.01));
+  const cores = pinCount || Math.max(1, Math.ceil(allotted)) || host;
 
   let cpuset: string | undefined;
   if (pinCount > 0) {
@@ -399,13 +413,15 @@ function cpuLayout(cpuPercent: number, cpuPinning: number, salt = "") {
 
   return {
     cores,
-    nanoCpus: unlimited ? undefined : quotaCores * 1e9,
-    cpuShares: unlimited ? undefined : quotaCores * 1024,
+    cpuPeriod: unlimited ? undefined : 100_000,
+    cpuQuota: unlimited ? undefined : Math.max(1_000, Math.round((cpuPercent / 100) * 100_000)),
+    nanoCpus: unlimited ? undefined : Math.max(1_000_000, Math.round(allotted * 1e9)),
+    cpuShares: unlimited ? undefined : Math.max(2, Math.round(allotted * 1024)),
     cpuset,
   };
 }
 
-function withCpuRuntimeEnv(env: Record<string, string>, cores: number) {
+function withCpuRuntimeEnv(env: Record<string, string>, cores: number, cpuPercent: number) {
   const threads = String(cores);
   const javaFlag = `-XX:ActiveProcessorCount=${cores}`;
   const java = env.JAVA_TOOL_OPTIONS?.includes("ActiveProcessorCount")
@@ -413,7 +429,7 @@ function withCpuRuntimeEnv(env: Record<string, string>, cores: number) {
     : [env.JAVA_TOOL_OPTIONS, javaFlag].filter(Boolean).join(" ").trim();
   return {
     ...env,
-    SERVER_CPU: env.SERVER_CPU || String(cores * 100),
+    SERVER_CPU: env.SERVER_CPU || String(Math.max(0, Math.round(cpuPercent))),
     P_SERVER_CORES: threads,
     UV_THREADPOOL_SIZE: env.UV_THREADPOOL_SIZE || threads,
     GOMAXPROCS: env.GOMAXPROCS || threads,
@@ -423,12 +439,48 @@ function withCpuRuntimeEnv(env: Record<string, string>, cores: number) {
   };
 }
 
+function hostCompute(spec: InstallSpec) {
+  const compute = cpuLayout(spec.limits.cpuPercent, spec.limits.cpuPinning ?? 0, spec.uuid);
+  const memory = spec.limits.memoryBytes > 0 ? spec.limits.memoryBytes : 0;
+  return {
+    compute,
+    memory,
+    hostConfig: {
+      Memory: memory,
+      ...(memory > 0 ? { MemorySwap: memory } : {}),
+      ...(compute.cpuQuota
+        ? { CpuPeriod: compute.cpuPeriod, CpuQuota: compute.cpuQuota }
+        : compute.nanoCpus
+          ? { NanoCpus: compute.nanoCpus }
+          : {}),
+      ...(compute.cpuShares ? { CpuShares: compute.cpuShares } : {}),
+      ...(compute.cpuset ? { CpusetCpus: compute.cpuset } : {}),
+    },
+  };
+}
+
+async function createLimitedContainer(options: Docker.ContainerCreateOptions) {
+  try {
+    return await docker.createContainer(options);
+  } catch (first) {
+    const host = options.HostConfig;
+    if (!host?.MemorySwap && !host?.CpusetCpus) throw first;
+    const { MemorySwap: _swap, CpusetCpus: _cpus, ...rest } = host;
+    try {
+      return await docker.createContainer({ ...options, HostConfig: rest });
+    } catch {
+      throw first;
+    }
+  }
+}
+
 function specFingerprint(spec: InstallSpec) {
   return createHash("sha1")
     .update(
       JSON.stringify({
         restart: "no",
-        cpuPolicy: 2,
+        cpuPolicy: 4,
+        memPolicy: 1,
         // 4 = run /entrypoint.sh under Docker init (skip nested image tini).
         init: 4,
         userBind: 2,
@@ -466,24 +518,25 @@ function dockerPortMap(spec: InstallSpec) {
 }
 
 async function applyCompute(containerId: string, spec: InstallSpec) {
-  const compute = cpuLayout(spec.limits.cpuPercent, spec.limits.cpuPinning ?? 0, spec.uuid);
+  const { compute, memory } = hostCompute(spec);
   const container = docker.getContainer(containerId);
-  const memory = spec.limits.memoryBytes > 0 ? spec.limits.memoryBytes : 0;
+  const memoryLock = {
+    Memory: memory,
+    MemorySwap: memory > 0 ? memory : -1,
+  };
+  const pin = compute.cpuset ? { CpusetCpus: compute.cpuset } : {};
+  const info = await container.inspect().catch(() => null);
+  const hasNano = Boolean(info?.HostConfig?.NanoCpus);
+  const cpu = hasNano || !compute.cpuQuota
+    ? { NanoCpus: compute.nanoCpus ?? 0, CpuShares: compute.cpuShares ?? 0 }
+    : { CpuPeriod: compute.cpuPeriod ?? 0, CpuQuota: compute.cpuQuota ?? 0, CpuShares: compute.cpuShares ?? 0 };
+
   try {
-    await container.update({
-      Memory: memory,
-      NanoCpus: compute.nanoCpus ?? 0,
-      CpuShares: compute.cpuShares ?? 0,
-      CpusetCpus: compute.cpuset ?? "",
-    });
+    await container.update({ ...memoryLock, ...cpu, ...pin });
   } catch {
     await container
-      .update({
-        Memory: memory,
-        NanoCpus: compute.nanoCpus ?? 0,
-        CpuShares: compute.cpuShares ?? 0,
-      })
-      .catch(() => undefined);
+      .update({ ...memoryLock, ...cpu })
+      .catch(() => container.update(memoryLock).catch(() => undefined));
   }
 }
 
@@ -522,7 +575,7 @@ export function runtimeEnvironment(spec: InstallSpec): Record<string, string> {
   // Keep {{placeholders}} in STARTUP. Yolk entrypoint.sh converts them after it
   // sets runtime vars (Arma CLIENT_MODS, etc.). Wings does the same.
   const layout = cpuLayout(spec.limits.cpuPercent, spec.limits.cpuPinning ?? 0, spec.uuid);
-  return withCpuRuntimeEnv(merged, layout.cores);
+  return withCpuRuntimeEnv(merged, layout.cores, spec.limits.cpuPercent);
 }
 
 export async function saveSpec(root: string, spec: InstallSpec) {
@@ -653,7 +706,8 @@ async function runInstallScript(root: string, spec: InstallSpec) {
     "exec sh /tmp/flutter-install.sh",
   ].join("; ");
 
-  const container = await docker.createContainer({
+  const { hostConfig } = hostCompute(spec);
+  const container = await createLimitedContainer({
     Image: image,
     Cmd: ["sh", "-c", runner],
     WorkingDir: "/mnt/server",
@@ -662,6 +716,7 @@ async function runInstallScript(root: string, spec: InstallSpec) {
       Binds: [`${bindPath(root)}:/mnt/server`],
       AutoRemove: false,
       NetworkMode: "bridge",
+      ...hostConfig,
     },
     Labels: { "flutter.server": spec.uuid, "flutter.role": "install" },
   });
@@ -1091,8 +1146,13 @@ export function startProcessWatch() {
     }, delayMs);
   };
   retry(0);
+  void tightenRunningCompute().catch(() => undefined);
   setInterval(() => {
-    void syncObservedProcessStates().catch(() => undefined);
+    void (async () => {
+      await syncObservedProcessStates().catch(() => undefined);
+      await tightenRunningCompute().catch(() => undefined);
+      await scanRunningDiskLimits().catch(() => undefined);
+    })();
   }, 8_000);
 }
 
@@ -1245,9 +1305,9 @@ async function bootContainer(config: DaemonConfig, spec: InstallSpec, signal: Ab
   const hasStartup = Boolean(merged.startup?.trim());
   if (hasStartup && !env.STARTUP?.trim()) env.STARTUP = DEFAULT_STARTUP;
   const ports = dockerPortMap(merged);
-  const compute = cpuLayout(merged.limits.cpuPercent, merged.limits.cpuPinning ?? 0, uuid);
+  const { hostConfig } = hostCompute(merged);
 
-  const container = await docker.createContainer({
+  const container = await createLimitedContainer({
     name,
     Image: image,
     User: identity.user,
@@ -1267,10 +1327,7 @@ async function bootContainer(config: DaemonConfig, spec: InstallSpec, signal: Ab
     HostConfig: {
       Init: true,
       Binds: [`${bindPath(root)}:/home/container`],
-      Memory: merged.limits.memoryBytes > 0 ? merged.limits.memoryBytes : 0,
-      ...(compute.nanoCpus ? { NanoCpus: compute.nanoCpus } : {}),
-      ...(compute.cpuShares ? { CpuShares: compute.cpuShares } : {}),
-      ...(compute.cpuset ? { CpusetCpus: compute.cpuset } : {}),
+      ...hostConfig,
       PortBindings: ports.bindings,
       RestartPolicy: { Name: "no" },
     },
@@ -1625,16 +1682,7 @@ export async function liveResources(config: DaemonConfig, uuid: string) {
 
   if (!cached || now - cached.diskAt > 8_000) {
     void diskUsageBytes(serverRoot(config, uuid))
-      .then((diskBytes) => {
-        const current = resourceCache.get(uuid);
-        resourceCache.set(uuid, {
-          at: current?.at ?? Date.now(),
-          running,
-          stats: current?.stats ?? stats,
-          diskBytes,
-          diskAt: Date.now(),
-        });
-      })
+      .then((diskBytes) => rememberDiskUsage(uuid, diskBytes, running, stats))
       .catch(() => undefined);
   }
 
@@ -1699,10 +1747,113 @@ export async function ensureStatsStream(uuid: string) {
   stream.on("error", stop);
 }
 
-export async function containerStats(uuid: string) {
-  const cached = resourceCache.get(uuid);
-  if (cached?.stats && Date.now() - cached.at < 750) return cached.stats;
-  return readDockerStats(uuid).catch(() => null);
+export class DiskLimitError extends Error {
+  readonly code = "ENOSPC";
+  constructor(message = "Disk limit reached") {
+    super(message);
+    this.name = "DiskLimitError";
+  }
+}
+
+const diskCheckCache = new Map<string, { at: number; used: number }>();
+const diskStopBusy = new Set<string>();
+const tightenedCompute = new Set<string>();
+
+function rememberDiskUsage(
+  uuid: string,
+  diskBytes: number,
+  running: boolean,
+  stats: ContainerStats | null,
+) {
+  diskCheckCache.set(uuid, { at: Date.now(), used: diskBytes });
+  const current = resourceCache.get(uuid);
+  resourceCache.set(uuid, {
+    at: current?.at ?? Date.now(),
+    running: current?.running ?? running,
+    stats: current?.stats ?? stats,
+    diskBytes,
+    diskAt: Date.now(),
+  });
+  void enforceDiskLimit(uuid, diskBytes).catch(() => undefined);
+}
+
+async function enforceDiskLimit(uuid: string, used: number) {
+  if (!boundConfig) return;
+  const spec = await loadSpec(serverRoot(boundConfig, uuid)).catch(() => null);
+  const limit = Math.max(0, spec?.limits.diskBytes ?? 0);
+  if (!(limit > 0) || used <= limit) return;
+  const process = getProcessState(uuid);
+  if (process !== "running" && process !== "starting") return;
+  if (diskStopBusy.has(uuid)) return;
+  diskStopBusy.add(uuid);
+  try {
+    notice(uuid, "Disk limit reached. Stopping server.");
+    setProcessState(uuid, "stopping");
+    void recordLastExit(uuid, {
+      kind: "killed",
+      code: 137,
+      message: "Disk limit reached",
+      at: new Date().toISOString(),
+    });
+    stopStatsStream(uuid);
+    await killContainer(uuid).catch(() => undefined);
+    setProcessState(uuid, "offline");
+    notice(uuid, "Server is offline.");
+  } finally {
+    diskStopBusy.delete(uuid);
+  }
+}
+
+async function tightenRunningCompute() {
+  if (!boundConfig) return;
+  for (const uuid of knownProcessUuids()) {
+    const process = getProcessState(uuid);
+    if (process !== "running" && process !== "starting") continue;
+    const info = await inspectContainer(uuid).catch(() => null);
+    if (!info?.Id || !info.State.Running) continue;
+    const spec = await loadSpec(serverRoot(boundConfig, uuid)).catch(() => null);
+    if (!spec) continue;
+    const key = `${uuid}:${specFingerprint(spec)}`;
+    if (tightenedCompute.has(key)) continue;
+    await applyCompute(info.Id, spec);
+    tightenedCompute.add(key);
+  }
+}
+
+async function scanRunningDiskLimits() {
+  if (!boundConfig) return;
+  for (const uuid of knownProcessUuids()) {
+    const process = getProcessState(uuid);
+    if (process !== "running" && process !== "starting") continue;
+    const hit = diskCheckCache.get(uuid);
+    if (hit && Date.now() - hit.at < 8_000) {
+      await enforceDiskLimit(uuid, hit.used).catch(() => undefined);
+      continue;
+    }
+    const used = await diskUsageBytes(serverRoot(boundConfig, uuid)).catch(() => null);
+    if (used == null) continue;
+    rememberDiskUsage(uuid, used, true, resourceCache.get(uuid)?.stats ?? null);
+  }
+}
+
+export async function ensureDiskCapacity(config: DaemonConfig, uuid: string, extraBytes = 0) {
+  const spec = await loadSpec(serverRoot(config, uuid)).catch(() => null);
+  const limit = Math.max(0, spec?.limits.diskBytes ?? 0);
+  if (!(limit > 0)) return;
+  const extra = Math.max(0, extraBytes);
+  const hit = diskCheckCache.get(uuid);
+  let used =
+    hit && Date.now() - hit.at < 2_000
+      ? hit.used
+      : await diskUsageBytes(serverRoot(config, uuid));
+  if (used + extra > limit && hit && Date.now() - hit.at < 2_000) {
+    used = await diskUsageBytes(serverRoot(config, uuid));
+  }
+  if (used + extra > limit) {
+    diskCheckCache.set(uuid, { at: Date.now(), used });
+    throw new DiskLimitError();
+  }
+  diskCheckCache.set(uuid, { at: hit && Date.now() - hit.at < 2_000 ? hit.at : Date.now(), used: used + extra });
 }
 
 export async function diskUsageBytes(root: string): Promise<number> {
@@ -1829,7 +1980,7 @@ async function noticeRecentLogs(uuid: string) {
     const { lines } = await getLogs(uuid, 40);
     for (const line of lines.slice(-20)) {
       const body = line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, "").trim();
-      if (!body || body.startsWith("[Flutter]")) continue;
+      if (!body || /^\[flutter\]/i.test(body)) continue;
       notice(uuid, body.slice(0, 500));
     }
   } catch {
@@ -1880,10 +2031,6 @@ let tryConsoleWrite: ((uuid: string, command: string) => boolean) | null = null;
 
 export function setConsoleWriter(write: (uuid: string, command: string) => boolean) {
   tryConsoleWrite = write;
-}
-
-export async function attachStdin(uuid: string) {
-  return attachStream(uuid, { stdin: true, stdout: true, stderr: true });
 }
 
 export async function attachConsole(
@@ -2136,14 +2283,14 @@ export async function runOfflineCommand(config: DaemonConfig, uuid: string, comm
   });
   const image = spec.dockerImage?.trim() || "busybox:1.36";
   const identity = hostIdentity();
-  const compute = cpuLayout(spec.limits.cpuPercent, spec.limits.cpuPinning ?? 0, uuid);
+  const { compute } = hostCompute(spec);
   const memory =
     spec.limits.memoryBytes > 0 ? Math.min(spec.limits.memoryBytes, 512 * 1024 * 1024) : 256 * 1024 * 1024;
 
   const job = (async () => {
     await pullImage(image);
     await removeOneshot(uuid);
-    const container = await docker.createContainer({
+    const container = await createLimitedContainer({
       name: oneshotName(uuid),
       Image: image,
       User: identity.user,
@@ -2159,7 +2306,11 @@ export async function runOfflineCommand(config: DaemonConfig, uuid: string, comm
         NetworkMode: "none",
         Memory: memory,
         MemorySwap: memory,
-        ...(compute.nanoCpus ? { NanoCpus: compute.nanoCpus } : {}),
+        ...(compute.cpuQuota
+          ? { CpuPeriod: compute.cpuPeriod, CpuQuota: compute.cpuQuota }
+          : compute.nanoCpus
+            ? { NanoCpus: compute.nanoCpus }
+            : {}),
         PidsLimit: 64,
         CapDrop: ["ALL"],
         SecurityOpt: ["no-new-privileges:true"],

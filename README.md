@@ -2,7 +2,7 @@
 
 Self-hosted game-server control panel. **Flutter is the product name** — this is not Google Flutter / Dart, and it is not a fork of Pterodactyl or Pelican.
 
-Install walkthrough: [https://docs.flutter.software](https://docs.flutter.software).
+Install walkthrough: [https://docs.flutter.software](https://docs.flutter.software). WHMCS / HostCore automatic login: [Billing login](https://docs.flutter.software/billing).
 
 Stack: Next.js 15 dashboard, Hono API, MongoDB (Mongoose + Prisma), Redis, TypeScript daemon talking to the Docker Engine API.
 

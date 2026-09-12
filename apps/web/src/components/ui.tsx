@@ -168,13 +168,6 @@ export function Textarea({
   );
 }
 
-export function selectClass(className?: string) {
-  return cn(
-    "h-10 w-full rounded-lg border border-input bg-input/60 px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30",
-    className,
-  );
-}
-
 export { SearchSelect, Select } from "./select";
 export type { SelectOption } from "./select";
 

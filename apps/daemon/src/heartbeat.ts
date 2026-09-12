@@ -1,18 +1,11 @@
 import { DAEMON_VERSION, type DaemonConfig, readDaemonConfigFile, writeDaemonConfig } from "./config";
 import { describeFetchError } from "./panel-fetch";
+import { isLoopbackUrl } from "@flutter-software/shared";
 import os from "node:os";
+import { setConsoleTag } from "./branding";
 
 function trimUrl(value: string) {
   return value.replace(/\/+$/, "");
-}
-
-function isLoopbackUrl(value: string) {
-  try {
-    const host = new URL(value).hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    return host === "127.0.0.1" || host === "localhost" || host === "::1";
-  } catch {
-    return false;
-  }
 }
 
 export function panelUrlCandidates(config: DaemonConfig) {
@@ -73,6 +66,8 @@ async function postHeartbeat(config: DaemonConfig, panelUrl: string, timeoutMs: 
     const json = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
     throw new Error(json.error?.message || `heartbeat HTTP ${response.status} from ${url}`);
   }
+  const json = (await response.json().catch(() => ({}))) as { data?: { consoleTag?: string } };
+  if (typeof json.data?.consoleTag === "string") setConsoleTag(json.data.consoleTag);
 }
 
 export async function sendHeartbeat(config: DaemonConfig) {

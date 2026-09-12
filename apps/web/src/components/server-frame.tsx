@@ -8,6 +8,7 @@ import { StatusPill } from "@/components/status";
 import { useAuth } from "@/components/auth-provider";
 import { ErrorPage, QueryErrorPage } from "@/components/error-page";
 import { prefetchQuery, useQuery } from "@/lib/query";
+import { useLiveReload } from "@/components/panel-socket";
 import type { ServerRecord, ServerStatus } from "@/lib/types";
 
 type ServerPayload = { data: { server: ServerRecord } };
@@ -62,11 +63,8 @@ export function ServerFrame({
 
   useEffect(() => {
     prefetchQuery(`/api/v1/client/servers/${serverId}/console/socket`);
-    const timer = window.setInterval(() => {
-      void reload();
-    }, 4000);
-    return () => window.clearInterval(timer);
-  }, [reload, serverId]);
+  }, [serverId]);
+  useLiveReload(reload, 4000);
 
   if (error && !server) {
     return (

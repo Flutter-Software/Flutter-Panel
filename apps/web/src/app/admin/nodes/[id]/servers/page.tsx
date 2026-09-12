@@ -3,19 +3,10 @@
 import Link from "next/link";
 import { useAdminNode } from "@/components/node-frame";
 import { Card } from "@/components/ui";
-import { statusMeta } from "@/components/status";
+import { statusMeta, statusPillClass } from "@/components/status";
 import { LimitMb } from "@/components/unlimited";
 import { cn } from "@/lib/cn";
 import type { ServerStatus } from "@/lib/types";
-
-const STATUS_PILL: Record<string, string> = {
-  running: "bg-status-running/15 text-status-running",
-  starting: "bg-status-warn/15 text-status-warn",
-  stopping: "bg-status-warn/15 text-status-warn",
-  installing: "bg-status-info/15 text-status-info",
-  install_failed: "bg-status-error/15 text-status-error",
-  offline: "bg-muted text-status-offline",
-};
 
 export default function NodeServersPage() {
   const { node } = useAdminNode();
@@ -43,7 +34,7 @@ export default function NodeServersPage() {
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                      STATUS_PILL[status] ?? STATUS_PILL.offline,
+                      statusPillClass(status),
                     )}
                   >
                     {meta.label}

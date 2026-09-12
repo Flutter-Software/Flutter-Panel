@@ -42,17 +42,6 @@ export async function authenticateNodeToken(token: string, nodeId: string) {
   return node;
 }
 
-export async function requireOnlineNode(nodeId: string) {
-  const node = await Node.findById(nodeId);
-  if (!node) throw FlutterError.notFound("Node not found");
-  if (!isNodeOnline(node.lastHeartbeatAt) || !node.daemonListenUrl) {
-    throw FlutterError.unavailable(
-      "Node daemon is offline. Start the daemon and wait for a heartbeat.",
-    );
-  }
-  return node;
-}
-
 export function panelApiUrl(requestOrigin?: string) {
   const origin = requestOrigin?.replace(/\/+$/, "") || "";
   if (origin) return origin;

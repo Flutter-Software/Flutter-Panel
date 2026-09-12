@@ -4,6 +4,7 @@ import {
   Suspense,
   use,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -44,6 +45,7 @@ import { cn } from "@/lib/cn";
 import { useServerRecord } from "@/components/server-frame";
 import { can } from "@/lib/access";
 import { FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } from "@flutter-software/shared";
+import { formatBytes } from "@/lib/types";
 
 type Entry = { name: string; kind: "file" | "dir"; size: number; modifiedAt: string };
 type SearchHit = { path: string; name: string; kind: "file" | "dir"; size: number };
@@ -167,6 +169,309 @@ function nextClickGuard(event: ClickPoint): ClickGuard {
 
 const CONTAINER_ROOT = ["home", "container"] as const;
 
+function lastSegment(dir: string) {
+  const cleaned = normalizeDir(dir);
+  if (cleaned === "/") return "";
+  return cleaned.slice(cleaned.lastIndexOf("/") + 1);
+}
+
+function HighlightedPath({ display, query }: { display: string; query: string }) {
+  const needle = query.trim();
+  if (!needle) return <>{display}</>;
+  const idx = display.toLowerCase().lastIndexOf(needle.toLowerCase());
+  if (idx < 0) return <>{display}</>;
+  return (
+    <>
+      {display.slice(0, idx)}
+      <span className="text-foreground">{display.slice(idx, idx + needle.length)}</span>
+      {display.slice(idx + needle.length)}
+    </>
+  );
+}
+
+type PathSuggestion = {
+  path: string;
+  kind: "current" | "match" | "nested";
+};
+
+function uniqueSuggestions(items: PathSuggestion[], limit = 12) {
+  const seen = new Set<string>();
+  const out: PathSuggestion[] = [];
+  for (const item of items) {
+    const key = normalizeDir(item.path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...item, path: key });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function MovePathSearch({
+  dest,
+  folders,
+  loading,
+  disabled,
+  onBrowse,
+  listDirs,
+  searchDirs,
+}: {
+  dest: string;
+  folders: Entry[];
+  loading: boolean;
+  disabled?: boolean;
+  onBrowse: (dir: string) => void;
+  listDirs: (dir: string) => Promise<Entry[]>;
+  searchDirs: (query: string) => Promise<SearchHit[]>;
+}) {
+  const listId = useId();
+  const cacheRef = useRef(new Map<string, Entry[]>());
+  const seqRef = useRef(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listDirsRef = useRef(listDirs);
+  const searchDirsRef = useRef(searchDirs);
+  listDirsRef.current = listDirs;
+  searchDirsRef.current = searchDirs;
+  const [draft, setDraft] = useState(() => displayContainerPath(dest));
+  const [open, setOpen] = useState(true);
+  const [active, setActive] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [suggestions, setSuggestions] = useState<PathSuggestion[]>([]);
+
+  useEffect(() => {
+    setDraft(displayContainerPath(dest));
+  }, [dest]);
+
+  useEffect(() => {
+    if (!loading) cacheRef.current.set(normalizeDir(dest), folders);
+  }, [dest, folders, loading]);
+
+  useEffect(() => {
+    if (!open) return;
+    const seq = ++seqRef.current;
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        const raw = draft.trim();
+        const asPath = looksLikePath(raw) || raw.startsWith("/") || raw.toLowerCase().startsWith("home");
+        const endsWithSlash = /[/\\]$/.test(raw);
+        const parsed = asPath ? parseContainerPath(raw, dest) : dest;
+        const parent = !asPath || endsWithSlash ? parsed : parentPath(parsed);
+        const prefix = asPath ? (endsWithSlash ? "" : lastSegment(parsed)).toLowerCase() : raw.toLowerCase();
+
+        async function cachedDirs(dir: string) {
+          const key = normalizeDir(dir);
+          const cached = cacheRef.current.get(key);
+          if (cached) return cached;
+          try {
+            const entries = await listDirsRef.current(key);
+            cacheRef.current.set(key, entries);
+            return entries;
+          } catch {
+            return [];
+          }
+        }
+
+        setBusy(true);
+        try {
+          const children = await cachedDirs(parent);
+          const matches = children
+            .filter((entry) => !prefix || entry.name.toLowerCase().includes(prefix))
+            .sort((a, b) => {
+              const aStart = prefix && a.name.toLowerCase().startsWith(prefix) ? 0 : 1;
+              const bStart = prefix && b.name.toLowerCase().startsWith(prefix) ? 0 : 1;
+              return aStart - bStart || a.name.localeCompare(b.name);
+            });
+
+          const exact = prefix ? matches.find((entry) => entry.name.toLowerCase() === prefix) : undefined;
+          const starts = prefix ? matches.filter((entry) => entry.name.toLowerCase().startsWith(prefix)) : matches;
+          let nestFrom: string | null =
+            endsWithSlash || !prefix
+              ? parsed
+              : exact
+                ? joinPath(parent, exact.name)
+                : starts.length === 1
+                  ? joinPath(parent, starts[0].name)
+                  : null;
+
+          let searched: SearchHit[] = [];
+          const searchQuery = (asPath ? prefix : raw).trim();
+          if (searchQuery.length >= 2) {
+            try {
+              searched = await searchDirsRef.current(searchQuery);
+            } catch {
+              searched = [];
+            }
+          }
+
+          if (!nestFrom && searched.length) {
+            const named =
+              searched.find((hit) => hit.name.toLowerCase() === prefix) ??
+              (searched.length === 1 ? searched[0] : undefined);
+            if (named) nestFrom = named.path;
+          }
+
+          let nested: Entry[] = [];
+          if (nestFrom) {
+            nested = normalizeDir(nestFrom) === normalizeDir(dest) ? folders : await cachedDirs(nestFrom);
+          }
+
+          if (seq !== seqRef.current) return;
+
+          const parsedExists =
+            normalizeDir(parsed) === "/" ||
+            normalizeDir(parsed) === normalizeDir(dest) ||
+            Boolean(exact) ||
+            (nestFrom != null && normalizeDir(nestFrom) === normalizeDir(parsed));
+
+          const next = uniqueSuggestions([
+            ...(parsedExists ? [{ path: parsed, kind: "current" as const }] : []),
+            ...(prefix
+              ? matches.map((entry) => ({ path: joinPath(parent, entry.name), kind: "match" as const }))
+              : []),
+            ...nested.map((entry) => ({
+              path: joinPath(nestFrom ?? parsed, entry.name),
+              kind: "nested" as const,
+            })),
+            ...searched.map((hit) => ({ path: hit.path, kind: "match" as const })),
+          ]);
+          setSuggestions(next);
+          setActive((index) => (next.length ? Math.min(index, next.length - 1) : 0));
+        } finally {
+          if (seq === seqRef.current) setBusy(false);
+        }
+      })();
+    }, 140);
+    return () => window.clearTimeout(handle);
+  }, [dest, draft, folders, open]);
+
+  function commit(path: string) {
+    onBrowse(path);
+    setOpen(true);
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      if (open) {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+      }
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      setActive((index) => (suggestions.length ? (index + 1) % suggestions.length : 0));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setOpen(true);
+      setActive((index) => (suggestions.length ? (index - 1 + suggestions.length) % suggestions.length : 0));
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const picked = open ? suggestions[active] : undefined;
+      if (picked) {
+        commit(picked.path);
+        return;
+      }
+      const raw = draft.trim();
+      commit(looksLikePath(raw) || raw.startsWith("/") ? parseContainerPath(raw, dest) : dest);
+    }
+  }
+
+  const highlightQuery = (() => {
+    const raw = draft.trim();
+    if (!looksLikePath(raw) && !raw.startsWith("/") && !raw.toLowerCase().startsWith("home")) return raw;
+    if (/[/\\]$/.test(raw)) return "";
+    return lastSegment(parseContainerPath(raw, dest));
+  })();
+
+  return (
+    <div ref={rootRef} className="relative">
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={draft}
+        disabled={disabled}
+        autoFocus
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="/home/container"
+        aria-label="Destination path"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={open && suggestions[active] ? `${listId}-${active}` : undefined}
+        className="h-9 pl-8 pr-8 font-mono text-xs sm:text-sm"
+        onChange={(event) => {
+          setDraft(event.target.value);
+          setOpen(true);
+        }}
+        onClick={() => setOpen(true)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          window.setTimeout(() => {
+            if (rootRef.current?.contains(document.activeElement)) return;
+            setOpen(false);
+          }, 120);
+        }}
+        onKeyDown={onKeyDown}
+      />
+      {loading || busy ? (
+        <Loader2 className="absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground" aria-label="Loading folders" />
+      ) : null}
+      {open ? (
+        <ul
+          id={listId}
+          role="listbox"
+          className="mt-1 max-h-52 overflow-y-auto rounded-lg border border-border bg-card py-1"
+        >
+          {suggestions.length === 0 ? (
+            <li className="px-3 py-2 text-sm text-muted-foreground">{busy ? "Searching folders…" : "No matching folders"}</li>
+          ) : (
+            suggestions.map((item, index) => {
+              const display = displayContainerPath(item.path);
+              const current = normalizeDir(item.path) === normalizeDir(dest);
+              return (
+                <li key={`${item.kind}:${item.path}`} role="option" aria-selected={index === active} id={`${listId}-${index}`}>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    className={cn(
+                      "no-press flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm",
+                      index === active && "bg-accent text-accent-foreground",
+                    )}
+                    onMouseEnter={() => setActive(index)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => commit(item.path)}
+                  >
+                    {item.kind === "nested" ? (
+                      <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className={cn("min-w-0 truncate font-mono text-xs sm:text-sm", current ? "text-foreground" : "text-muted-foreground")}>
+                      <HighlightedPath display={display} query={highlightQuery} />
+                    </span>
+                    {item.kind === "nested" ? (
+                      <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">inside</span>
+                    ) : current ? (
+                      <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">here</span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })
+          )}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function PathCrumbs({
   path,
   onBrowse,
@@ -206,12 +511,6 @@ function PathCrumbs({
       })}
     </nav>
   );
-}
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function isArchive(name: string) {
@@ -1327,7 +1626,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                   </td>
                   <td className="px-4 py-2.5 capitalize text-muted-foreground">{entry.kind}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">
-                    {entry.kind === "dir" ? "—" : formatSize(entry.size)}
+                    {entry.kind === "dir" ? "—" : formatBytes(entry.size)}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex justify-end">
@@ -1642,7 +1941,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             ? `Move ${moveModal.entries[0]?.name}`
             : `Move ${moveModal?.entries.length ?? 0} items`
         }
-        description="Choose a folder, then move the selection here."
+        description="Search for a folder or pick one below, then move the selection here."
         open={Boolean(moveModal)}
         onClose={closeMoveModal}
         className="max-w-md"
@@ -1664,18 +1963,23 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       >
         <div className="space-y-3">
           {moveError ? <p className="text-sm text-destructive">{moveError}</p> : null}
-          <div className="flex items-center gap-2">
-            <PathCrumbs
-              path={moveDest}
-              onBrowse={(dir, event) => {
-                if (shouldIgnoreClick(event)) return;
-                armClickGuard(event);
-                void browseMove(dir);
-              }}
-            />
-            {moveLoading ? <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Loading folder" /> : null}
-          </div>
-          <p className="font-mono text-xs text-muted-foreground">{displayContainerPath(moveDest)}</p>
+          <MovePathSearch
+            dest={moveDest}
+            folders={moveFolders}
+            loading={moveLoading}
+            disabled={movePending}
+            onBrowse={(dir) => void browseMove(dir)}
+            listDirs={async (dir) => {
+              const result = await files({ action: "list", path: dir });
+              const data = result.data as { entries?: Entry[] };
+              return (data.entries ?? []).filter((entry) => entry.kind === "dir");
+            }}
+            searchDirs={async (query) => {
+              const result = await files({ action: "search", path: "/", query });
+              const data = result.data as { matches?: SearchHit[] };
+              return (data.matches ?? []).filter((hit) => hit.kind === "dir");
+            }}
+          />
           <div className={cn("max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border", moveLoading && "pointer-events-none")}>
             {moveDest !== "/" ? (
               <button

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { LayoutGrid, Table2 } from "lucide-react";
 import { ServerCard, ServerTable, serverAttention } from "@/components/server-card";
 import { ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
 import { Badge, Button, Input } from "@/components/ui";
 import { useQuery } from "@/lib/query";
+import { useLiveReload } from "@/components/panel-socket";
 import type { ServerRecord } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
@@ -18,13 +19,7 @@ export default function DashboardPage() {
     "/api/v1/client/servers",
   );
   const servers = data?.data.servers ?? [];
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void reload();
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [reload]);
+  useLiveReload(reload, 3000);
 
   const mine = servers.filter((server) => server.owner);
   const other = servers.filter((server) => !server.owner);

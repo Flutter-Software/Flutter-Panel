@@ -21,6 +21,7 @@ import {
   stripAttachNoise,
 } from "./docker";
 import { getProcessState, setProcessState, setStatusBroadcast } from "./process-state";
+import { consoleTagged } from "./branding";
 
 const MAX_HISTORY = 200;
 
@@ -64,8 +65,9 @@ function clock(date = new Date()) {
 }
 
 export function consoleNotice(uuid: string, message: string) {
-  emitOutput(uuid, `[${clock()}] [Flutter] ${message}`);
-  void injectContainerLog(uuid, `[Flutter] ${message}`).catch(() => undefined);
+  const tagged = consoleTagged(message);
+  emitOutput(uuid, `[${clock()}] ${tagged}`);
+  void injectContainerLog(uuid, tagged).catch(() => undefined);
 }
 
 export function clearConsole(uuid: string) {
@@ -136,13 +138,49 @@ setConsoleEvent((uuid, event, data) => {
 });
 
 function flutterKey(line: string) {
-  const match = /\[Flutter\]\s+(.*)$/.exec(line);
+  const match = /\[Flutter\]\s+(.*)$/i.exec(line);
   return match ? match[1] : null;
+}
+
+const DOCKER_RFC3339 =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+
+function isHaltNotice(line: string) {
+  return /\[Flutter\]\s+(Stopping server|Killing server|Restarting server)\.\.\./i.test(line);
+}
+
+function isResumeNotice(line: string) {
+  return /\[Flutter\]\s+Starting server\.\.\./i.test(line);
+}
+
+function isRunningHeartbeat(line: string) {
+  const key = flutterKey(line)?.trim() ?? "";
+  return /^(?:\d{2}:\d{2}:\d{2}\s+)?running\s*$/i.test(key);
+}
+
+function haltMuted(history: string[]) {
+  let muted = false;
+  for (const row of history) {
+    if (isResumeNotice(row)) muted = false;
+    else if (isHaltNotice(row)) muted = true;
+  }
+  return muted;
+}
+
+function shouldDropOutput(uuid: string, line: string) {
+  const body = lineBody(line);
+  if (DOCKER_RFC3339.test(body)) return true;
+  if (!isRunningHeartbeat(line)) return false;
+  if (getProcessState(uuid) === "stopping") return true;
+  const history = sessions.get(uuid)?.history ?? pendingNotices.get(uuid) ?? [];
+  return haltMuted(history);
 }
 
 function isNoise(line: string) {
   const cleaned = stripAttachNoise(line);
-  return !cleaned || (cleaned.startsWith("{") && cleaned.includes('"hijack"'));
+  if (!cleaned || (cleaned.startsWith("{") && cleaned.includes('"hijack"'))) return true;
+  const body = cleaned.replace(/^\[\d{2}:\d{2}:\d{2}\]\s+/, "");
+  return DOCKER_RFC3339.test(body);
 }
 
 function lineBody(line: string) {
@@ -163,6 +201,7 @@ function rememberLine(history: string[], line: string) {
 }
 
 function emitOutput(uuid: string, line: string) {
+  if (shouldDropOutput(uuid, line)) return;
   const current = sessions.get(uuid);
   if (!current) {
     const queue = pendingNotices.get(uuid) ?? [];

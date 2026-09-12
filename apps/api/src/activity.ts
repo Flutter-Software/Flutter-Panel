@@ -29,10 +29,6 @@ export type ActivityActor = {
 
 const actorStore = new AsyncLocalStorage<ActivityActor>();
 
-export function enterActivityContext(actor: ActivityActor) {
-  actorStore.enterWith(actor);
-}
-
 export function runActivityContext<T>(actor: ActivityActor, fn: () => T): T {
   return actorStore.run(actor, fn);
 }

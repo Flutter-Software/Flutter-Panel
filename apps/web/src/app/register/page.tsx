@@ -17,7 +17,7 @@ export default function RegisterPage() {
   useEffect(() => {
     api<SetupResponse>("/api/v1/auth/setup")
       .then((result) => {
-        if (!result.data.initialized) {
+        if (!result.data.initialized || result.data.sso?.passwordLogin === false) {
           router.replace("/login");
           return;
         }

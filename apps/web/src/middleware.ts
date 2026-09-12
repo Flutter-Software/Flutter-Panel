@@ -1,21 +1,9 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE } from "@flutter-software/shared";
+import { SESSION_COOKIE, isLoopbackHost } from "@flutter-software/shared";
 
-const PUBLIC = new Set(["/login", "/register", "/verify"]);
+const PUBLIC = new Set(["/login", "/register", "/verify", "/sso"]);
 const PUBLIC_FILE = /\.(?:ico|png|jpe?g|gif|webp|svg|woff2?)$/i;
-
-function isLoopbackHost(host: string) {
-  const hostname = host.split(":")[0]?.toLowerCase() ?? "";
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "0.0.0.0" ||
-    hostname === "::1" ||
-    hostname === "[::1]" ||
-    hostname === ""
-  );
-}
 
 function asUrl(value: string, base?: string) {
   try {

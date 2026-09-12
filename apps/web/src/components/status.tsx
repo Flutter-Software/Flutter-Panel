@@ -51,6 +51,10 @@ const STATUS_PILL: Record<ServerStatus, string> = {
   offline: "border border-border/80 bg-muted/60 text-foreground",
 };
 
+export function statusPillClass(status: ServerStatus) {
+  return STATUS_PILL[status] ?? STATUS_PILL.offline;
+}
+
 export function StatusPill({
   status,
   className,
@@ -71,34 +75,6 @@ export function StatusPill({
       <span className={cn("size-2 shrink-0 rounded-full", meta.bar, live && "animate-pulse")} />
       {meta.label}
     </span>
-  );
-}
-
-export function ResourceBar({
-  label,
-  value,
-  max,
-  display,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  display: string;
-}) {
-  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
-  const tone =
-    pct >= 90 ? "bg-status-error" : pct >= 70 ? "bg-status-warn" : "bg-status-running";
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-[11px]">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="tabular-nums text-foreground/80">{display}</span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full", tone)} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
   );
 }
 

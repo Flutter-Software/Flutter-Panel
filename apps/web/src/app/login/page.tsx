@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthBrand } from "@/components/brand";
-import { Button, Input } from "@/components/ui";
+import { Button, buttonClass, Input } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { api, type AuthResponse, type SetupResponse } from "@/lib/api";
 import { PANEL_VERSION } from "@flutter-software/shared";
@@ -17,16 +17,36 @@ export default function LoginPage() {
   const [pending, setPending] = useState(false);
   const [totpToken, setTotpToken] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState("");
+  const [sso, setSso] = useState<{ enabled: boolean; buttonLabel: string; passwordLogin: boolean }>({
+    enabled: false,
+    buttonLabel: "Sign in with SSO",
+    passwordLogin: true,
+  });
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error") === "sso") {
+      setError("Automatic sign-in failed. Try again, or use a password if that is enabled.");
+    }
     api<SetupResponse>("/api/v1/auth/setup")
-      .then((result) => setInitialized(result.data.initialized))
+      .then((result) => {
+        setInitialized(result.data.initialized);
+        if (result.data.sso) setSso(result.data.sso);
+      })
       // If setup is unreachable, show the login form — not the first-admin
       // register screen. An empty panel still answers this endpoint.
       .catch(() => setInitialized(true));
   }, []);
 
   const setupMode = initialized === false;
+  const showPassword = setupMode || sso.passwordLogin;
+  const showSso = !setupMode && !totpToken && sso.enabled;
+
+  function ssoHref() {
+    const next = new URLSearchParams(window.location.search).get("next");
+    const qs = next?.startsWith("/") ? `?next=${encodeURIComponent(next)}` : "";
+    return `/api/v1/auth/oidc/start${qs}`;
+  }
 
   function finishLogin(user: AuthResponse["data"]["user"]) {
     if (!user) throw new Error("Sign in failed");
@@ -103,103 +123,123 @@ export default function LoginPage() {
               </button>
             </form>
           ) : (
-          <form
-            className="mt-6 space-y-4"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              setError(null);
-              setPending(true);
-              const form = new FormData(event.currentTarget);
-              try {
-                const path = setupMode ? "/api/v1/auth/register" : "/api/v1/auth/login";
-                const body = setupMode
-                  ? {
-                      username: String(form.get("username")),
-                      email: String(form.get("email")),
-                      password: String(form.get("password")),
+            <div className="mt-6 space-y-4">
+              {showSso ? (
+                <a href={ssoHref()} className={buttonClass({ className: "h-11 w-full" })}>
+                  {sso.buttonLabel}
+                </a>
+              ) : null}
+
+              {showSso && showPassword ? (
+                <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <span className="h-px flex-1 bg-border" />
+                  or
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+              ) : null}
+
+              {showPassword ? (
+                <form
+                  className="space-y-4"
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    setError(null);
+                    setPending(true);
+                    const form = new FormData(event.currentTarget);
+                    try {
+                      const path = setupMode ? "/api/v1/auth/register" : "/api/v1/auth/login";
+                      const body = setupMode
+                        ? {
+                            username: String(form.get("username")),
+                            email: String(form.get("email")),
+                            password: String(form.get("password")),
+                          }
+                        : {
+                            login: String(form.get("email")),
+                            password: String(form.get("password")),
+                            remember: true,
+                          };
+                      const result = await api<AuthResponse>(path, {
+                        method: "POST",
+                        body: JSON.stringify(body),
+                      });
+                      if (result.data.needsVerification && result.data.email) {
+                        const next = new URLSearchParams(window.location.search).get("next");
+                        const verify = `/verify?email=${encodeURIComponent(result.data.email)}`;
+                        router.push(
+                          next?.startsWith("/") ? `${verify}&next=${encodeURIComponent(next)}` : verify,
+                        );
+                        return;
+                      }
+                      if (result.data.needsTotp && result.data.totpToken) {
+                        setTotpToken(result.data.totpToken);
+                        setTotpCode("");
+                        return;
+                      }
+                      finishLogin(result.data.user);
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Sign in failed");
+                    } finally {
+                      setPending(false);
                     }
-                  : {
-                      login: String(form.get("email")),
-                      password: String(form.get("password")),
-                      remember: true,
-                    };
-                const result = await api<AuthResponse>(path, {
-                  method: "POST",
-                  body: JSON.stringify(body),
-                });
-                if (result.data.needsVerification && result.data.email) {
-                  const next = new URLSearchParams(window.location.search).get("next");
-                  const verify = `/verify?email=${encodeURIComponent(result.data.email)}`;
-                  router.push(
-                    next?.startsWith("/") ? `${verify}&next=${encodeURIComponent(next)}` : verify,
-                  );
-                  return;
-                }
-                if (result.data.needsTotp && result.data.totpToken) {
-                  setTotpToken(result.data.totpToken);
-                  setTotpCode("");
-                  return;
-                }
-                finishLogin(result.data.user);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Sign in failed");
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            {setupMode ? (
-              <label className="block space-y-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Username
-                </span>
-                <Input name="username" autoComplete="username" required placeholder="admin" />
-              </label>
-            ) : null}
-            <label className="block space-y-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Email
-              </span>
-              <Input
-                name="email"
-                type={setupMode ? "email" : "text"}
-                autoComplete={setupMode ? "email" : "username"}
-                required
-                placeholder="alex@flutter.local"
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Password
-              </span>
-              <Input
-                name="password"
-                type="password"
-                autoComplete={setupMode ? "new-password" : "current-password"}
-                required
-                minLength={setupMode ? 10 : 1}
-                placeholder="••••••••"
-              />
-            </label>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-            <Button type="submit" className="h-11 w-full" disabled={pending || initialized === null}>
-              {pending ? "Please wait…" : setupMode ? "Create admin" : "Sign in"}
-            </Button>
-          </form>
+                  }}
+                >
+                  {setupMode ? (
+                    <label className="block space-y-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Username
+                      </span>
+                      <Input name="username" autoComplete="username" required placeholder="admin" />
+                    </label>
+                  ) : null}
+                  <label className="block space-y-1.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Email
+                    </span>
+                    <Input
+                      name="email"
+                      type={setupMode ? "email" : "text"}
+                      autoComplete={setupMode ? "email" : "username"}
+                      required
+                      placeholder="alex@flutter.local"
+                    />
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Password
+                    </span>
+                    <Input
+                      name="password"
+                      type="password"
+                      autoComplete={setupMode ? "new-password" : "current-password"}
+                      required
+                      minLength={setupMode ? 10 : 1}
+                      placeholder="••••••••"
+                    />
+                  </label>
+                  {error ? <p className="text-sm text-destructive">{error}</p> : null}
+                  <Button type="submit" className="h-11 w-full" disabled={pending || initialized === null}>
+                    {pending ? "Please wait…" : setupMode ? "Create admin" : "Sign in"}
+                  </Button>
+                </form>
+              ) : (
+                error ? <p className="text-sm text-destructive">{error}</p> : null
+              )}
+            </div>
           )}
 
           {totpToken ? null : setupMode ? (
             <p className="mt-5 text-center text-sm text-muted-foreground">
               First account becomes the panel administrator.
             </p>
-          ) : (
+          ) : sso.passwordLogin ? (
             <p className="mt-5 text-center text-sm text-muted-foreground">
               Don&apos;t have an account?{" "}
               <Link href="/register" className="font-medium text-primary">
                 Create an account
               </Link>
             </p>
-          )}
+          ) : null}
         </div>
       </div>
 

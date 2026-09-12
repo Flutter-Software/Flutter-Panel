@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Box,
@@ -14,11 +14,12 @@ import {
 } from "lucide-react";
 import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
-import { statusMeta } from "@/components/status";
+import { statusMeta, statusPillClass } from "@/components/status";
 import { ButtonLink, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { prefetchQuery, useQuery } from "@/lib/query";
-import type { ServerRecord, ServerStatus } from "@/lib/types";
+import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
+import type { ServerRecord } from "@/lib/types";
 import type { PublicUser } from "@flutter-software/shared";
 import type { LocationRecord } from "./locations/location-form";
 import type { NestRecord } from "./nests/nest-form";
@@ -46,15 +47,6 @@ type UpdateStatus = {
   latest: { message: string; shortSha: string };
 };
 
-const STATUS_PILL: Record<ServerStatus, string> = {
-  running: "bg-status-running/15 text-status-running",
-  starting: "bg-status-warn/15 text-status-warn",
-  stopping: "bg-status-warn/15 text-status-warn",
-  installing: "bg-status-info/15 text-status-info",
-  install_failed: "bg-status-error/15 text-status-error",
-  offline: "bg-muted text-status-offline",
-};
-
 const HEALTH_LABELS: Record<string, string> = {
   mongo: "MongoDB",
   prisma: "Prisma",
@@ -77,35 +69,28 @@ export default function AdminDashboardPage() {
   const locationRows = locations.data?.data.locations ?? [];
   const userRows = users.data?.data.users ?? [];
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void servers.reload();
-      void nodes.reload();
-    }, 8000);
-    return () => window.clearInterval(timer);
-  }, [servers.reload, nodes.reload]);
+  useLiveReload(servers.reload, 8000);
+  useLiveReload(nodes.reload, 8000);
+  usePanelEvent("health", (payload) => {
+    setHealth(payload as Health);
+    setHealthError(null);
+  });
+
+  const loadHealth = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/health", { credentials: "include" });
+      const json = (await response.json()) as Health;
+      setHealth(json);
+      setHealthError(null);
+    } catch {
+      setHealthError("Unreachable");
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    async function loadHealth() {
-      try {
-        const response = await fetch("/api/v1/health", { credentials: "include" });
-        const json = (await response.json()) as Health;
-        if (!cancelled) {
-          setHealth(json);
-          setHealthError(null);
-        }
-      } catch {
-        if (!cancelled) setHealthError("Unreachable");
-      }
-    }
     void loadHealth();
-    const timer = window.setInterval(() => void loadHealth(), 15_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
+  }, [loadHealth]);
+  useLiveReload(loadHealth, 15_000);
 
   const running = serverRows.filter((row) => row.status === "running").length;
   const installFailed = serverRows.filter((row) => row.status === "install_failed");
@@ -277,7 +262,7 @@ export default function AdminDashboardPage() {
           </div>
 
           {updates.data?.data.updateAvailable ? (
-            <Link href="/admin/settings">
+            <Link href="/admin/settings#updates">
               <Card className="p-4 transition-colors hover:border-primary/40">
                 <p className="text-sm font-semibold">Panel update available</p>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -327,7 +312,7 @@ export default function AdminDashboardPage() {
                           <span
                             className={cn(
                               "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
-                              STATUS_PILL[server.status],
+                              statusPillClass(server.status),
                             )}
                           >
                             <span className={cn("size-1.5 rounded-full", meta.bar)} />

@@ -4,7 +4,7 @@ import { mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile, 
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { DaemonConfig } from "./config";
-import { ensureServerOwnership, serverRoot } from "./docker";
+import { DiskLimitError, ensureDiskCapacity, ensureServerOwnership, serverRoot } from "./docker";
 import { safeJoin } from "./files";
 import { describeFetchError } from "./panel-fetch";
 import { panelUrlCandidates } from "./heartbeat";
@@ -118,6 +118,9 @@ function statusOf(error: unknown) {
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
   if (code === "ENOENT" || code === "ENOTDIR") return STATUS.NO_SUCH_FILE;
   if (code === "EACCES" || code === "EPERM" || code === "EEXIST") return STATUS.PERMISSION_DENIED;
+  if (code === "ENOSPC" || error instanceof DiskLimitError) {
+    return (STATUS as { NO_SPACE?: number }).NO_SPACE ?? STATUS.FAILURE;
+  }
   return STATUS.FAILURE;
 }
 
@@ -295,6 +298,7 @@ function bindSftp(sftp: SftpStream, config: DaemonConfig, auth: SftpAuth) {
         sftp.status(id, STATUS.FAILURE);
         return;
       }
+      if (mode.writable) await ensureDiskCapacity(config, auth.uuid, existing ? 0 : 1);
       const file = await withWritable(config, auth.uuid, () => open(target, mode.flags));
       const handle = alloc();
       opens.set(keyOf(handle), { kind: "file", handle: file, writable: mode.writable });
@@ -332,6 +336,9 @@ function bindSftp(sftp: SftpStream, config: DaemonConfig, auth: SftpAuth) {
     }
     if (deny(id, auth.write && opened.writable)) return;
     try {
+      const info = await opened.handle.stat();
+      const end = Number(offset) + data.length;
+      await ensureDiskCapacity(config, auth.uuid, Math.max(0, end - info.size));
       await withWritable(config, auth.uuid, () => opened.handle.write(data, 0, data.length, Number(offset)));
       sftp.status(id, STATUS.OK);
     } catch (error) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Check, Copy, Plus, Server, Trash2 } from "lucide-react";
 import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
@@ -10,6 +10,7 @@ import { Button, ButtonLink, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
+import { useLiveReload } from "@/components/panel-socket";
 import { formatGiB } from "@/lib/types";
 
 type Allocation = { id: string; ip: string; port: number; assigned: boolean };
@@ -85,13 +86,7 @@ export default function AdminNodesPage() {
   const nodes = data?.data.nodes ?? [];
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      void reload();
-    }, 15_000);
-    return () => window.clearInterval(id);
-  }, [reload]);
+  useLiveReload(reload, 15_000);
 
   async function copyToken(node: Node) {
     try {

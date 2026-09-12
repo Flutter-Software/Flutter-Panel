@@ -1,9 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/cn";
-import { DEFAULT_LOGO_SRC, useBranding } from "@/components/branding-provider";
-
-export const LOGO_SRC = DEFAULT_LOGO_SRC;
+import { useBranding } from "@/components/branding-provider";
 
 export function BrandMark({
   size = 28,

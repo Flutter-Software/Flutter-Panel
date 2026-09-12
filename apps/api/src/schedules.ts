@@ -14,6 +14,7 @@ import { Schedule, Server } from "./db/models";
 import { log } from "./log";
 import { applyPowerDirect, createBackupDirect, requireAccess, sendCommandDirect } from "./servers";
 import { recordActivity, runActivityContext } from "./activity";
+import { publish } from "./panel-hub";
 
 type TaskDoc = {
   _id: { toString(): string };
@@ -88,6 +89,15 @@ function publicSchedule(row: {
   };
 }
 
+function emitSchedule(serverId: string, row: Parameters<typeof publicSchedule>[0] | null, removed?: string) {
+  publish({
+    event: "schedule",
+    data: removed
+      ? { serverId, removed }
+      : { serverId, schedule: row ? publicSchedule(row) : undefined },
+  });
+}
+
 function caps(access: { admin: boolean; owner: boolean; permissions: string[] }) {
   const allow = (permission: ServerPermission) =>
     access.admin || access.owner || hasServerPermission(access.permissions, permission);
@@ -129,6 +139,7 @@ export async function createSchedule(serverId: string, viewerId: string, admin: 
     category: "schedules",
     properties: { name: row.name },
   });
+  emitSchedule(access.server._id.toString(), row);
   return { schedule: publicSchedule(row) };
 }
 
@@ -166,6 +177,7 @@ export async function updateSchedule(
     category: "schedules",
     properties: { name: row.name },
   });
+  emitSchedule(access.server._id.toString(), row);
   return { schedule: publicSchedule(row) };
 }
 
@@ -181,6 +193,7 @@ export async function deleteSchedule(serverId: string, scheduleId: string, viewe
     category: "schedules",
     properties: { name },
   });
+  emitSchedule(access.server._id.toString(), null, row._id.toString());
   return { ok: true };
 }
 
@@ -190,6 +203,7 @@ export async function runScheduleNow(serverId: string, scheduleId: string, viewe
   if (!row) throw FlutterError.notFound("Schedule not found");
   const claimed = await claimSchedule(row._id.toString());
   if (!claimed) throw FlutterError.conflict("This schedule is already running");
+  emitSchedule(access.server._id.toString(), claimed);
   recordActivity({
     serverId: access.server._id.toString(),
     event: "schedule.run",
@@ -287,11 +301,13 @@ async function finishSchedule(
   row.lastError = errorMessage;
   row.nextRunAt = row.enabled ? nextCronDate(cron) : null;
   await row.save();
+  emitSchedule(row.serverId.toString(), row);
 }
 
 async function executeSchedule(scheduleId: string, options: { ignoreOnline?: boolean } = {}) {
   const claimed = await claimSchedule(scheduleId);
   if (!claimed) return;
+  emitSchedule(claimed.serverId.toString(), claimed);
   await finishSchedule(claimed, options);
 }
 

@@ -1,29 +1,21 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, Pencil, Plus, Search, Server, Trash2, X } from "lucide-react";
 import { AdminPage, ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card, EmptyState, Input, Select } from "@/components/ui";
-import { statusMeta } from "@/components/status";
+import { statusMeta, statusPillClass } from "@/components/status";
 import { serverAlerts, serverAttention } from "@/components/server-card";
 import { CpuLimit, LimitMb } from "@/components/unlimited";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
+import { useLiveReload } from "@/components/panel-socket";
 import { formatCompact, type ServerRecord, type ServerStatus } from "@/lib/types";
-
-const STATUS_PILL: Record<ServerStatus, string> = {
-  running: "bg-status-running/15 text-status-running",
-  starting: "bg-status-warn/15 text-status-warn",
-  stopping: "bg-status-warn/15 text-status-warn",
-  installing: "bg-status-info/15 text-status-info",
-  install_failed: "bg-status-error/15 text-status-error",
-  offline: "bg-muted text-status-offline",
-};
 
 const STATUS_FILTERS: ServerStatus[] = [
   "running",
@@ -44,13 +36,7 @@ export default function AdminServersPage() {
   const [node, setNode] = useState("");
   const [egg, setEgg] = useState("");
   const [owner, setOwner] = useState("");
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void reload();
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [reload]);
+  useLiveReload(reload, 3000);
 
   const nodes = useMemo(
     () => [...new Set(servers.map((server) => server.node).filter(Boolean))].sort(),
@@ -254,7 +240,7 @@ export default function AdminServersPage() {
                         <span
                           className={cn(
                             "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
-                            STATUS_PILL[server.status],
+                            statusPillClass(server.status),
                           )}
                         >
                           <span className={cn("size-1.5 rounded-full", meta.bar)} />

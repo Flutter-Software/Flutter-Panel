@@ -10,6 +10,7 @@ import {
 import { Allocation, Location, Node, Server } from "../db/models";
 import { hashPassword, randomToken } from "./crypto";
 import { isNodeOnline, panelApiUrl } from "../nodes";
+import { publish, publishNodesChanged, rememberNodeOnline } from "../panel-hub";
 
 function nodeInstallCommand(panelUrl: string, token: string, nodeId: string, daemonPort: number) {
   const port = Number.isInteger(daemonPort) && daemonPort > 0 ? daemonPort : 8080;
@@ -299,6 +300,7 @@ export async function createNode(body: unknown) {
 
   const nodeId = row._id.toString();
   const panelUrl = panelApiUrl();
+  publishNodesChanged(nodeId);
 
   return {
     node: {
@@ -351,6 +353,20 @@ export async function updateNode(id: string, body: unknown) {
   if (parsed.data.uploadLimitMb !== undefined) node.uploadLimitMb = parsed.data.uploadLimitMb;
   if (parsed.data.maintenanceMode !== undefined) node.maintenanceMode = parsed.data.maintenanceMode;
   await node.save();
+  const online = isNodeOnline(node.lastHeartbeatAt);
+  rememberNodeOnline(id, online);
+  publish({
+    event: "node.status",
+    data: {
+      id,
+      online,
+      lastHeartbeatAt: node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).toISOString() : null,
+      maintenanceMode: Boolean(node.maintenanceMode),
+      daemonVersion: node.daemonVersion || null,
+      daemonListenUrl: node.daemonListenUrl ?? null,
+    },
+  });
+  publishNodesChanged(id);
   return getNode(id);
 }
 
@@ -412,6 +428,7 @@ export async function deleteNode(id: string) {
   }
   await Allocation.deleteMany({ nodeId: id });
   await Node.deleteOne({ _id: id });
+  publishNodesChanged(id);
   return { deleted: true };
 }
 

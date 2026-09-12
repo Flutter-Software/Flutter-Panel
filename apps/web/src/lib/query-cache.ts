@@ -26,6 +26,15 @@ export function subscribeQuery(path: string, listener: () => void) {
   };
 }
 
+export function updateQueries(mutate: (path: string, data: unknown) => unknown | undefined) {
+  for (const [path, entry] of store) {
+    const next = mutate(path, entry.data);
+    if (next === undefined) continue;
+    store.set(path, { data: next });
+    listeners.get(path)?.forEach((listener) => listener());
+  }
+}
+
 export function invalidateQuery(prefix: string) {
   const keys = [...store.keys()].filter(
     (key) => key === prefix || key.startsWith(`${prefix}?`) || key.startsWith(`${prefix}/`),

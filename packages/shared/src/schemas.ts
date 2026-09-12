@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./constants";
+import { CONSOLE_TAG_MAX_LENGTH, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, normalizeConsoleTag } from "./constants";
 import { SERVER_PERMISSIONS } from "./permissions";
 
 export const roleSchema = z.enum(["admin", "user"]);
@@ -157,8 +157,52 @@ export const smtpTestSchema = z.object({
   fromName: z.string().max(120).optional(),
 });
 
+export const oidcSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    issuer: z.string().max(500).default(""),
+    clientId: z.string().max(255).default(""),
+    clientSecret: z.union([z.string().max(2048), z.literal("")]).optional(),
+    buttonLabel: z.string().trim().max(64).default("Sign in with SSO"),
+    scopes: z.string().trim().max(255).default("openid email profile"),
+    allowedDomains: z.string().max(500).default(""),
+    passwordLogin: z.boolean().default(true),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.enabled) return;
+    const issuer = data.issuer.trim();
+    if (!issuer) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Issuer URL is required", path: ["issuer"] });
+    } else if (!z.string().url().safeParse(issuer).success) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Issuer must be a valid URL", path: ["issuer"] });
+    }
+    if (!data.clientId.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Client ID is required", path: ["clientId"] });
+    }
+  });
+
+export const oidcDiscoveryTestSchema = z.object({
+  issuer: z.string().trim().url().max(500),
+});
+
+export const ssoLoginCreateSchema = z
+  .object({
+    userId: objectIdSchema.optional(),
+    email: z.string().trim().email().optional(),
+    username: registerSchema.shape.username.optional(),
+    next: z.string().max(300).optional(),
+  })
+  .refine((data) => Boolean(data.userId || data.email || data.username), {
+    message: "userId, email, or username is required",
+  });
+
 export const brandingUpdateSchema = z.object({
   siteName: z.string().trim().min(1).max(48),
+  consoleTag: z
+    .string()
+    .max(CONSOLE_TAG_MAX_LENGTH + 2)
+    .transform((value) => normalizeConsoleTag(value))
+    .optional(),
   logo: z
     .object({
       mime: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
@@ -274,9 +318,12 @@ export const eggCreateSchema = z.object({
   installScript: z.string().max(20_000).optional().default(""),
   installImage: z.string().max(255).optional().default("alpine:3.20"),
   variables: z.array(eggVariableSchema).optional().default([]),
+  requiresAllocation: z.boolean().optional().default(true),
 });
 
-export const eggUpdateSchema = eggCreateSchema.partial();
+export const eggUpdateSchema = eggCreateSchema.omit({ requiresAllocation: true }).partial().extend({
+  requiresAllocation: z.boolean().optional(),
+});
 
 export const eggImportSchema = z.object({
   nestId: objectIdSchema,
@@ -288,7 +335,7 @@ export const serverCreateSchema = z.object({
   description: z.string().max(240).optional().default(""),
   eggId: objectIdSchema,
   nodeId: objectIdSchema,
-  allocationId: objectIdSchema,
+  allocationId: objectIdSchema.optional(),
   allocationIds: z.array(objectIdSchema).max(50).optional().default([]),
   ownerId: objectIdSchema.optional(),
   memoryMb: z.number().int().min(0).max(16_777_216),
@@ -307,7 +354,7 @@ export const serverUpdateSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   description: z.string().max(240).optional(),
   ownerId: objectIdSchema.optional(),
-  allocationId: objectIdSchema.optional(),
+  allocationId: objectIdSchema.nullable().optional(),
   allocationIds: z.array(objectIdSchema).max(50).optional(),
   memoryMb: z.number().int().min(0).max(16_777_216).optional(),
   diskMb: z.number().int().min(0).max(16_777_216).optional(),

@@ -11,8 +11,19 @@ const userSchema = new Schema(
     emailVerified: { type: Boolean, required: true, default: true },
     emailVerifyHash: { type: String, default: null },
     emailVerifyExpiresAt: { type: Date, default: null },
+    oidcIssuer: { type: String, default: null },
+    oidcSub: { type: String, default: null },
   },
   { timestamps: true },
+);
+
+userSchema.index(
+  { oidcIssuer: 1, oidcSub: 1 },
+  {
+    unique: true,
+    name: "oidc_subject_unique",
+    partialFilterExpression: { oidcSub: { $type: "string" } },
+  },
 );
 
 const sessionSchema = new Schema(
@@ -99,6 +110,7 @@ const eggSchema = new Schema({
   installScript: { type: String, default: "" },
   installImage: { type: String, default: "alpine:3.20" },
   variables: { type: Schema.Types.Mixed, default: [] },
+  requiresAllocation: { type: Boolean, required: true, default: true },
   createdAt: { type: Date, required: true, default: Date.now },
 });
 
@@ -110,7 +122,7 @@ const serverSchema = new Schema(
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     nodeId: { type: Schema.Types.ObjectId, ref: "Node", required: true, index: true },
     eggId: { type: Schema.Types.ObjectId, ref: "Egg", required: true, index: true },
-    allocationId: { type: Schema.Types.ObjectId, ref: "Allocation", required: true, unique: true },
+    allocationId: { type: Schema.Types.ObjectId, ref: "Allocation" },
     memoryMb: { type: Number, required: true },
     diskMb: { type: Number, required: true },
     cpuPercent: { type: Number, required: true, default: 100 },
@@ -125,6 +137,15 @@ const serverSchema = new Schema(
     environment: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true },
+);
+
+serverSchema.index(
+  { allocationId: 1 },
+  {
+    unique: true,
+    name: "allocationId_unique_assigned",
+    partialFilterExpression: { allocationId: { $type: "objectId" } },
+  },
 );
 
 const subuserSchema = new Schema(
@@ -188,7 +209,18 @@ const panelSettingsSchema = new Schema(
       fromEmail: { type: String, default: "" },
       fromName: { type: String, default: "Flutter" },
     },
+    oidc: {
+      enabled: { type: Boolean, default: false },
+      issuer: { type: String, default: "" },
+      clientId: { type: String, default: "" },
+      clientSecret: { type: String, default: "" },
+      buttonLabel: { type: String, default: "Sign in with SSO" },
+      scopes: { type: String, default: "openid email profile" },
+      allowedDomains: { type: String, default: "" },
+      passwordLogin: { type: Boolean, default: true },
+    },
     siteName: { type: String, default: "Flutter" },
+    consoleTag: { type: String, default: "Flutter" },
     logoMime: { type: String, default: null },
     logo: { type: Buffer, default: null },
   },
@@ -261,6 +293,19 @@ const apiKeySchema = new Schema(
 
 apiKeySchema.index({ userId: 1, kind: 1, createdAt: -1 });
 
+const ssoLoginTokenSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    tokenHash: { type: String, required: true, unique: true },
+    next: { type: String, default: "/" },
+    expiresAt: { type: Date, required: true },
+    usedAt: { type: Date, default: null },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } },
+);
+
+ssoLoginTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
 function modelOf(name: string, schema: Schema): Model<any> {
   // tsx/node --watch re-imports this file. mongoose throws on a second
   // model(name) for the same connection, so drop the cached one first.
@@ -283,3 +328,4 @@ export const DatabaseHost = modelOf("DatabaseHost", databaseHostSchema);
 export const ServerDatabase = modelOf("ServerDatabase", serverDatabaseSchema);
 export const Activity = modelOf("Activity", activitySchema);
 export const ApiKey = modelOf("ApiKey", apiKeySchema);
+export const SsoLoginToken = modelOf("SsoLoginToken", ssoLoginTokenSchema);

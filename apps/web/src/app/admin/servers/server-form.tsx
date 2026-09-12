@@ -36,6 +36,7 @@ type EggOption = {
   startup?: string;
   stopCommand?: string;
   variables?: EggVariable[];
+  requiresAllocation?: boolean;
 };
 type Nest = { id: string; name: string; eggs: EggOption[] };
 type Node = { id: string; name: string; online: boolean; location?: string };
@@ -161,6 +162,7 @@ export function ServerForm({
     [nests],
   );
   const selectedEgg = eggs.find((egg) => egg.id === eggId);
+  const needsPort = selectedEgg ? selectedEgg.requiresAllocation !== false : true;
   const allocationOptions = allocations.filter(
     (row) => !row.assigned || row.id === initial?.allocationId || row.serverId === initial?.id,
   );
@@ -234,6 +236,11 @@ export function ServerForm({
     setStartup(egg.startup ?? "");
     setStopCommand(egg.stopCommand || "stop");
     setEnvValues(envFromEgg(egg));
+    if (egg.requiresAllocation === false) {
+      setAllocationId("");
+      setExtraAllocationIds([]);
+      setAddingPorts(false);
+    }
   }, [creating, eggId, eggs]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -244,8 +251,11 @@ export function ServerForm({
       name: name.trim(),
       description,
       ownerId,
-      allocationId,
-      allocationIds: extraAllocationIds.filter((id) => id !== allocationId),
+      ...(allocationId
+        ? { allocationId, allocationIds: extraAllocationIds.filter((id) => id !== allocationId) }
+        : creating
+          ? {}
+          : { allocationId: null, allocationIds: [] }),
       memoryMb: Number(memoryMb),
       diskMb: Number(diskMb),
       cpuPercent: Number(cpuPercent),
@@ -315,7 +325,7 @@ export function ServerForm({
     ownerId &&
     eggId &&
     nodeId &&
-    allocationId &&
+    (!needsPort || allocationId) &&
     Number.isFinite(Number(memoryMb)) &&
     Number(memoryMb) >= 0 &&
     Number.isFinite(Number(diskMb)) &&
@@ -425,7 +435,15 @@ export function ServerForm({
                 />
               )}
             </Field>
-            <Field label="Allocation" required>
+            <Field
+              label="Allocation"
+              required={needsPort}
+              hint={
+                needsPort
+                  ? undefined
+                  : "Optional. This egg does not need a public port."
+              }
+            >
               <Select
                 value={allocationId}
                 onChange={(event) => {
@@ -433,11 +451,17 @@ export function ServerForm({
                   setAllocationId(next);
                   setExtraAllocationIds((current) => current.filter((id) => id !== next));
                 }}
-                required
+                required={needsPort}
                 disabled={!nodeId}
                 className="font-mono"
               >
-                <option value="">{nodeId ? "Select allocation" : "Select a node first"}</option>
+                <option value="">
+                  {!nodeId
+                    ? "Select a node first"
+                    : needsPort
+                      ? "Select allocation"
+                      : "None (no public port)"}
+                </option>
                 {allocationOptions.map((row) => (
                   <option key={row.id} value={row.id}>
                     {row.ip}:{row.port}
@@ -446,6 +470,7 @@ export function ServerForm({
                 ))}
               </Select>
             </Field>
+            {needsPort ? (
             <Field label="Extra ports">
               {extraAllocationIds.length || addingPorts ? (
                 <SearchSelect
@@ -480,11 +505,12 @@ export function ServerForm({
                 </button>
               )}
             </Field>
+            ) : null}
           </div>
         </Panel>
       </div>
 
-      <Panel icon={<Gauge className="size-3.5" />} title="Limits" aside="0 = unlimited · 100% CPU = 1 core">
+      <Panel icon={<Gauge className="size-3.5" />} title="Limits" aside="Hard caps · 0 = unlimited · 100% CPU = 1 core">
         <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
           <Field label="Memory (MB)" required>
             <Input

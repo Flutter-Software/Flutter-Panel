@@ -5,7 +5,7 @@ import { unzipSync, zipSync } from "fflate";
 import { createExtractorFromData, UnrarError } from "node-unrar-js";
 import { gunzipSync } from "node:zlib";
 import type { DaemonConfig } from "./config";
-import { bindPath, ensureServerOwnership, runBackupContainer, serverRoot } from "./docker";
+import { bindPath, ensureDiskCapacity, DiskLimitError, ensureServerOwnership, runBackupContainer, serverRoot } from "./docker";
 
 export function safeJoin(root: string, rel: string) {
   const cleaned = (rel || ".").replace(/\\/g, "/").replace(/^\/+/, "");
@@ -81,6 +81,16 @@ export async function readServerFile(config: DaemonConfig, uuid: string, relPath
   return { path: displayPath(root, target), content: buffer.toString("utf8"), size: info.size };
 }
 
+async function extraWriteBytes(path: string, nextBytes: number) {
+  try {
+    const info = await stat(path);
+    if (info.isFile()) return Math.max(0, nextBytes - info.size);
+  } catch {
+    /* creating a new file */
+  }
+  return nextBytes;
+}
+
 export async function writeServerFile(
   config: DaemonConfig,
   uuid: string,
@@ -90,10 +100,12 @@ export async function writeServerFile(
   const root = serverRoot(config, uuid);
   const target = safeJoin(root, relPath);
   return withWritable(config, uuid, async () => {
-    if (Buffer.byteLength(content) > FILE_OPEN_LIMIT_BYTES) throw new Error("File is larger than 250 MB");
+    const bytes = Buffer.byteLength(content);
+    if (bytes > FILE_OPEN_LIMIT_BYTES) throw new Error("File is larger than 250 MB");
+    await ensureDiskCapacity(config, uuid, await extraWriteBytes(target, bytes));
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, content, "utf8");
-    return { path: displayPath(root, target), size: Buffer.byteLength(content) };
+    return { path: displayPath(root, target), size: bytes };
   });
 }
 
@@ -162,6 +174,7 @@ export async function uploadServerFile(
     throw new Error("Cannot write into .flutter");
   }
   return withWritable(config, uuid, async () => {
+    await ensureDiskCapacity(config, uuid, await extraWriteBytes(target, buffer.length));
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, buffer);
     return { path: displayPath(root, target), size: buffer.length };
@@ -242,6 +255,7 @@ export async function compressArchive(
   const destMount = destRel ? `/data/${destRel}` : "/data";
 
   return withWritable(config, uuid, async () => {
+    await ensureDiskCapacity(config, uuid, 1);
     try {
       await runBackupContainer(
         "alpine:3.20",
@@ -253,6 +267,13 @@ export async function compressArchive(
       throw new Error(`Could not create the archive (${detail})`);
     }
     const archivePath = join(dir, archiveName);
+    try {
+      await ensureDiskCapacity(config, uuid, 0);
+    } catch (error) {
+      await rm(archivePath, { force: true }).catch(() => undefined);
+      if (error instanceof DiskLimitError) throw error;
+      throw error;
+    }
     const meta = await stat(archivePath);
     return { path: displayPath(root, archivePath), size: meta.size };
   });
@@ -278,15 +299,18 @@ export async function extractArchive(config: DaemonConfig, uuid: string, relPath
 
   const destDir = dirname(archive);
   if (kind === "zip") {
-    await extractZip(root, archive, destDir);
+    await extractZip(config, uuid, root, archive, destDir);
   } else if (kind === "rar") {
-    await extractRar(root, archive, destDir);
+    await extractRar(config, uuid, root, archive, destDir);
   } else if (kind === "gz") {
     const outName = archive.replace(/\.gz$/i, "");
     if (outName === archive) throw new Error("Cannot determine output name");
     const out = safeJoin(root, relative(root, outName).replace(/\\/g, "/"));
-    await writeFile(out, gunzipSync(await readFile(archive)));
+    const uncompressed = gunzipSync(await readFile(archive));
+    await ensureDiskCapacity(config, uuid, await extraWriteBytes(out, uncompressed.length));
+    await writeFile(out, uncompressed);
   } else {
+    await ensureDiskCapacity(config, uuid, info.size);
     const rel = relative(root, archive).replace(/\\/g, "/");
     const destRel = relative(root, destDir).replace(/\\/g, "/");
     const destMount = destRel ? `/data/${destRel}` : "/data";
@@ -299,23 +323,29 @@ export async function extractArchive(config: DaemonConfig, uuid: string, relPath
   return { path: displayPath(root, destDir), extracted: true };
 }
 
-async function extractZip(root: string, archive: string, destDir: string) {
+async function extractZip(config: DaemonConfig, uuid: string, root: string, archive: string, destDir: string) {
   const unzipped = unzipSync(new Uint8Array(await readFile(archive)));
-  let count = 0;
+  let extra = 0;
+  const writes: { dest: string; data: Buffer }[] = [];
   for (const [entryName, data] of Object.entries(unzipped)) {
     const name = entryName.replace(/\\/g, "/");
     if (!name || name.endsWith("/")) continue;
     const destRel = [relative(root, destDir).replace(/\\/g, "/"), name].filter(Boolean).join("/");
     const dest = safeJoin(root, destRel);
     if (resolve(destDir) === resolve(root) && name.split("/")[0] === ".flutter") continue;
-    await mkdir(dirname(dest), { recursive: true });
-    await writeFile(dest, Buffer.from(data));
-    count += 1;
+    const buffer = Buffer.from(data);
+    extra += await extraWriteBytes(dest, buffer.length);
+    writes.push({ dest, data: buffer });
   }
-  if (!count) throw new Error("Archive did not contain any files");
+  if (!writes.length) throw new Error("Archive did not contain any files");
+  await ensureDiskCapacity(config, uuid, extra);
+  for (const write of writes) {
+    await mkdir(dirname(write.dest), { recursive: true });
+    await writeFile(write.dest, write.data);
+  }
 }
 
-async function extractRar(root: string, archive: string, destDir: string) {
+async function extractRar(config: DaemonConfig, uuid: string, root: string, archive: string, destDir: string) {
   const buf = await readFile(archive);
   const data = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   let extractor;
@@ -339,8 +369,10 @@ async function extractRar(root: string, archive: string, destDir: string) {
       const dest = safeJoin(root, destRel);
       if (resolve(destDir) === resolve(root) && name.split("/")[0] === ".flutter") continue;
       if (!file.extraction) continue;
+      const payload = Buffer.from(file.extraction);
+      await ensureDiskCapacity(config, uuid, await extraWriteBytes(dest, payload.length));
       await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, Buffer.from(file.extraction));
+      await writeFile(dest, payload);
       count += 1;
     }
   } catch (error) {

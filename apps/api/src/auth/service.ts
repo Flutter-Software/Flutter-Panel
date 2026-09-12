@@ -38,7 +38,7 @@ import {
 import { resolveSmtp, sendVerificationEmail } from "../mail";
 import { attachPendingSubusers } from "../subusers";
 import { env } from "../env";
-import { getSiteName } from "../settings";
+import { getSiteName, publicOidc } from "../settings";
 import { requestIp } from "../activity";
 import {
   generateTotpSecret,
@@ -127,6 +127,10 @@ export async function register(c: Context, body: unknown): Promise<AuthPayload> 
   }
 
   if (setup.initialized) {
+    const sso = await publicOidc();
+    if (!sso.passwordLogin) {
+      throw FlutterError.forbidden("Password registration is disabled. Use single sign-on.");
+    }
     await requireSmtp();
   }
 
@@ -160,6 +164,11 @@ export async function login(c: Context, body: unknown): Promise<AuthPayload> {
   const parsed = loginSchema.safeParse(body);
   if (!parsed.success) {
     throw FlutterError.validation("Invalid login", parsed.error.flatten());
+  }
+
+  const sso = await publicOidc();
+  if (!sso.passwordLogin) {
+    throw FlutterError.forbidden("Password sign-in is disabled. Use single sign-on.");
   }
 
   const identifier = parsed.data.login.trim();

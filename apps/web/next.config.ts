@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
   experimental: {
     // File uploads POST JSON through this Next process (rewritten to the API).
     middlewareClientMaxBodySize: "400mb",
-    optimizePackageImports: ["@mantine/core", "@mantine/hooks"],
+    optimizePackageImports: ["@mantine/core"],
   },
   turbopack: {
     root: repoRoot,
@@ -45,7 +45,7 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     // Browser never talks to :4000 for HTTP. WS is a special case — see
-    // browserConsoleSocketUrl. nginx in prod does the same /api → api split.
+    // browserApiSocketUrl. nginx in prod does the same /api → api split.
     const api = process.env.API_INTERNAL_URL ?? "http://127.0.0.1:4000";
     return [{ source: "/api/:path*", destination: `${api}/api/:path*` }];
   },

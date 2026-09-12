@@ -12,7 +12,7 @@ import { browserConsoleSocketUrl } from "@/lib/console-socket";
 import { formatLimitMb, formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/access";
-import { ansiSpans, isFlutterConsoleLine, splitConsoleLine, stripConsoleAnsi } from "@/lib/console-ansi";
+import { ansiSpans, isBareDockerTimestampLine, isConsoleHaltNotice, isConsoleResumeNotice, isConsoleRunningHeartbeat, isFlutterConsoleLine, scrubDockerTimestamps, splitConsoleLine, stripConsoleAnsi, consoleTags } from "@/lib/console-ansi";
 import {
   commandsForServer,
   completeConsoleCommand,
@@ -21,6 +21,7 @@ import {
 } from "@/lib/console-commands";
 import { toast } from "@/components/toast";
 import { UnlimitedStat } from "@/components/unlimited";
+import { useBranding } from "@/components/branding-provider";
 
 const MAX_LINES = 400;
 const HISTORY = 60;
@@ -87,18 +88,20 @@ function HighlightedText({ text, query, active }: { text: string; query: string;
 
 function ConsoleLine({
   line,
+  tags,
   query = "",
   active = false,
   copied = false,
   onCopyLine,
 }: {
   line: string;
+  tags?: string[];
   query?: string;
   active?: boolean;
   copied?: boolean;
   onCopyLine?: (line: string) => void;
 }) {
-  const parts = splitConsoleLine(line);
+  const parts = splitConsoleLine(line, tags);
   const body = parts.body;
   const needle = query.trim();
   const bodyNode = needle ? (
@@ -130,9 +133,9 @@ function ConsoleLine({
           </button>{" "}
         </>
       ) : null}
-      {parts.flutter ? (
+      {parts.tag ? (
         <>
-          <span className="font-medium text-primary">[Flutter]</span>{" "}
+          <span className="font-medium text-primary">[{parts.tag}]</span>{" "}
         </>
       ) : null}
       <span>{bodyNode}</span>
@@ -286,6 +289,8 @@ export default function ConsolePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { consoleTag } = useBranding();
+  const tags = useMemo(() => consoleTags(consoleTag), [consoleTag]);
   const framed = usePolledServerRecord();
   const { setLiveStatus } = useLiveServerStatus();
   const [server, setServer] = useState<ServerRecord | null>(framed);
@@ -603,14 +608,21 @@ export default function ConsolePage({
 
   const needle = searchQuery.trim();
   const visibleLines = useMemo(() => {
-    return lines
-      .map((line, index) => ({ line, index }))
-      .filter(({ line }) => {
-        if (filter === "all") return true;
-        const flutter = isFlutterConsoleLine(line);
-        return filter === "flutter" ? flutter : !flutter;
-      });
-  }, [lines, filter]);
+    let halted = false;
+    return lines.flatMap((raw, index) => {
+      const line = scrubDockerTimestamps(raw);
+      if (isConsoleResumeNotice(line, tags)) halted = false;
+      const empty = !stripConsoleAnsi(splitConsoleLine(line, tags).body).trim();
+      const hide =
+        empty || isBareDockerTimestampLine(line, tags) || (halted && isConsoleRunningHeartbeat(line, tags));
+      if (isConsoleHaltNotice(line, tags)) halted = true;
+      if (hide) return [];
+      if (filter === "all") return [{ line, index }];
+      const flutter = isFlutterConsoleLine(line, tags);
+      if (filter === "flutter" ? flutter : !flutter) return [{ line, index }];
+      return [];
+    });
+  }, [lines, filter, tags]);
 
   const matchIndexes = useMemo(() => {
     if (!needle) return [];
@@ -967,8 +979,11 @@ export default function ConsolePage({
   );
 
   const lastExit = server?.lastExit ?? null;
+  const expectedStop = lastExit?.kind === "killed" && lastExit.code !== 137;
   const showExit =
-    Boolean(lastExit) && (server?.status === "offline" || server?.status === "install_failed");
+    Boolean(lastExit) &&
+    !expectedStop &&
+    (server?.status === "offline" || server?.status === "install_failed");
   const exitMeta = lastExit ? lastExitBanner(lastExit) : null;
 
   return (
@@ -1002,7 +1017,7 @@ export default function ConsolePage({
                   )}
                   onClick={() => setFilter(option.value)}
                 >
-                  {option.label}
+                  {option.value === "flutter" ? consoleTag : option.label}
                 </button>
               ))}
             </div>
@@ -1068,6 +1083,7 @@ export default function ConsolePage({
                     >
                       <ConsoleLine
                         line={row.line}
+                        tags={tags}
                         query={searchOpen ? searchQuery : ""}
                         active={searchOpen && matchIndexes[matchIndex] === visibleIndex}
                         onCopyLine={() => void copyPlain(row.line, row.index)}
@@ -1096,7 +1112,7 @@ export default function ConsolePage({
               </div>
             ) : visibleLines.length === 0 ? (
               <div className="pointer-events-none absolute inset-0 p-4 font-mono text-[13px] leading-6 text-muted-foreground">
-                {filter === "flutter" ? "No Flutter lines in this buffer." : "No game lines in this buffer."}
+                {filter === "flutter" ? `No ${consoleTag} lines in this buffer.` : "No game lines in this buffer."}
               </div>
             ) : null}
             {selectionCopy ? (

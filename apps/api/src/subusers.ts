@@ -17,6 +17,7 @@ import { hashPassword, publicUser, randomToken, sha256, validatePassword } from 
 import { createSession } from "./auth/session";
 import { assertPerm, requireAccess } from "./servers";
 import { recordActivity } from "./activity";
+import { grantServerAccess, publishServersChanged, publishToUser, revokeUserServerAccess } from "./panel-hub";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -48,12 +49,18 @@ async function inviteMailContext(server: {
 }
 
 export async function attachPendingSubusers(user: { _id: { toString(): string }; email: string }) {
+  const pending = await Subuser.find({ email: user.email.toLowerCase(), userId: null });
   await Subuser.updateMany(
     { email: user.email.toLowerCase(), userId: null },
     {
       $set: { userId: user._id, inviteTokenHash: null, inviteExpiresAt: null },
     },
   );
+  const userId = user._id.toString();
+  for (const row of pending) {
+    grantServerAccess(row.serverId.toString(), [userId]);
+    publishServersChanged("membership", row.serverId.toString());
+  }
 }
 
 async function toSubuserDto(
@@ -185,6 +192,8 @@ export async function createSubuser(
       category: "users",
       properties: { email, username: user.username },
     });
+    grantServerAccess(access.server._id.toString(), [user._id.toString()]);
+    publishServersChanged("membership", access.server._id.toString());
     return { subuser: await toSubuserDto(row, usersById), emailed: false as const };
   }
 
@@ -246,6 +255,12 @@ export async function deleteSubuser(serverId: string, subuserId: string, viewerI
   if (!row) throw FlutterError.notFound("Subuser not found");
   const email = row.email;
   await Subuser.deleteOne({ _id: row._id });
+  if (row.userId) {
+    const userId = row.userId.toString();
+    const serverId = access.server._id.toString();
+    publishToUser(userId, { event: "servers.changed", data: { id: serverId, reason: "membership" } });
+    revokeUserServerAccess(userId, serverId);
+  }
   recordActivity({
     serverId: access.server._id.toString(),
     event: "user.delete",

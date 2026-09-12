@@ -117,18 +117,21 @@ export function Segmented<T extends string>({
 export function Switch({
   checked,
   onChange,
+  disabled,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "no-press relative h-6 w-11 shrink-0 rounded-full transition-colors",
+        "no-press relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50",
         checked ? "bg-primary" : "bg-muted",
       )}
     >

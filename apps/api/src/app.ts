@@ -3,16 +3,16 @@ import { cors } from "hono/cors";
 import { requestId } from "hono/request-id";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
-import { FlutterError, PANEL_VERSION } from "@flutter-software/shared";
+import { FlutterError } from "@flutter-software/shared";
 import { signDaemonRequest } from "@flutter-software/shared/ticket";
 import { env, requestOrigin } from "./env";
-import { pingMongo } from "./db/mongoose";
-import { pingPrisma } from "./db/prisma";
-import { pingRedis } from "./redis";
+import { panelHealth } from "./health";
 import { ensureCsrfCookie, assertCsrf, requireAdmin, requireUser, requireSession, getAuth, withAuthLimits } from "./auth/session";
 import * as apiKeys from "./auth/api-keys";
 import { bearerApiKey } from "./auth/api-keys";
 import * as auth from "./auth/service";
+import * as oidc from "./auth/oidc";
+import * as ssoLogin from "./auth/sso-login";
 import * as admin from "./auth/admin";
 import * as daemon from "./daemon";
 import * as eggs from "./eggs";
@@ -26,6 +26,9 @@ import * as updater from "./update";
 import { Node } from "./db/models";
 import { isNodeOnline } from "./nodes";
 import { verifyConsoleTicket } from "./console-ticket";
+import { verifyPanelTicket } from "./panel-ticket";
+import { attachPanelSession, detachPanelSession, mintPanelSocket } from "./panel-hub";
+import { startPanelLive } from "./panel-live";
 import { log } from "./log";
 
 type Variables = {
@@ -60,7 +63,7 @@ export function createApp() {
       method === "OPTIONS" ||
       Boolean(bearerApiKey(c)) ||
       path.includes("/daemon/") ||
-      path.includes("/ws/console") ||
+      path.includes("/ws/") ||
       path.endsWith("/auth/login") ||
       path.endsWith("/auth/register") ||
       path.endsWith("/auth/verify") ||
@@ -122,61 +125,16 @@ export function createApp() {
   );
 
   app.get("/health", async (c) => {
-    const requestIdValue = c.get("requestId");
-    const checks: Record<string, { ok: boolean; latencyMs?: number; error?: string }> = {};
-
-    const startedMongo = Date.now();
-    try {
-      await pingMongo();
-      checks.mongo = { ok: true, latencyMs: Date.now() - startedMongo };
-    } catch (error) {
-      checks.mongo = {
-        ok: false,
-        latencyMs: Date.now() - startedMongo,
-        error: error instanceof Error ? error.message : "mongo failed",
-      };
-    }
-
-    const startedPrisma = Date.now();
-    try {
-      await pingPrisma();
-      checks.prisma = { ok: true, latencyMs: Date.now() - startedPrisma };
-    } catch (error) {
-      checks.prisma = {
-        ok: false,
-        latencyMs: Date.now() - startedPrisma,
-        error: error instanceof Error ? error.message : "prisma failed",
-      };
-    }
-
-    const startedRedis = Date.now();
-    try {
-      await pingRedis();
-      checks.redis = { ok: true, latencyMs: Date.now() - startedRedis };
-    } catch (error) {
-      checks.redis = {
-        ok: false,
-        latencyMs: Date.now() - startedRedis,
-        error: error instanceof Error ? error.message : "redis failed",
-      };
-    }
-
-    const ok = checks.mongo?.ok === true && checks.prisma?.ok === true;
+    const health = await panelHealth(c.get("requestId"));
     // Redis is optional (schedules + sessions live in Mongo). Prisma talks to
     // the same Mongo as Mongoose — if generate is stale, this goes 503.
-    return c.json(
-      {
-        ok,
-        service: "api",
-        version: PANEL_VERSION,
-        requestId: requestIdValue,
-        checks,
-      },
-      ok ? 200 : 503,
-    );
+    return c.json(health, health.ok ? 200 : 503);
   });
 
-  app.get("/auth/setup", async (c) => c.json({ data: await auth.setupStatus() }));
+  app.get("/auth/setup", async (c) => {
+    const setup = await auth.setupStatus();
+    return c.json({ data: { ...setup, sso: await settings.publicOidc() } });
+  });
   app.get("/auth/me", async (c) => c.json({ data: { user: await auth.me(c) } }));
   app.post("/auth/register", async (c) => {
     const result = await auth.register(c, await c.req.json());
@@ -186,6 +144,9 @@ export function createApp() {
     const result = await auth.login(c, await c.req.json());
     return c.json({ data: result });
   });
+  app.get("/auth/oidc/start", (c) => oidc.startOidc(c));
+  app.get("/auth/oidc/callback", (c) => oidc.finishOidc(c));
+  app.get("/auth/sso", (c) => ssoLogin.consumeSsoLogin(c));
   app.post("/auth/verify", async (c) => {
     const result = await auth.verifyEmail(c, await c.req.json());
     return c.json({ data: result });
@@ -258,6 +219,14 @@ export function createApp() {
     c.json({ data: await daemon.applyServerState(c, c.req.param("uuid")) }),
   );
 
+  app.get("/client/panel/socket", async (c) => {
+    const session = await requireSession(c);
+    const origin = requestOrigin({
+      host: c.req.header("x-forwarded-host") || c.req.header("host"),
+      proto: c.req.header("x-forwarded-proto"),
+    });
+    return c.json({ data: mintPanelSocket(session.user.id, origin) });
+  });
   app.get("/client/servers", async (c) => {
     const session = await requireUser(c);
     return c.json({
@@ -652,6 +621,14 @@ export function createApp() {
     await requireAdmin(c);
     return c.json({ data: await settings.testSmtp(await c.req.json()) });
   });
+  app.patch("/admin/settings/oidc", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await settings.updateOidc(await c.req.json()) });
+  });
+  app.post("/admin/settings/oidc/test", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await oidc.testOidcDiscovery(await c.req.json()) });
+  });
   app.get("/admin/users", async (c) => {
     await requireAdmin(c);
     return c.json({ data: { users: await auth.listUsers() } });
@@ -659,6 +636,14 @@ export function createApp() {
   app.post("/admin/users", async (c) => {
     await requireAdmin(c);
     return c.json({ data: { user: await auth.createUser(await c.req.json()) } }, 201);
+  });
+  app.post("/admin/users/sso", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await ssoLogin.mintSsoLoginFromRequest(c) }, 201);
+  });
+  app.post("/admin/users/:id/sso", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await ssoLogin.mintSsoLoginFromRequest(c, c.req.param("id")) }, 201);
   });
   app.get("/admin/users/:id", async (c) => {
     await requireAdmin(c);
@@ -845,6 +830,31 @@ export function createApp() {
   });
 
   app.get(
+    "/ws/panel",
+    upgradeWebSocket((c) => {
+      const claims = verifyPanelTicket(env().SESSION_SECRET, c.req.query("token"));
+      return {
+        onOpen(_event, ws) {
+          if (!claims) {
+            sendClient(ws, { event: "error", data: "Invalid or expired panel ticket" });
+            ws.close();
+            return;
+          }
+          void attachPanelSession(ws, claims.userId).then((session) => {
+            if (!session && Number(ws.readyState) === 1) ws.close();
+          });
+        },
+        onClose(_event, ws) {
+          detachPanelSession(ws);
+        },
+        onError(_event, ws) {
+          detachPanelSession(ws);
+        },
+      };
+    }),
+  );
+
+  app.get(
     "/ws/console",
     upgradeWebSocket((c) => {
       const claims = verifyConsoleTicket(env().SESSION_SECRET, c.req.query("token"));
@@ -888,6 +898,7 @@ export function createApp() {
     }),
   );
 
+  startPanelLive();
   return { app, injectWebSocket };
 }
 

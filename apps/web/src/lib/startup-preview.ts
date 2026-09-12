@@ -12,12 +12,6 @@ export function ipFromAddress(address?: string | null) {
   return index > 0 ? address.slice(0, index) : "";
 }
 
-export function interpolateStartup(template: string, env: Record<string, string>) {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) =>
-    Object.prototype.hasOwnProperty.call(env, key) ? (env[key] ?? "") : `{{${key}}}`,
-  );
-}
-
 export function startupUsesVariable(template: string, key: string) {
   if (!key) return false;
   return template.includes(`{{${key}}}`);

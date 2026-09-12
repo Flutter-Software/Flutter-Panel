@@ -14,11 +14,12 @@ import {
 } from "lucide-react";
 import { describeCron, nextCronDate, type CronFields } from "@flutter-software/shared";
 import { confirm } from "@/components/confirm-dialog";
+import { Switch } from "@/components/admin-create";
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, Select, Textarea } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
+import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
 import { api } from "@/lib/api";
 import { can } from "@/lib/access";
-import { cn } from "@/lib/cn";
 
 type TaskAction = "power" | "command" | "backup";
 type PowerPayload = "start" | "stop" | "restart" | "kill";
@@ -148,38 +149,7 @@ function TaskIcon({ action }: { action: TaskAction }) {
   return <Icon className="size-3.5 text-muted-foreground" />;
 }
 
-function Switch({
-  checked,
-  onChange,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "no-press relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50",
-        checked ? "bg-primary" : "bg-muted",
-      )}
-    >
-      <span
-        className={cn(
-          "absolute top-0.5 left-0.5 block size-5 rounded-full bg-card transition-transform",
-          checked && "translate-x-5",
-        )}
-      />
-    </button>
-  );
-}
-
-function StatusPill({ schedule }: { schedule: Schedule }) {
+function ScheduleStatus({ schedule }: { schedule: Schedule }) {
   if (schedule.running) {
     return <Badge className="bg-primary/15 text-primary">Running</Badge>;
   }
@@ -228,13 +198,23 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
   }, [allowRead, load, server]);
 
   const running = schedules.some((row) => row.running);
-  useEffect(() => {
-    if (!running) return;
-    const timer = window.setInterval(() => {
-      load().catch(() => undefined);
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [load, running]);
+  useLiveReload(load, 2000, running);
+  usePanelEvent("schedule", (payload) => {
+    if (!payload || typeof payload !== "object") return;
+    const data = payload as { serverId?: string; schedule?: Schedule; removed?: string };
+    if (data.serverId !== id) return;
+    if (data.removed) {
+      setSchedules((rows) => rows.filter((row) => row.id !== data.removed));
+      return;
+    }
+    if (!data.schedule) return;
+    const next = data.schedule;
+    setSchedules((rows) => {
+      const index = rows.findIndex((row) => row.id === next.id);
+      if (index < 0) return [...rows, next];
+      return rows.map((row) => (row.id === next.id ? next : row));
+    });
+  });
 
   const nextPreview = useMemo(() => {
     try {
@@ -625,7 +605,7 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
                   <div className="flex flex-wrap items-center gap-2">
                     <Clock className="size-4 text-primary" />
                     <p className="font-medium">{row.name}</p>
-                    <StatusPill schedule={row} />
+                    <ScheduleStatus schedule={row} />
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">{row.cronLabel}</p>
                   <p className="mt-1 font-mono text-[11px] text-muted-foreground">{row.cronExpression}</p>

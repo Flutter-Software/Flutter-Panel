@@ -175,7 +175,13 @@ export function apiUpload<T>(
 }
 
 export type MeResponse = { data: { user: PublicUser | null } };
-export type SetupResponse = { data: { initialized: boolean; userCount: number } };
+export type SetupResponse = {
+  data: {
+    initialized: boolean;
+    userCount: number;
+    sso?: { enabled: boolean; buttonLabel: string; passwordLogin: boolean };
+  };
+};
 export type AuthResponse = {
   data: {
     user: PublicUser | null;

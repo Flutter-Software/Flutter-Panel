@@ -1,20 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { formatCompact, type ServerRecord, type ServerStatus } from "@/lib/types";
+import { formatCompact, type ServerRecord } from "@/lib/types";
 import { cn } from "@/lib/cn";
-import { statusMeta } from "@/components/status";
+import { statusMeta, statusPillClass } from "@/components/status";
 import { prefetchQuery } from "@/lib/query";
 import { serverHomeHref } from "@/lib/access";
-
-const STATUS_PILL: Record<ServerStatus, string> = {
-  running: "bg-status-running/15 text-status-running",
-  starting: "bg-status-warn/15 text-status-warn",
-  stopping: "bg-status-warn/15 text-status-warn",
-  installing: "bg-status-info/15 text-status-info",
-  install_failed: "bg-status-error/15 text-status-error",
-  offline: "bg-muted text-status-offline",
-};
 
 function cpuPercent(server: ServerRecord) {
   if (server.cpu.limit > 0) return Math.min(100, (server.cpu.used / server.cpu.limit) * 100);
@@ -100,7 +91,7 @@ export function ServerCard({ server }: { server: ServerRecord }) {
         <span
           className={cn(
             "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
-            STATUS_PILL[server.status],
+            statusPillClass(server.status),
           )}
         >
           <span className={cn("size-1.5 rounded-full", meta.bar)} />

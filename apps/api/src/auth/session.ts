@@ -36,12 +36,18 @@ function cookieSecure() {
   return env().APP_URL.startsWith("https://");
 }
 
-function sessionCookieOptions() {
+export function authCookieOptions() {
   return {
     path: "/",
     httpOnly: true,
     sameSite: "Lax" as const,
     secure: cookieSecure(),
+  };
+}
+
+function sessionCookieOptions() {
+  return {
+    ...authCookieOptions(),
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   };
 }

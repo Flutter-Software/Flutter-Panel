@@ -28,8 +28,6 @@
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
-  --color-success: var(--status-running);
-  --color-warning: var(--status-warn);
   --color-status-running: var(--status-running);
   --color-status-warn: var(--status-warn);
   --color-status-offline: var(--status-offline);

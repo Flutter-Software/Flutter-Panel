@@ -6,6 +6,7 @@ import {
   hasServerPermission,
   lastExitSchema,
   PANEL_VERSION,
+  isLoopbackUrl,
   type PowerAction,
 } from "@flutter-software/shared";
 import { signDaemonRequest, readBearerToken } from "@flutter-software/shared/ticket";
@@ -15,6 +16,12 @@ import { authenticateNodeToken, isNodeOnline, panelApiUrl } from "./nodes";
 import { dummyPasswordHash, verifyPassword } from "./auth/crypto";
 import type { Context } from "hono";
 import { recordActivity } from "./activity";
+import {
+  publish,
+  publishServerStatus,
+  rememberNodeOnline,
+} from "./panel-hub";
+import { getConsoleTag } from "./settings";
 
 export type InstallSpec = {
   uuid: string;
@@ -52,6 +59,7 @@ export async function configuration(c: Context) {
     listenUrl: `http://127.0.0.1:${listenPort}`,
     dataDir: "./data",
     requestSecret: env().DAEMON_REQUEST_SECRET,
+    consoleTag: await getConsoleTag(),
   };
 }
 
@@ -79,11 +87,27 @@ export async function heartbeat(c: Context) {
     node.tokenPrefix = token.slice(0, 12);
   }
   await node.save();
+  const nodeId = node._id.toString();
+  rememberNodeOnline(nodeId, true);
+  publish({
+    event: "node.status",
+    data: {
+      id: nodeId,
+      online: true,
+      lastHeartbeatAt: node.lastHeartbeatAt
+        ? new Date(node.lastHeartbeatAt).toISOString()
+        : new Date().toISOString(),
+      maintenanceMode: Boolean(node.maintenanceMode),
+      daemonVersion: node.daemonVersion || null,
+      daemonListenUrl: node.daemonListenUrl ?? null,
+    },
+  });
   return {
     ok: true,
     nodeId: node._id.toString(),
     version: PANEL_VERSION,
     sftpPort: Number(node.sftpPort) || 2022,
+    consoleTag: await getConsoleTag(),
   };
 }
 
@@ -124,6 +148,11 @@ export async function applyServerState(c: Context, uuid: string) {
         server.markModified("lastExit");
       }
       await server.save();
+      publishServerStatus({
+        id: server._id.toString(),
+        status: server.status,
+        lastExit: server.lastExit,
+      });
     }
     return { ok: true, status: server.status };
   }
@@ -139,6 +168,11 @@ export async function applyServerState(c: Context, uuid: string) {
   }
   if (next || parsed.data.lastExit !== undefined) {
     await server.save();
+    publishServerStatus({
+      id: server._id.toString(),
+      status: server.status,
+      lastExit: server.lastExit,
+    });
   }
   if (next) forgetLiveStats(uuid);
   return { ok: true, status: server.status };
@@ -574,15 +608,6 @@ export async function saveNodeDaemonConfig(nodeId: string, body: unknown) {
   }
   const node = await loadNode(nodeId);
   return daemonNodeOp(node, { method: "PUT", path: "config", body: { content: parsed.data.content } });
-}
-
-function isLoopbackUrl(value: string) {
-  try {
-    const host = new URL(value).hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
-  } catch {
-    return /localhost|127\.0\.0\.1|::1/i.test(value);
-  }
 }
 
 function browserProbeUrl(node: {
