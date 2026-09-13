@@ -314,6 +314,8 @@ async function main() {
     if (allocation?.id) body.allocationId = allocation.id;
     if (server.image) body.dockerImage = String(server.image).slice(0, 255);
     if (server.startup) body.startup = String(server.startup).slice(0, 2000);
+    if (server.uuid) body.uuid = String(server.uuid);
+    body.skipInstall = true;
 
     try {
       await api("POST", "/admin/servers", body);

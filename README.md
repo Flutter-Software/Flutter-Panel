@@ -28,7 +28,7 @@ sudo bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh
 
 The installer is an interactive TUI (arrow keys to move, enter to confirm). It asks whether you are switching from Pterodactyl or Pelican, the public panel URL, nginx / Let's Encrypt, whether to run a local game-node daemon, and whether to create a personal admin account. It then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`, creates the admin user, and prints a summary table (URL, admin login, database URL, ports).
 
-Coming from **Pterodactyl or Pelican**, choose Yes in the installer to optionally import eggs and recreate servers (they reinstall from the egg; world files are not copied) and/or wipe the old panel. You can still run the wipe script by itself:
+Coming from **Pterodactyl or Pelican**, choose Yes in the installer to optionally import eggs, recreate servers, and copy world files / server data, and/or wipe the old panel. You can still run the wipe script by itself:
 
 ```bash
 sudo bash /usr/local/src/flutter-panel/install/wipe-pterodactyl.sh --yes
@@ -51,7 +51,7 @@ sudo FLUTTER_URL=https://panel.example.com FLUTTER_EMAIL=you@example.com \
 | `--admin-password` / `FLUTTER_ADMIN_PASSWORD` | Admin password (generated if omitted) |
 | `--admin-username` / `FLUTTER_ADMIN_USERNAME` | Admin username (default `Administrator`) |
 | `--from-pterodactyl` / `FLUTTER_FROM_PTERODACTYL=1` | This host is switching from Pterodactyl/Pelican |
-| `--migrate-servers` / `FLUTTER_MIGRATE_SERVERS=1` | Import eggs and recreate servers on the local node |
+| `--migrate-servers` / `FLUTTER_MIGRATE_SERVERS=1` | Import eggs, recreate servers, and copy world files |
 | `--wipe-pterodactyl` / `FLUTTER_WIPE_PTERODACTYL=1` | Remove Pterodactyl/Pelican after exporting data |
 | `--no-nginx` / `FLUTTER_NO_NGINX=1` | Skip nginx; panel listens on port 3010 |
 | `--no-daemon` / `FLUTTER_NO_DAEMON=1` | Panel only (attach a node later) |

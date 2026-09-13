@@ -347,6 +347,8 @@ export const serverCreateSchema = z.object({
   dockerImage: z.string().min(1).max(255).optional(),
   startup: z.string().max(2000).optional(),
   stopCommand: z.string().max(120).optional(),
+  uuid: z.string().uuid().optional(),
+  skipInstall: z.boolean().optional().default(false),
   environment: z.record(z.string()).optional().default({}),
 });
 

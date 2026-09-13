@@ -504,9 +504,15 @@ export async function createServer(body: unknown, actorId: string) {
     throw FlutterError.unavailable("Node daemon is offline. Start the daemon before creating a server.");
   }
 
+  const uuid = parsed.data.uuid || randomUUID();
+  if (await Server.findOne({ uuid })) {
+    throw FlutterError.conflict("A server with that UUID already exists");
+  }
+
   const environment = { ...eggDefaults(egg), ...parsed.data.environment };
+  const skipInstall = Boolean(parsed.data.skipInstall);
   const row = await Server.create({
-    uuid: randomUUID(),
+    uuid,
     name: parsed.data.name,
     description: parsed.data.description ?? "",
     ownerId,
@@ -522,7 +528,7 @@ export async function createServer(body: unknown, actorId: string) {
     dockerImage: parsed.data.dockerImage?.trim() || egg.dockerImage,
     startup: parsed.data.startup !== undefined ? parsed.data.startup : egg.startup,
     stopCommand: parsed.data.stopCommand?.trim() || egg.stopCommand || "stop",
-    status: "installing",
+    status: skipInstall ? "offline" : "installing",
     environment,
   });
   if (allocation) {
@@ -534,7 +540,9 @@ export async function createServer(body: unknown, actorId: string) {
     allocation ? allocation._id.toString() : "",
     parsed.data.allocationIds ?? [],
   );
-  void runInstall(row._id.toString());
+  if (!skipInstall) {
+    void runInstall(row._id.toString());
+  }
   grantServerAccess(row._id.toString(), [ownerId]);
   publishServersChanged("created", row._id.toString());
   publishServerStatus({ id: row._id.toString(), status: row.status, lastExit: row.lastExit });

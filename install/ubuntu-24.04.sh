@@ -53,6 +53,7 @@ PTERO_DUMP=""
 MIGRATED_EGGS=0
 MIGRATED_SERVERS=0
 SKIPPED_REMOTE=0
+COPIED_VOLUMES=0
 
 if [[ "${FLUTTER_LETSENCRYPT:-}" == "1" ]]; then
   LETSENCRYPT=1
@@ -231,8 +232,8 @@ run_wizard() {
   ensure_gum || true
   printf '\n'
   if ui_gum_ready; then
-    ui_gum style --foreground 196 --bold --align center --padding "1 2" --border double --border-foreground 196 \
-      "Flutter installer"$'\n'"Arrow keys to move · space to select · enter to confirm"
+    ui_gum style --foreground "#F9FAFB" --bold --align center --padding "1 2" --border double --border-foreground 196 \
+      "Flutter installer"$'\n'"Arrow keys to move · enter to confirm"
   else
     log "Flutter installer"
   fi
@@ -248,7 +249,7 @@ run_wizard() {
     if [[ "$ptero_default" != "Yes" ]]; then
       warn "No Pterodactyl/Pelican install was detected on this host."
     fi
-    answer="$(ui_choose "Transfer servers and eggs to Flutter? Servers reinstall from their eggs (existing world files are not copied)." "Yes" "Yes" "No")"
+    answer="$(ui_choose "Transfer servers, eggs, and world files to Flutter?" "Yes" "Yes" "No")"
     if [[ "$answer" == "Yes" ]]; then
       MIGRATE_SERVERS=1
     fi
@@ -380,10 +381,49 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
+copy_ptero_volumes() {
+  local src="" dest="$DATA_DIR/servers" dir uuid volume_root=""
+  if [[ -f "$PTERO_DUMP" ]]; then
+    volume_root="$(awk -F'"' '/"volumeRoot"/{print $4; exit}' "$PTERO_DUMP")"
+  fi
+  local candidate
+  for candidate in \
+    "$volume_root" \
+    "${volume_root%/}/volumes" \
+    /var/lib/pterodactyl/volumes \
+    /var/lib/pelican/volumes
+  do
+    [[ -n "$candidate" && -d "$candidate" ]] || continue
+    src="$candidate"
+    break
+  done
+  if [[ -z "$src" ]]; then
+    warn "No Pterodactyl/Pelican volume directory found; servers will be empty."
+    return 0
+  fi
+  mkdir -p "$dest"
+  COPIED_VOLUMES=0
+  for dir in "$src"/*; do
+    [[ -d "$dir" ]] || continue
+    uuid="$(basename "$dir")"
+    [[ "$uuid" =~ ^[0-9a-fA-F-]{8,}$ ]] || continue
+    log "Copying ${uuid}"
+    mkdir -p "$dest/$uuid"
+    rsync -a "$dir/" "$dest/$uuid/"
+    mkdir -p "$dest/$uuid/.flutter"
+    printf '{"status":"ok","startedAt":"%s","finishedAt":"%s"}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      >"$dest/$uuid/.flutter/install-status.json"
+    COPIED_VOLUMES=$((COPIED_VOLUMES + 1))
+  done
+  log "Copied ${COPIED_VOLUMES} server volume(s) to ${dest}"
+}
+
 if [[ "$MIGRATE_SERVERS" -eq 1 ]]; then
   ui_phase "EXPORTING PTERODACTYL DATA...."
   apt-get update -y
-  apt-get install -y --no-install-recommends ca-certificates
+  apt-get install -y --no-install-recommends ca-certificates rsync
   apt-get install -y --no-install-recommends mariadb-client || apt-get install -y --no-install-recommends mysql-client || true
   PANEL_ENV=""
   for candidate in /var/www/pterodactyl/.env /var/www/pelican/.env; do
@@ -404,6 +444,12 @@ if [[ "$MIGRATE_SERVERS" -eq 1 ]]; then
   bash "$SCRIPT_DIR/dump-pterodactyl.sh" --env "$PANEL_ENV" --out "$PTERO_DUMP" ${WINGS_CFG:+--wings-config "$WINGS_CFG"}
   chmod 600 "$PTERO_DUMP"
   log "Wrote ${PTERO_DUMP}"
+  ui_phase "COPYING SERVER FILES...."
+  if wings_running || [[ -d /etc/pterodactyl || -d /etc/pelican || -x /usr/local/bin/wings ]]; then
+    log "Stopping Wings so server files can be copied cleanly"
+    bash "$SCRIPT_DIR/wipe-pterodactyl.sh" --yes --wings-only --keep-data
+  fi
+  copy_ptero_volumes
 fi
 
 if [[ "$WIPE_PTERO" -eq 1 ]]; then
@@ -496,7 +542,7 @@ fi
 usermod -aG docker "$SERVICE_USER"
 
 mkdir -p "$PREFIX" "$DATA_DIR" /usr/local/src
-chown "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
 
 ui_phase "INSTALLING PANEL...."
 if [[ -z "$SOURCE" ]]; then
@@ -806,7 +852,8 @@ ui_kv_table \
   "Nginx" "$([[ "$INSTALL_NGINX" -eq 1 ]] && echo Yes || echo No)" \
   "Let's Encrypt" "$([[ "$LETSENCRYPT" -eq 1 ]] && echo Yes || echo No)" \
   "Migrated eggs" "$MIGRATED_EGGS" \
-  "Migrated servers" "$MIGRATED_SERVERS"
+  "Migrated servers" "$MIGRATED_SERVERS" \
+  "Copied volumes" "$COPIED_VOLUMES"
 
 if [[ "$ADMIN_CREATED" -eq 1 && "$ADMIN_GENERATED" -eq 1 ]]; then
   printf '\n%sSave this admin password now — it will not be shown again.%s\n' "$RED$BOLD" "$RESET"

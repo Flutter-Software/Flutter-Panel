@@ -57,7 +57,7 @@ sudo bash install/wipe-local.sh --yes --daemon-only
 
 ## Coming from Pterodactyl
 
-The panel installer asks if you are switching from Pterodactyl or Pelican. You can import eggs and recreate servers on this host (they reinstall from the egg; world files are not copied) and/or wipe the old panel. Non-interactive:
+The panel installer asks if you are switching from Pterodactyl or Pelican. You can import eggs, recreate servers, and copy world files onto this host, and/or wipe the old panel. Non-interactive:
 
 ```bash
 sudo bash install/ubuntu-24.04.sh --yes --from-pterodactyl --migrate-servers --wipe-pterodactyl \

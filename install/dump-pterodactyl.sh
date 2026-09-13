@@ -113,6 +113,7 @@ dump_table() {
 }
 
 LOCAL_UUID=""
+VOLUME_ROOT=""
 if [[ -n "$WINGS_CFG" && -f "$WINGS_CFG" ]]; then
   LOCAL_UUID="$(awk '
     $1 == "uuid:" {
@@ -121,6 +122,22 @@ if [[ -n "$WINGS_CFG" && -f "$WINGS_CFG" ]]; then
       exit
     }
   ' "$WINGS_CFG")"
+  VOLUME_ROOT="$(awk '
+    $1 == "data:" {
+      gsub(/["'\''\r]/, "", $2)
+      print $2
+      exit
+    }
+  ' "$WINGS_CFG")"
+fi
+if [[ -z "$VOLUME_ROOT" ]]; then
+  if [[ -d /var/lib/pterodactyl/volumes ]]; then
+    VOLUME_ROOT="/var/lib/pterodactyl/volumes"
+  elif [[ -d /var/lib/pelican/volumes ]]; then
+    VOLUME_ROOT="/var/lib/pelican/volumes"
+  else
+    VOLUME_ROOT="/var/lib/pterodactyl/volumes"
+  fi
 fi
 
 TMP="$(mktemp -d)"
@@ -135,6 +152,7 @@ mkdir -p "$(dirname "$OUT")"
   printf '{\n'
   printf '  "source": "pterodactyl",\n'
   printf '  "localNodeUuid": %s,\n' "$(json_str "$LOCAL_UUID")"
+  printf '  "volumeRoot": %s,\n' "$(json_str "$VOLUME_ROOT")"
   printf '  "nests": '; cat "$TMP/nests.json"; printf ',\n'
   printf '  "eggs": '; cat "$TMP/eggs.json"; printf ',\n'
   printf '  "egg_variables": '; cat "$TMP/egg_variables.json"; printf ',\n'

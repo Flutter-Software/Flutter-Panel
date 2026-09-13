@@ -70,7 +70,9 @@ ensure_gum() {
 }
 
 ui_gum() {
-  TERM="${TERM:-xterm-256color}" "$GUM" "$@" <"$UI_TTY"
+  TERM="${TERM:-xterm-256color}" \
+    COLORTERM="${COLORTERM:-truecolor}" \
+    "$GUM" "$@" <"$UI_TTY"
 }
 
 ui_choose() {
@@ -78,52 +80,67 @@ ui_choose() {
   local selected="$2"
   shift 2
   local options=("$@")
-  if ui_gum_ready; then
-    local result=""
-    result="$(
-      ui_gum choose \
-        --no-limit \
-        --header "${header}  (↑/↓ move, space to select, enter to confirm)" \
-        --cursor.foreground "#E11D48" \
-        --header.foreground "#E11D48" \
-        --selected.foreground "#FFFFFF" \
-        --selected.background "#E11D48" \
-        --selected "$selected" \
-        "${options[@]}"
-    )" || true
-    if [[ -z "$result" ]]; then
-      printf '%s\n' "$selected"
-      return
+  local count=${#options[@]}
+  local idx=0 i key bracket arrow
+  [[ "$count" -gt 0 ]] || return 1
+  for i in "${!options[@]}"; do
+    if [[ "${options[$i]}" == "$selected" ]]; then
+      idx=$i
+      break
     fi
-    local last=""
-    while IFS= read -r line; do
-      [[ -n "$line" ]] && last="$line"
-    done <<<"$result"
-    printf '%s\n' "${last:-$selected}"
-    return
-  fi
-  local i=1 choice=""
-  printf '\n%s\n' "$header" >"$UI_TTY"
-  for opt in "${options[@]}"; do
-    if [[ "$opt" == "$selected" ]]; then
-      printf '  %d) %s (default)\n' "$i" "$opt" >"$UI_TTY"
-    else
-      printf '  %d) %s\n' "$i" "$opt" >"$UI_TTY"
-    fi
-    i=$((i + 1))
   done
-  if ui_has_tty; then
-    read -r -p "Choice [${selected}]: " choice <"$UI_TTY" || true
-  fi
-  if [[ -z "$choice" ]]; then
+
+  if ! ui_has_tty; then
     printf '%s\n' "$selected"
     return
   fi
-  if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 && "$choice" -le ${#options[@]} ]]; then
-    printf '%s\n' "${options[$((choice - 1))]}"
-    return
-  fi
-  printf '%s\n' "$choice"
+
+  local lines=0
+  local WHITE=$'\033[1;97m'
+  local MUTED=$'\033[0;97m'
+  local HINT=$'\033[0;90m'
+  _ui_radio_draw() {
+    local i out=""
+    out+=$'\n'
+    out+="  ${WHITE}${header}${RESET}"$'\n'
+    out+="  ${HINT}↑/↓ move · enter to confirm${RESET}"$'\n\n'
+    for i in "${!options[@]}"; do
+      if [[ $i -eq $idx ]]; then
+        out+="  ${RED}●${RESET} ${WHITE}${options[$i]}${RESET}"$'\n'
+      else
+        out+="  ${HINT}○${RESET} ${MUTED}${options[$i]}${RESET}"$'\n'
+      fi
+    done
+    printf '%s' "$out" >"$UI_TTY"
+    lines=$((count + 4))
+  }
+
+  printf '\033[?25l' >"$UI_TTY"
+  trap 'printf "\033[?25h" >"$UI_TTY"' RETURN
+  _ui_radio_draw
+  while true; do
+    IFS= read -rsn1 key <"$UI_TTY" || true
+    if [[ "$key" == $'\033' ]]; then
+      IFS= read -rsn1 bracket <"$UI_TTY" || true
+      IFS= read -rsn1 arrow <"$UI_TTY" || true
+      if [[ "$bracket" == "[" ]]; then
+        case "$arrow" in
+          A) idx=$(((idx - 1 + count) % count)) ;;
+          B) idx=$(((idx + 1) % count)) ;;
+        esac
+      fi
+    elif [[ "$key" == "k" ]]; then
+      idx=$(((idx - 1 + count) % count))
+    elif [[ "$key" == "j" ]]; then
+      idx=$(((idx + 1) % count))
+    elif [[ "$key" == "" || "$key" == " " ]]; then
+      break
+    fi
+    printf '\033[%sA\033[J' "$lines" >"$UI_TTY"
+    _ui_radio_draw
+  done
+  printf '\033[?25h' >"$UI_TTY"
+  printf '%s\n' "${options[$idx]}"
 }
 
 ui_input() {
@@ -132,7 +149,15 @@ ui_input() {
   local value="${3:-}"
   local out=""
   if ui_gum_ready; then
-    local args=(input --header "$header" --placeholder "$placeholder")
+    local args=(
+      input
+      --header "$header"
+      --placeholder "$placeholder"
+      --header.foreground "#F9FAFB"
+      --prompt.foreground "#F9FAFB"
+      --placeholder.foreground "#9CA3AF"
+      --cursor.foreground "#E11D48"
+    )
     if [[ -n "$value" ]]; then
       args+=(--value "$value")
     fi
@@ -148,7 +173,9 @@ ui_input() {
     display="$header [$value]"
   fi
   if ui_has_tty; then
+    printf '\033[1;97m' >"$UI_TTY"
     read -r -p "${display}: " out <"$UI_TTY" || true
+    printf '\033[0m' >"$UI_TTY"
   fi
   printf '%s\n' "${out:-$value}"
 }
@@ -157,12 +184,20 @@ ui_password() {
   local header="$1"
   local out=""
   if ui_gum_ready; then
-    ui_gum input --password --header "$header" --placeholder "at least 10 characters"
+    ui_gum input \
+      --password \
+      --header "$header" \
+      --placeholder "at least 10 characters" \
+      --header.foreground "#F9FAFB" \
+      --prompt.foreground "#F9FAFB" \
+      --placeholder.foreground "#9CA3AF" \
+      --cursor.foreground "#E11D48"
     return
   fi
   if ui_has_tty; then
+    printf '\033[1;97m' >"$UI_TTY"
     read -r -s -p "${header}: " out <"$UI_TTY" || true
-    printf '\n' >"$UI_TTY"
+    printf '\033[0m\n' >"$UI_TTY"
   fi
   printf '%s\n' "$out"
 }
@@ -260,7 +295,7 @@ ui_kv_table() {
   for ((i = 0; i < val_w + 2; i++)); do body+="─"; done
   body+="┘"
   if ui_gum_ready; then
-    ui_gum style --border rounded --border-foreground 196 --padding "1 1" --margin "1 0" "$body"
+    ui_gum style --foreground "#F9FAFB" --border rounded --border-foreground 196 --padding "1 1" --margin "1 0" "$body"
     return
   fi
   printf '%s\n' "$body"
