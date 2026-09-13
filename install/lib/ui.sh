@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 # TUI helpers for the Flutter panel installer (Charm gum).
-# Sourced by ubuntu-24.04.sh. Expects log/warn/die from the caller.
+# Sourced by ubuntu-24.04.sh. Defines log/ok/warn/die.
 
 GUM_VERSION="${FLUTTER_GUM_VERSION:-0.16.2}"
 GUM_DIR="${FLUTTER_GUM_DIR:-/usr/local/lib/flutter-install}"
 GUM="${GUM_DIR}/gum"
 UI_TTY="/dev/tty"
 RED=$'\033[1;31m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[1;34m'
+GREEN=$'\033[1;32m'
 DIM=$'\033[2m'
 BOLD=$'\033[1m'
 RESET=$'\033[0m'
+
+log()  { printf '%s[FLUTTER] %s%s\n' "$BLUE" "$*" "$RESET"; }
+ok()   { printf '%s[FLUTTER] %s%s\n' "$GREEN" "$*" "$RESET"; }
+warn() { printf '%s[FLUTTER] warning: %s%s\n' "$YELLOW" "$*" "$RESET" >&2; }
+fail() { printf '%s[FLUTTER] error: %s%s\n' "$RED" "$*" "$RESET" >&2; }
+die()  { fail "$*"; exit 1; }
 
 ui_has_tty() {
   [[ -e "$UI_TTY" && -r "$UI_TTY" ]]

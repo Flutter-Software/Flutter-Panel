@@ -76,9 +76,10 @@ if [[ "${FLUTTER_WIPE_PTERODACTYL:-}" == "1" ]]; then
   WIPE_PTERO=1
 fi
 
-log() { printf '[flutter] %s\n' "$*"; }
-warn() { printf '[flutter] warning: %s\n' "$*" >&2; }
-die() { printf '[flutter] error: %s\n' "$*" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=lib/ui.sh
+source "$SCRIPT_DIR/lib/ui.sh"
 
 usage() {
   sed -n '2,32p' "$0"
@@ -108,11 +109,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$(id -u)" -eq 0 ]] || die "Run as root: sudo bash install/ubuntu-24.04.sh"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# shellcheck source=lib/ui.sh
-source "$SCRIPT_DIR/lib/ui.sh"
 
 SOURCE=""
 if [[ -f "$REPO_ROOT/package.json" ]] && grep -q '"name": "flutter-panel"' "$REPO_ROOT/package.json"; then
@@ -231,11 +227,12 @@ prepare_admin_account() {
 run_wizard() {
   ensure_gum || true
   printf '\n'
+  ui_banner_flutter
   if ui_gum_ready; then
     ui_gum style --foreground "#F9FAFB" --bold --align center --padding "1 2" --border double --border-foreground 196 \
-      "Flutter installer"$'\n'"Arrow keys to move · enter to confirm"
+      "FLUTTER installer"$'\n'"Arrow keys to move · enter to confirm"
   else
-    log "Flutter installer"
+    log "FLUTTER installer — arrow keys to move, enter to confirm"
   fi
 
   local ptero_default="No"
@@ -417,7 +414,7 @@ copy_ptero_volumes() {
       >"$dest/$uuid/.flutter/install-status.json"
     COPIED_VOLUMES=$((COPIED_VOLUMES + 1))
   done
-  log "Copied ${COPIED_VOLUMES} server volume(s) to ${dest}"
+  ok "Copied ${COPIED_VOLUMES} server volume(s) to ${dest}"
 }
 
 if [[ "$MIGRATE_SERVERS" -eq 1 ]]; then
@@ -443,7 +440,7 @@ if [[ "$MIGRATE_SERVERS" -eq 1 ]]; then
   PTERO_DUMP="/root/flutter-ptero-export.json"
   bash "$SCRIPT_DIR/dump-pterodactyl.sh" --env "$PANEL_ENV" --out "$PTERO_DUMP" ${WINGS_CFG:+--wings-config "$WINGS_CFG"}
   chmod 600 "$PTERO_DUMP"
-  log "Wrote ${PTERO_DUMP}"
+  ok "Wrote ${PTERO_DUMP}"
   ui_phase "COPYING SERVER FILES...."
   if wings_running || [[ -d /etc/pterodactyl || -d /etc/pelican || -x /usr/local/bin/wings ]]; then
     log "Stopping Wings so server files can be copied cleanly"
@@ -697,7 +694,7 @@ start_nginx() {
   if systemctl restart nginx; then
     return 0
   fi
-  warn "nginx.service failed to start. Recent logs:"
+  fail "nginx.service failed to start. Recent logs:"
   journalctl -u nginx.service -n 40 --no-pager || true
   warn "Listeners on :80 / :443:"
   ss -tlnp 2>/dev/null | grep -E ':80|:443' || true
@@ -755,7 +752,7 @@ for _ in $(seq 1 45); do
   fi
   sleep 2
 done
-[[ "$api_ready" -eq 1 ]] || warn "API did not become ready on 127.0.0.1:4000"
+[[ "$api_ready" -eq 1 ]] || fail "API did not become ready on 127.0.0.1:4000"
 
 ui_phase "CREATING ADMIN ACCOUNT...."
 admin_json="$(
@@ -785,7 +782,7 @@ if [[ "$MIGRATE_SERVERS" -eq 1 && -n "$PTERO_DUMP" && -f "$PTERO_DUMP" ]]; then
       node scripts/migrate-pterodactyl.mjs"
   )" || migrate_ok=0
   if [[ "$migrate_ok" -ne 1 ]]; then
-    warn "Pterodactyl/Pelican migration reported errors"
+    fail "Pterodactyl/Pelican migration reported errors"
   fi
   if [[ -n "${migrate_json:-}" ]]; then
     MIGRATED_EGGS="$(printf '%s' "$migrate_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("eggsImported",0))' 2>/dev/null || echo 0)"
@@ -794,7 +791,7 @@ if [[ "$MIGRATE_SERVERS" -eq 1 && -n "$PTERO_DUMP" && -f "$PTERO_DUMP" ]]; then
     migrate_errors="$(printf '%s' "$migrate_json" | python3 -c 'import json,sys; e=json.load(sys.stdin).get("errors") or []; print(len(e))' 2>/dev/null || echo 0)"
     if [[ "$migrate_errors" != "0" ]]; then
       migrate_ok=0
-      warn "Some eggs or servers could not be imported. See the migrate-pterodactyl output above."
+      fail "Some eggs or servers could not be imported. See the migrate-pterodactyl output above."
     fi
   fi
   rm -f "$PREFIX/ptero-export.json"
@@ -807,9 +804,9 @@ fi
 
 sleep 2
 if systemctl is-active --quiet flutter-api && systemctl is-active --quiet flutter-web; then
-  log "API and panel are running"
+  ok "API and panel are running"
 else
-  warn "One or more services failed to start. Check: journalctl -u flutter-api -u flutter-web -e"
+  fail "One or more services failed to start. Check: journalctl -u flutter-api -u flutter-web -e"
 fi
 
 WEB_PORT="3010"
