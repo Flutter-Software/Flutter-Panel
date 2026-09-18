@@ -66,14 +66,14 @@ export default function AccountProfilePage() {
           />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate font-medium text-primary">{user?.username ?? username || "—"}</p>
+              <p className="truncate font-medium text-primary">{(user?.username ?? username) || "—"}</p>
               {user?.role === "admin" ? (
                 <span className="rounded-md bg-primary px-1.5 py-0.5 text-[11px] font-semibold text-primary-foreground">
                   admin
                 </span>
               ) : null}
             </div>
-            <p className="mt-0.5 truncate text-sm text-muted-foreground">{user?.email ?? email || "—"}</p>
+            <p className="mt-0.5 truncate text-sm text-muted-foreground">{(user?.email ?? email) || "—"}</p>
           </div>
         </div>
         <form className="mt-6 space-y-5" onSubmit={(event) => void onSave(event)}>

@@ -44,7 +44,7 @@ function fileToBase64(file: File) {
   });
 }
 
-export function avatarInitials(user: { username?: string | null; email?: string | null } | null) {
+export function avatarInitials(user?: { username?: string | null; email?: string | null } | null) {
   const fromName = (user?.username ?? "").replace(/[^a-zA-Z]/g, "").slice(0, 2);
   if (fromName) return fromName.toUpperCase();
   const local = (user?.email ?? "").split("@")[0] ?? "";
