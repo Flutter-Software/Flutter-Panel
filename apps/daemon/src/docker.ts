@@ -87,7 +87,7 @@ export function stripAttachNoise(text: string) {
     .trim();
 }
 
-/** Cursor-home / erase-line from npm and similar TTY installers. Color (SGR) stays for the panel. */
+/** ANSI home / erase-line from npm and similar TTY installers. Color (SGR) stays for the panel. */
 function sanitizeConsoleOutput(text: string) {
   let value = text.replace(/\r\n/g, "\n");
   const colors: string[] = [];

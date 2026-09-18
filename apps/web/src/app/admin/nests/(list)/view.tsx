@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { Box, Boxes, Pencil, Plus, Trash2, Upload } from "lucide-react";
-import { AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminPage } from "@/components/admin-table";
+import { AdminNestsPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
-import type { NestRecord } from "./nest-form";
+import type { NestRecord } from "../nest-form";
 
-export default function AdminNestsPage() {
+export default function AdminNestsPage({ skeletonNests }: { skeletonNests?: number[] }) {
   const { data, error, errorStatus, reload } = useQuery<{ data: { nests: NestRecord[] } }>("/api/v1/admin/nests");
   const nests = data?.data.nests ?? [];
 
@@ -62,6 +63,10 @@ export default function AdminNestsPage() {
     );
   }
 
+  if (!data) {
+    return <AdminNestsPageSkeleton nests={skeletonNests} />;
+  }
+
   return (
     <AdminPage
       title="Nests"
@@ -83,9 +88,7 @@ export default function AdminNestsPage() {
         </>
       }
     >
-      {!data ? (
-        <ListSkeleton />
-      ) : nests.length === 0 ? (
+      {nests.length === 0 ? (
         <Card className="px-6 py-16 text-center">
           <p className="text-base font-semibold">No nests yet</p>
           <p className="mt-1 text-sm text-muted-foreground">

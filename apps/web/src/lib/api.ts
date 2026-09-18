@@ -4,6 +4,7 @@ import {
   type PublicUser,
 } from "@flutter-software/shared";
 import { invalidateQuery, writeQuery } from "@/lib/query-cache";
+import { rememberListCounts } from "@/lib/skeleton-counts";
 
 export type ApiError = {
   error: { code: string; message: string };
@@ -87,6 +88,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (typeof window !== "undefined" && method === "GET" && json) {
     writeQuery(path, json);
     seedListCache(path, json);
+    rememberListCounts(path, json);
   } else if (typeof window !== "undefined" && method !== "GET") {
     invalidateMutating(path);
   }

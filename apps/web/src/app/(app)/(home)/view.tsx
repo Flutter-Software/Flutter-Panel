@@ -3,15 +3,15 @@
 import { useMemo, useState } from "react";
 import { LayoutGrid, Table2 } from "lucide-react";
 import { ServerCard, ServerTable, serverAttention } from "@/components/server-card";
-import { ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
+import { HomeServersSkeleton } from "@/components/skeletons";
 import { Badge, Button, Input } from "@/components/ui";
 import { useQuery } from "@/lib/query";
 import { useLiveReload } from "@/components/panel-socket";
 import type { ServerRecord } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
-export default function DashboardPage() {
+export default function HomePage({ skeletonCount }: { skeletonCount?: number }) {
   const [tab, setTab] = useState<"my" | "other">("my");
   const [layout, setLayout] = useState<"grid" | "table">("grid");
   const [query, setQuery] = useState("");
@@ -41,6 +41,10 @@ export default function DashboardPage() {
         onRetry={() => void reload()}
       />
     );
+  }
+
+  if (!data) {
+    return <HomeServersSkeleton count={skeletonCount} />;
   }
 
   return (
@@ -101,9 +105,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {!data ? (
-        <ListSkeleton rows={2} />
-      ) : filtered.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-6 py-16 text-center">
           <p className="font-semibold">
             {tab === "my"

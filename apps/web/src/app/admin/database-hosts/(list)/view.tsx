@@ -3,15 +3,16 @@
 import { useCallback } from "react";
 import Link from "next/link";
 import { Database, Pencil, Plus, Trash2 } from "lucide-react";
-import { AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminPage } from "@/components/admin-table";
+import { AdminDatabaseHostsPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
-import type { DatabaseHostRecord } from "./types";
+import type { DatabaseHostRecord } from "../types";
 
-export default function AdminDatabaseHostsPage() {
+export default function AdminDatabaseHostsPage({ skeletonCount }: { skeletonCount?: number }) {
   const { data, error, errorStatus, reload } = useQuery<{ data: { hosts: DatabaseHostRecord[] } }>(
     "/api/v1/admin/database-hosts",
   );
@@ -50,6 +51,10 @@ export default function AdminDatabaseHostsPage() {
     );
   }
 
+  if (!data) {
+    return <AdminDatabaseHostsPageSkeleton count={skeletonCount} />;
+  }
+
   return (
     <AdminPage
       title="Database hosts"
@@ -60,9 +65,7 @@ export default function AdminDatabaseHostsPage() {
         </ButtonLink>
       }
     >
-      {!data ? (
-        <ListSkeleton />
-      ) : rows.length === 0 ? (
+      {rows.length === 0 ? (
         <Card className="px-6 py-16 text-center">
           <p className="text-base font-semibold">No database hosts yet</p>
           <p className="mt-1 text-sm text-muted-foreground">

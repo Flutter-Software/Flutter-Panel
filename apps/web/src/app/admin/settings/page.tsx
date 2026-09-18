@@ -3,7 +3,8 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Check, Copy, Image as ImageIcon, KeyRound, Mail, RefreshCw, Send } from "lucide-react";
 import { Button, NumberInput, PasswordInput, Select, Switch, TextInput } from "@mantine/core";
-import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminError, AdminPage } from "@/components/admin-table";
+import { SettingsWorkspaceSkeleton } from "@/components/skeletons";
 import { useAuth } from "@/components/auth-provider";
 import { DEFAULT_CONSOLE_TAG, DEFAULT_LOGO_SRC, DEFAULT_SITE_NAME, useBranding } from "@/components/branding-provider";
 import { UpdatesSection } from "./updates-section";
@@ -420,7 +421,7 @@ export default function AdminSettingsPage() {
     >
       <AdminError message={loadError} />
       {!data && !loadError ? (
-        <ListSkeleton rows={2} />
+        <SettingsWorkspaceSkeleton />
       ) : (
         <SettingsWorkspace
           section={section}

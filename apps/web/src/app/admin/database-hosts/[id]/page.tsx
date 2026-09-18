@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { AdminEditFormSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import { DatabaseHostForm } from "../host-form";
@@ -28,14 +28,12 @@ export default function EditDatabaseHostPage({ params }: { params: Promise<{ id:
 
   if (!host) {
     return (
-      <AdminFormPage
+      <AdminEditFormSkeleton
         title="Database host"
         description="Edit this database host."
         backHref="/admin/database-hosts"
         backLabel="Databases"
-      >
-        <ListSkeleton rows={2} />
-      </AdminFormPage>
+      />
     );
   }
 

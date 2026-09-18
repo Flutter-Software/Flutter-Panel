@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Check, Copy, Plus, Server, Trash2 } from "lucide-react";
-import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminError, AdminPage } from "@/components/admin-table";
+import { AdminNodesPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card } from "@/components/ui";
@@ -81,7 +82,7 @@ type Node = {
   allocations: Allocation[];
 };
 
-export default function AdminNodesPage() {
+export default function AdminNodesPage({ skeletonCount }: { skeletonCount?: number }) {
   const { data, error, errorStatus, reload } = useQuery<{ data: { nodes: Node[] } }>("/api/v1/admin/nodes");
   const nodes = data?.data.nodes ?? [];
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -134,6 +135,10 @@ export default function AdminNodesPage() {
     );
   }
 
+  if (!data) {
+    return <AdminNodesPageSkeleton count={skeletonCount} />;
+  }
+
   return (
     <AdminPage
       title="Nodes"
@@ -145,9 +150,7 @@ export default function AdminNodesPage() {
       }
     >
       <AdminError message={actionError} />
-      {!data ? (
-        <ListSkeleton />
-      ) : nodes.length === 0 ? (
+      {nodes.length === 0 ? (
         <Card className="px-6 py-16 text-center">
           <p className="text-base font-semibold">No nodes yet</p>
           <p className="mt-1 text-sm text-muted-foreground">

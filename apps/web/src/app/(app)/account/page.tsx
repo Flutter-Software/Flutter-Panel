@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { Button, Card, Field, Input } from "@/components/ui";
+import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import type { PublicUser } from "@flutter-software/shared";
 import { SettingsSection } from "./settings-nav";
@@ -52,21 +53,27 @@ export default function AccountProfilePage() {
       <Card className="p-5 sm:p-6">
         <h3 className="text-sm font-semibold">Identity</h3>
         <div className="mt-5 flex items-center gap-4">
-          <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary text-lg font-semibold text-primary-foreground">
-            {initials}
-          </span>
+          <UserAvatar
+            user={user}
+            initials={initials}
+            size="lg"
+            editable
+            onChanged={(next) => {
+              setUser(next);
+              setError(null);
+            }}
+            onError={setError}
+          />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate font-medium text-primary">{user?.email ?? "—"}</p>
+              <p className="truncate font-medium text-primary">{user?.username ?? username || "—"}</p>
               {user?.role === "admin" ? (
                 <span className="rounded-md bg-primary px-1.5 py-0.5 text-[11px] font-semibold text-primary-foreground">
                   admin
                 </span>
               ) : null}
             </div>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Avatars are generated from your email initials.
-            </p>
+            <p className="mt-0.5 truncate text-sm text-muted-foreground">{user?.email ?? email || "—"}</p>
           </div>
         </div>
         <form className="mt-6 space-y-5" onSubmit={(event) => void onSave(event)}>

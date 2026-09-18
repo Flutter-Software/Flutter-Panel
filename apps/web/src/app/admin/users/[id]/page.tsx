@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { AdminEditFormSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import type { PublicUser } from "@flutter-software/shared";
@@ -28,14 +28,12 @@ export default function EditUserPage({ params }: { params: Promise<{ id: string 
 
   if (!user) {
     return (
-      <AdminFormPage
+      <AdminEditFormSkeleton
         title="User"
         description="Edit this account."
         backHref="/admin/users"
         backLabel="Users"
-      >
-        <ListSkeleton rows={2} />
-      </AdminFormPage>
+      />
     );
   }
 

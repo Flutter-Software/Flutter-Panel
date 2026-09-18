@@ -13,6 +13,8 @@ const userSchema = new Schema(
     emailVerifyExpiresAt: { type: Date, default: null },
     oidcIssuer: { type: String, default: null },
     oidcSub: { type: String, default: null },
+    avatarMime: { type: String, default: null },
+    avatar: { type: Buffer, default: null, select: false },
   },
   { timestamps: true },
 );

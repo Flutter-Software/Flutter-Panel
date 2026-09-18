@@ -2,7 +2,7 @@
 
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { AdminEditFormSkeleton } from "@/components/skeletons";
 import { EggForm } from "../../egg-form";
 
 function CreateEggInner() {
@@ -14,14 +14,12 @@ export default function CreateEggPage() {
   return (
     <Suspense
       fallback={
-        <AdminFormPage
+        <AdminEditFormSkeleton
           title="New egg"
           description="Create an egg in a nest."
           backHref="/admin/nests"
           backLabel="Nests"
-        >
-          <ListSkeleton rows={2} />
-        </AdminFormPage>
+        />
       }
     >
       <CreateEggInner />

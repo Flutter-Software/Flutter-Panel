@@ -3,7 +3,8 @@
 import { Suspense, useMemo, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FileJson, Upload } from "lucide-react";
-import { AdminError, AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { AdminError } from "@/components/admin-table";
+import { AdminEditFormSkeleton } from "@/components/skeletons";
 import { AdminCreateHeader, AdminSection, SaveIsland, isDirty } from "@/components/admin-create";
 import { Field, Input, Select, Textarea } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -172,14 +173,12 @@ export default function ImportEggPage() {
   return (
     <Suspense
       fallback={
-        <AdminFormPage
+        <AdminEditFormSkeleton
           title="Import egg"
           description="Paste a Pterodactyl or Pelican egg JSON file."
           backHref="/admin/nests"
           backLabel="Nests"
-        >
-          <ListSkeleton rows={2} />
-        </AdminFormPage>
+        />
       }
     >
       <ImportEggInner />

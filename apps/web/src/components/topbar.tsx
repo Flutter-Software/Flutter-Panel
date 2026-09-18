@@ -7,8 +7,16 @@ import { ChevronDown, LayoutDashboard, LogOut, Moon, Shield, Sun, UserRound } fr
 import { useTheme } from "next-themes";
 import { Wordmark } from "@/components/brand";
 import { useAuth } from "@/components/auth-provider";
+import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
+
+function topbarKicker(pathname: string) {
+  if (pathname.startsWith("/account")) return "Account settings";
+  if (pathname.startsWith("/admin")) return "Admin";
+  if (pathname.startsWith("/server/")) return "Server";
+  return "Server list";
+}
 
 export function Topbar() {
   const pathname = usePathname();
@@ -18,7 +26,8 @@ export function Topbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const inAdmin = pathname.startsWith("/admin");
-  const initials = (user?.username ?? "??").slice(0, 2).toUpperCase();
+  const inAccount = pathname.startsWith("/account");
+  const kicker = topbarKicker(pathname);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -44,9 +53,7 @@ export function Topbar() {
       <Link href="/" className="shrink-0">
         <Wordmark />
       </Link>
-      {pathname.startsWith("/account") ? (
-        <p className="hidden text-sm text-muted-foreground sm:block">Account settings.</p>
-      ) : null}
+      <p className="hidden text-sm text-muted-foreground sm:block">{kicker}</p>
       <div className="ml-auto flex items-center gap-1">
         <button
           type="button"
@@ -68,9 +75,7 @@ export function Topbar() {
             aria-haspopup="menu"
             onClick={() => setMenuOpen((open) => !open)}
           >
-            <span className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-              {initials}
-            </span>
+            <UserAvatar user={user} size="sm" />
             <span className="hidden text-sm sm:block">{user?.username ?? "Account"}</span>
             <ChevronDown
               className={cn("size-4 text-muted-foreground transition-transform", menuOpen && "rotate-180")}
@@ -82,9 +87,7 @@ export function Topbar() {
               className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-border bg-card shadow-lg"
             >
               <div className="flex items-center gap-3 border-b border-border px-3 py-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                  {initials}
-                </span>
+                <UserAvatar user={user} size="md" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{user?.username ?? "Account"}</p>
                   <p className="truncate text-xs text-muted-foreground">{user?.email ?? ""}</p>
@@ -96,10 +99,17 @@ export function Topbar() {
                 </p>
               ) : null}
               <div className="flex flex-col gap-0.5 p-1.5 pt-0">
-                <Link href="/account" role="menuitem" className={itemClass} onClick={() => setMenuOpen(false)}>
-                  <UserRound className="size-4 shrink-0" />
-                  Account
-                </Link>
+                {inAccount ? (
+                  <Link href="/" role="menuitem" className={itemClass} onClick={() => setMenuOpen(false)}>
+                    <LayoutDashboard className="size-4 shrink-0" />
+                    Servers
+                  </Link>
+                ) : (
+                  <Link href="/account" role="menuitem" className={itemClass} onClick={() => setMenuOpen(false)}>
+                    <UserRound className="size-4 shrink-0" />
+                    Account
+                  </Link>
+                )}
                 {user?.role === "admin" ? (
                   inAdmin ? (
                     <Link href="/" role="menuitem" className={itemClass} onClick={() => setMenuOpen(false)}>

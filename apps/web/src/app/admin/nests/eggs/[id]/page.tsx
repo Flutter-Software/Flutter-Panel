@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { AdminEditFormSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import { EggForm, type EggRecord } from "../../egg-form";
@@ -27,14 +27,12 @@ export default function EditEggPage({ params }: { params: Promise<{ id: string }
 
   if (!egg) {
     return (
-      <AdminFormPage
+      <AdminEditFormSkeleton
         title="Egg"
         description="Edit this egg."
         backHref="/admin/nests"
         backLabel="Nests"
-      >
-        <ListSkeleton rows={2} />
-      </AdminFormPage>
+      />
     );
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { AdminEditFormSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import type { ServerRecord } from "@/lib/types";
@@ -28,14 +28,12 @@ export default function EditServerPage({ params }: { params: Promise<{ id: strin
 
   if (!server) {
     return (
-      <AdminFormPage
+      <AdminEditFormSkeleton
         title="Server"
         description="Edit this server."
         backHref="/admin/servers"
         backLabel="Servers"
-      >
-        <ListSkeleton rows={2} />
-      </AdminFormPage>
+      />
     );
   }
 

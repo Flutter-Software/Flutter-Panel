@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { AdminEditFormSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import { LocationForm, type LocationRecord } from "../location-form";
@@ -27,14 +27,12 @@ export default function EditLocationPage({ params }: { params: Promise<{ id: str
 
   if (!location) {
     return (
-      <AdminFormPage
+      <AdminEditFormSkeleton
         title="Location"
         description="Edit this location."
         backHref="/admin/locations"
         backLabel="Locations"
-      >
-        <ListSkeleton rows={2} />
-      </AdminFormPage>
+      />
     );
   }
 

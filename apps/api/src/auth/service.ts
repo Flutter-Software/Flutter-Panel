@@ -6,6 +6,7 @@ import {
   adminUserUpdateSchema,
   changePasswordSchema,
   updateProfileSchema,
+  updateAvatarSchema,
   loginSchema,
   registerSchema,
   resendVerifySchema,
@@ -320,6 +321,69 @@ export async function updateProfile(c: Context, body: unknown) {
   row.email = email;
   await row.save();
   return { user: publicUser(row) };
+}
+
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+function decodeImageData(raw: string) {
+  const comma = raw.indexOf(",");
+  const payload = comma >= 0 ? raw.slice(comma + 1) : raw;
+  const buffer = Buffer.from(payload, "base64");
+  if (!buffer.length) throw FlutterError.validation("Image file is empty");
+  if (buffer.length > AVATAR_MAX_BYTES) throw FlutterError.validation("Image must be 2 MB or smaller");
+  return buffer;
+}
+
+function sniffImageMime(buffer: Buffer) {
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return "image/png" as const;
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg" as const;
+  }
+  if (buffer.length >= 6 && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+    return "image/gif" as const;
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    return "image/webp" as const;
+  }
+  return null;
+}
+
+export async function updateAvatar(c: Context, body: unknown) {
+  const session = await getSessionUser(c);
+  if (!session) throw FlutterError.unauthorized();
+  const parsed = updateAvatarSchema.safeParse(body);
+  if (!parsed.success) throw FlutterError.validation("Could not use that image", parsed.error.flatten());
+
+  const row = await User.findById(session.user.id);
+  if (!row) throw FlutterError.unauthorized();
+
+  if (parsed.data.avatar === null) {
+    row.avatar = null;
+    row.avatarMime = null;
+  } else {
+    const buffer = decodeImageData(parsed.data.avatar.data);
+    const mime = sniffImageMime(buffer);
+    if (!mime) throw FlutterError.validation("Could not use that image");
+    row.avatar = buffer;
+    row.avatarMime = mime;
+  }
+  await row.save();
+  return { user: publicUser(row) };
+}
+
+export async function getAvatar(id: string) {
+  if (!/^[a-fA-F0-9]{24}$/.test(id)) return null;
+  const row = await User.findById(id).select("+avatar avatarMime");
+  const data = row?.avatar;
+  const buffer = Buffer.isBuffer(data) ? data : data instanceof Uint8Array ? Buffer.from(data) : null;
+  if (!row?.avatarMime || !buffer?.byteLength) return null;
+  return { mime: String(row.avatarMime), data: buffer };
 }
 
 export async function listSessions(c: Context) {

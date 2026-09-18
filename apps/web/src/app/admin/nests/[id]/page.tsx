@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AdminFormPage, ListSkeleton } from "@/components/admin-table";
+import { AdminEditFormSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { useQuery } from "@/lib/query";
 import { NestForm, type NestRecord } from "../nest-form";
@@ -27,14 +27,12 @@ export default function EditNestPage({ params }: { params: Promise<{ id: string 
 
   if (!nest) {
     return (
-      <AdminFormPage
+      <AdminEditFormSkeleton
         title="Nest"
         description="Edit this nest."
         backHref="/admin/nests"
         backLabel="Nests"
-      >
-        <ListSkeleton rows={2} />
-      </AdminFormPage>
+      />
     );
   }
 

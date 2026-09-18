@@ -73,6 +73,7 @@ export {
   inviteCompleteSchema,
   changePasswordSchema,
   updateProfileSchema,
+  updateAvatarSchema,
   totpCodeSchema,
   totpSetupSchema,
   totpEnableSchema,

@@ -2,16 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { Plus, Shield, UserRound } from "lucide-react";
-import { AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminPage } from "@/components/admin-table";
+import { AdminUsersPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { useAuth } from "@/components/auth-provider";
 import { ButtonLink, Card } from "@/components/ui";
+import { UserAvatar } from "@/components/user-avatar";
 import { cn } from "@/lib/cn";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import type { ServerRecord } from "@/lib/types";
 import type { PublicUser } from "@flutter-software/shared";
 
-export default function AdminUsersPage() {
+export default function AdminUsersPage({ skeletonCount }: { skeletonCount?: number }) {
   const router = useRouter();
   const { user: viewer } = useAuth();
   const { data, error, errorStatus, reload } = useQuery<{ data: { users: PublicUser[] } }>("/api/v1/admin/users");
@@ -32,6 +34,10 @@ export default function AdminUsersPage() {
     );
   }
 
+  if (!data) {
+    return <AdminUsersPageSkeleton count={skeletonCount} />;
+  }
+
   return (
     <AdminPage
       title="Users"
@@ -43,10 +49,7 @@ export default function AdminUsersPage() {
         </ButtonLink>
       }
     >
-      {!data ? (
-        <ListSkeleton />
-      ) : (
-        <Card className="overflow-hidden">
+      <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -73,9 +76,7 @@ export default function AdminUsersPage() {
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                            {user.username.slice(0, 2).toUpperCase()}
-                          </span>
+                          <UserAvatar user={user} size="sm" />
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="font-medium">{user.username}</span>
@@ -124,7 +125,6 @@ export default function AdminUsersPage() {
             </p>
           ) : null}
         </Card>
-      )}
     </AdminPage>
   );
 }

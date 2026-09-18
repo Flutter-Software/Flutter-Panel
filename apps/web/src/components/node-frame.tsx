@@ -4,8 +4,9 @@ import { createContext, useContext, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { ListSkeleton } from "@/components/admin-table";
 import { QueryErrorPage } from "@/components/error-page";
+import { SkeletonRoot } from "@/components/skeleton";
+import { NodeDetailSkeleton } from "@/components/skeletons";
 import { cn } from "@/lib/cn";
 import { useQuery } from "@/lib/query";
 
@@ -167,7 +168,11 @@ export function NodeFrame({ nodeId, children }: { nodeId: string; children: Reac
           })}
         </nav>
 
-        {node ? children : <ListSkeleton rows={3} />}
+        {node ? children : (
+          <SkeletonRoot>
+            <NodeDetailSkeleton />
+          </SkeletonRoot>
+        )}
       </div>
     </NodeContext.Provider>
   );

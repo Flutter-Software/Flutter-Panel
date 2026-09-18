@@ -63,14 +63,19 @@ export function publicUser(row: {
   email: string;
   role: string;
   totpEnabled: boolean;
+  avatarMime?: string | null;
+  updatedAt?: Date;
   createdAt: Date;
 }) {
+  const id = row.id ?? row._id?.toString() ?? "";
+  const version = row.updatedAt ? row.updatedAt.getTime() : 0;
   return {
-    id: row.id ?? row._id?.toString() ?? "",
+    id,
     username: row.username,
     email: row.email,
     role: row.role as "admin" | "user",
     totpEnabled: row.totpEnabled,
+    avatarUrl: row.avatarMime ? `/api/v1/users/${id}/avatar?v=${version}` : null,
     createdAt: row.createdAt.toISOString(),
   };
 }

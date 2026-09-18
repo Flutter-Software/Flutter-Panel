@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, Pencil, Plus, Search, Server, Trash2, X } from "lucide-react";
-import { AdminPage, ListSkeleton } from "@/components/admin-table";
+import { AdminPage } from "@/components/admin-table";
+import { AdminServersPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
 import { Button, ButtonLink, Card, EmptyState, Input, Select } from "@/components/ui";
@@ -26,7 +27,7 @@ const STATUS_FILTERS: ServerStatus[] = [
   "install_failed",
 ];
 
-export default function AdminServersPage() {
+export default function AdminServersPage({ skeletonCount }: { skeletonCount?: number }) {
   const { data, error, errorStatus, reload } = useQuery<{ data: { servers: ServerRecord[] } }>(
     "/api/v1/admin/servers",
   );
@@ -117,6 +118,10 @@ export default function AdminServersPage() {
     );
   }
 
+  if (!data) {
+    return <AdminServersPageSkeleton count={skeletonCount} />;
+  }
+
   return (
     <AdminPage
       title="Servers"
@@ -127,9 +132,7 @@ export default function AdminServersPage() {
         </ButtonLink>
       }
     >
-      {!data ? (
-        <ListSkeleton />
-      ) : servers.length === 0 ? (
+      {servers.length === 0 ? (
         <EmptyState
           title="No servers yet"
           description="Create a node and allocations first, then place a game server."

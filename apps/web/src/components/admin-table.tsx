@@ -71,16 +71,3 @@ export function AdminError({ message }: { message: string | null }) {
     </p>
   );
 }
-
-export function ListSkeleton({ rows = 3, className }: { rows?: number; className?: string }) {
-  return (
-    <div className={cn("space-y-4", className)}>
-      {Array.from({ length: rows }, (_, index) => (
-        <div
-          key={index}
-          className="h-24 animate-pulse rounded-xl border border-border bg-card"
-        />
-      ))}
-    </div>
-  );
-}

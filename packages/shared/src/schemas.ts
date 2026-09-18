@@ -15,6 +15,7 @@ export const publicUserSchema = z.object({
   email: z.string().email(),
   role: roleSchema,
   totpEnabled: z.boolean(),
+  avatarUrl: z.string().nullable(),
   createdAt: z.string(),
 });
 
@@ -81,6 +82,17 @@ export const changePasswordSchema = z
 export const updateProfileSchema = z.object({
   username: registerSchema.shape.username,
   email: z.string().email(),
+});
+
+export const IMAGE_MIMES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+
+export const updateAvatarSchema = z.object({
+  avatar: z
+    .object({
+      mime: z.enum(IMAGE_MIMES),
+      data: z.string().min(1).max(3_000_000),
+    })
+    .nullable(),
 });
 
 export const totpCodeSchema = z

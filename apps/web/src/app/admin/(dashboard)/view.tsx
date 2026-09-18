@@ -1,28 +1,32 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Box,
+  CircleHelp,
   Cpu,
   MapPin,
   Plus,
   Server,
   Settings,
+  SquareArrowOutUpRight,
   Upload,
   Users,
 } from "lucide-react";
-import { AdminError, AdminPage, ListSkeleton } from "@/components/admin-table";
+import { Popover } from "@mantine/core";
+import { AdminError, AdminPage } from "@/components/admin-table";
+import { DashboardSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { statusMeta, statusPillClass } from "@/components/status";
-import { ButtonLink, Card } from "@/components/ui";
+import { Badge, ButtonLink, Card } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
 import type { ServerRecord } from "@/lib/types";
 import type { PublicUser } from "@flutter-software/shared";
-import type { LocationRecord } from "./locations/location-form";
-import type { NestRecord } from "./nests/nest-form";
+import type { LocationRecord } from "../locations/location-form";
+import type { NestRecord } from "../nests/nest-form";
 
 type HealthCheck = { ok: boolean; latencyMs?: number };
 type Health = {
@@ -47,13 +51,42 @@ type UpdateStatus = {
   latest: { message: string; shortSha: string };
 };
 
-const HEALTH_LABELS: Record<string, string> = {
-  mongo: "MongoDB",
-  prisma: "Prisma",
-  redis: "Redis",
+type ServiceKind = "ORM" | "Service";
+
+const HEALTH_META: Record<
+  string,
+  { label: string; kind: ServiceKind; description: string; href: string }
+> = {
+  mongo: {
+    label: "MongoDB",
+    kind: "Service",
+    description:
+      "Document database that stores panel state — accounts, servers, nodes, and sessions.",
+    href: "https://www.mongodb.com/",
+  },
+  prisma: {
+    label: "Prisma",
+    kind: "ORM",
+    description:
+      "Typed MongoDB client generated from schema.prisma. Health-checks that the schema still matches the database.",
+    href: "https://www.prisma.io/",
+  },
+  redis: {
+    label: "Redis",
+    kind: "Service",
+    description:
+      "In-memory data store bundled with the panel. Pinged for health and available for cache and background jobs.",
+    href: "https://redis.io/",
+  },
 };
 
-export default function AdminDashboardPage() {
+export default function AdminDashboardPage({
+  skeletonServers,
+  skeletonNodes,
+}: {
+  skeletonServers?: number;
+  skeletonNodes?: number;
+}) {
   const users = useQuery<{ data: { users: PublicUser[] } }>("/api/v1/admin/users");
   const locations = useQuery<{ data: { locations: LocationRecord[] } }>("/api/v1/admin/locations");
   const nodes = useQuery<{ data: { nodes: NodeRow[] } }>("/api/v1/admin/nodes");
@@ -202,6 +235,10 @@ export default function AdminDashboardPage() {
     );
   }
 
+  if (loading) {
+    return <DashboardSkeleton servers={skeletonServers} nodes={skeletonNodes} />;
+  }
+
   return (
     <AdminPage
       title="Dashboard"
@@ -214,11 +251,7 @@ export default function AdminDashboardPage() {
       }
     >
       <AdminError message={loadError} />
-      {loading ? <ListSkeleton rows={3} /> : null}
-
-      {!loading ? (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {stats.map((stat) => {
               const Icon = stat.icon;
               return (
@@ -390,34 +423,133 @@ export default function AdminDashboardPage() {
                   <p className="mt-3 text-sm text-muted-foreground">Checking…</p>
                 ) : (
                   <ul className="mt-3 space-y-2.5">
-                    {Object.entries(health.checks).map(([name, check]) => (
-                      <li key={name} className="flex items-center justify-between gap-3 text-sm">
-                        <span className="flex items-center gap-2">
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              check.ok ? "bg-status-running" : "bg-status-error",
-                            )}
-                          />
-                          {HEALTH_LABELS[name] ?? name}
-                        </span>
-                        <span className="tabular-nums text-xs text-muted-foreground">
-                          {check.ok
-                            ? check.latencyMs != null
-                              ? `${check.latencyMs} ms`
-                              : "Up"
-                            : "Down"}
-                        </span>
-                      </li>
-                    ))}
+                    {Object.entries(health.checks).map(([name, check]) => {
+                      const meta = HEALTH_META[name];
+                      const label = meta?.label ?? name;
+                      return (
+                        <li key={name} className="flex items-center justify-between gap-3 text-sm">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span
+                              className={cn(
+                                "size-1.5 shrink-0 rounded-full",
+                                check.ok ? "bg-status-running" : "bg-status-error",
+                              )}
+                            />
+                            <span className="truncate">{label}</span>
+                            {meta ? <ServiceHint meta={meta} /> : null}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
+                            {check.ok
+                              ? check.latencyMs != null
+                                ? `${check.latencyMs} ms`
+                                : "Up"
+                              : "Down"}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </Card>
             </div>
           </div>
-        </>
-      ) : null}
     </AdminPage>
+  );
+}
+
+function ServiceHint({
+  meta,
+}: {
+  meta: { label: string; kind: ServiceKind; description: string; href: string };
+}) {
+  const [opened, setOpened] = useState(false);
+  const pinned = useRef(false);
+  const leaveTimer = useRef<number>(0);
+
+  const open = () => {
+    window.clearTimeout(leaveTimer.current);
+    setOpened(true);
+  };
+  const close = () => {
+    pinned.current = false;
+    window.clearTimeout(leaveTimer.current);
+    setOpened(false);
+  };
+  const scheduleClose = () => {
+    if (pinned.current) return;
+    window.clearTimeout(leaveTimer.current);
+    leaveTimer.current = window.setTimeout(() => setOpened(false), 160);
+  };
+
+  return (
+    <Popover
+      width={280}
+      shadow="none"
+      withArrow
+      arrowSize={6}
+      offset={6}
+      position="left"
+      opened={opened}
+      onChange={(next) => {
+        if (!next) close();
+        else setOpened(true);
+      }}
+      classNames={{ dropdown: "flutter-tooltip", arrow: "flutter-tooltip-arrow" }}
+    >
+      <Popover.Target>
+        <button
+          type="button"
+          className="no-press inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
+          aria-label={`About ${meta.label}`}
+          aria-expanded={opened}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            window.clearTimeout(leaveTimer.current);
+            if (opened && pinned.current) {
+              close();
+              return;
+            }
+            pinned.current = true;
+            setOpened(true);
+          }}
+          onMouseEnter={open}
+          onMouseLeave={scheduleClose}
+        >
+          <CircleHelp className="size-3.5" />
+        </button>
+      </Popover.Target>
+      <Popover.Dropdown
+        className="!w-[280px] !p-3 !font-normal"
+        onMouseEnter={open}
+        onMouseLeave={scheduleClose}
+      >
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">{meta.label}</p>
+            <Badge
+              className={
+                meta.kind === "ORM"
+                  ? "rounded-md"
+                  : "rounded-md bg-muted text-muted-foreground"
+              }
+            >
+              {meta.kind}
+            </Badge>
+          </div>
+          <p className="text-xs leading-relaxed text-muted-foreground">{meta.description}</p>
+          <a
+            href={meta.href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          >
+            Open {new URL(meta.href).hostname.replace(/^www\./, "")}
+            <SquareArrowOutUpRight className="size-3" />
+          </a>
+        </div>
+      </Popover.Dropdown>
+    </Popover>
   );
 }
 

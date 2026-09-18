@@ -166,6 +166,18 @@ export function createApp() {
     await requireUser(c);
     return c.json({ data: await auth.updateProfile(c, await c.req.json()) });
   });
+  app.patch("/auth/profile/avatar", async (c) => {
+    await requireUser(c);
+    return c.json({ data: await auth.updateAvatar(c, await c.req.json()) });
+  });
+  app.get("/users/:id/avatar", async (c) => {
+    await requireUser(c);
+    const file = await auth.getAvatar(c.req.param("id"));
+    if (!file) return c.body("", 404);
+    c.header("Content-Type", file.mime);
+    c.header("Cache-Control", "private, max-age=31536000, immutable");
+    return c.body(new Uint8Array(file.data));
+  });
   app.get("/auth/sessions", async (c) => {
     await requireUser(c);
     return c.json({ data: await auth.listSessions(c) });
