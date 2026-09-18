@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { PublicUser } from "@flutter-software/shared";
-import { api, type MeResponse } from "@/lib/api";
+import { ErrorPage } from "@/components/error-page";
+import { api, HttpError, type MeResponse } from "@/lib/api";
 
 type AuthState = {
   user: PublicUser | null;
@@ -13,31 +14,52 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+function isPanelDown(error: unknown) {
+  if (!(error instanceof HttpError)) return true;
+  return error.status >= 500 || error.code === "UNAVAILABLE" || error.code === "INTERNAL";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<PublicUser | null>(null);
   const [ready, setReady] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       const result = await api<MeResponse>("/api/v1/auth/me");
       setUser(result.data.user);
-    } catch {
+      setUnavailable(false);
+    } catch (error) {
+      // Cookie still lets middleware through, but Mongo/API is down. Don't
+      // treat that as signed-out or the shell renders ?? / — placeholders.
+      if (isPanelDown(error)) {
+        setUnavailable(true);
+        return;
+      }
       setUser(null);
+      setUnavailable(false);
     } finally {
       setReady(true);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
   const value = useMemo(
     () => ({ user, ready, refresh, setUser }),
-    [user, ready],
+    [user, ready, refresh],
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  let body: ReactNode = null;
+  if (ready && unavailable) {
+    body = <ErrorPage kind="server-error" onRetry={() => void refresh()} />;
+  } else if (ready) {
+    body = children;
+  }
+
+  return <AuthContext.Provider value={value}>{body}</AuthContext.Provider>;
 }
 
 export function useAuth() {

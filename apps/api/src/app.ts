@@ -24,6 +24,7 @@ import * as activity from "./activity";
 import * as settings from "./settings";
 import * as updater from "./update";
 import { Node } from "./db/models";
+import { mongoConnected } from "./db/mongoose";
 import { isNodeOnline } from "./nodes";
 import { verifyConsoleTicket } from "./console-ticket";
 import { verifyPanelTicket } from "./panel-ticket";
@@ -76,6 +77,13 @@ export function createApp() {
     await next();
   });
   app.use("*", async (c, next) => {
+    // /health still answers so operators can see mongo: not ok.
+    if (!c.req.path.endsWith("/health") && !mongoConnected()) {
+      throw FlutterError.internal();
+    }
+    await next();
+  });
+  app.use("*", async (c, next) => {
     const auth = await getAuth(c);
     if (!auth) return next();
     return withAuthLimits(auth, () =>
@@ -99,7 +107,7 @@ export function createApp() {
           error: { code: error.code, message: error.message, details: error.details },
           requestId: requestIdValue,
         },
-        error.status as 400 | 401 | 403 | 404 | 409 | 503,
+        error.status as 400 | 401 | 403 | 404 | 409 | 500 | 503,
       );
     }
     log("error", error instanceof Error ? error.message : "unknown error", {
@@ -627,7 +635,13 @@ export function createApp() {
   });
   app.post("/admin/settings/update", async (c) => {
     await requireAdmin(c);
-    return c.json({ data: await updater.startUpdate() });
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    return c.json({
+      data: await updater.startUpdate({
+        applySchema: body.applySchema !== false,
+        restartDaemon: body.restartDaemon !== false,
+      }),
+    });
   });
   app.post("/admin/settings/smtp/test", async (c) => {
     await requireAdmin(c);

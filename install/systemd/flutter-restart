@@ -1,6 +1,27 @@
 #!/bin/sh
 set -e
+ROOT=/opt/flutter
+SELF=/usr/local/sbin/flutter-restart
+SRC="$ROOT/install/systemd/flutter-restart"
+
+if [ -f "$SRC" ]; then
+  tmp="$(mktemp)"
+  sed "s|/opt/flutter|${ROOT}|g" "$SRC" >"$tmp"
+  if [ ! -f "$SELF" ] || ! cmp -s "$tmp" "$SELF"; then
+    install -m 755 "$tmp" "$SELF"
+    rm -f "$tmp"
+    exec "$SELF" "$@"
+  fi
+  rm -f "$tmp"
+fi
+
 systemctl restart flutter-api.service flutter-web.service
-if systemctl list-unit-files flutter-daemon.service >/dev/null 2>&1; then
+
+restart_daemon=1
+if [ -f "$ROOT/.flutter-update.json" ] && grep -Eq '"restartDaemon"[[:space:]]*:[[:space:]]*false' "$ROOT/.flutter-update.json"; then
+  restart_daemon=0
+fi
+
+if [ "$restart_daemon" -eq 1 ] && systemctl list-unit-files flutter-daemon.service >/dev/null 2>&1; then
   systemctl restart flutter-daemon.service || true
 fi

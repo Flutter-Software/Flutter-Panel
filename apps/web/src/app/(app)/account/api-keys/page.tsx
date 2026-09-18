@@ -216,7 +216,7 @@ export default function AccountApiKeysPage() {
               <h3 className="text-sm font-semibold">Application keys</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 Manage the panel through <span className="font-mono">/api/v1/admin</span>, including
-                one-time login URLs for WHMCS or HostCore. Header:{" "}
+                one-time login URLs for HostCore or WHMCS. Header:{" "}
                 <span className="font-mono">Authorization: Bearer {API_KEY_APPLICATION_PREFIX}…</span>
               </p>
             </div>

@@ -10,6 +10,22 @@ const DEFAULT_REF = "main";
 const STALE_MS = 30 * 60 * 1000;
 const REMOTE_CACHE_MS = 10 * 60 * 1000;
 
+export const UPDATE_PHASES = [
+  "preparing",
+  "packages",
+  "database",
+  "building",
+  "promoting",
+  "restarting",
+] as const;
+
+export type UpdatePhase = (typeof UPDATE_PHASES)[number];
+
+export type UpdateOptions = {
+  applySchema: boolean;
+  restartDaemon: boolean;
+};
+
 export type UpdateJob = {
   state: "idle" | "running" | "ok" | "failed";
   log: string[];
@@ -18,6 +34,14 @@ export type UpdateJob = {
   error?: string | null;
   sha?: string;
   version?: string;
+  phase?: UpdatePhase | null;
+  activity?: string | null;
+  options?: UpdateOptions | null;
+};
+
+export type StartUpdateInput = {
+  applySchema?: boolean;
+  restartDaemon?: boolean;
 };
 
 type RemoteCommit = {
@@ -65,6 +89,28 @@ async function readJson(path: string) {
   }
 }
 
+function parsePhase(value: unknown): UpdatePhase | null {
+  return typeof value === "string" && (UPDATE_PHASES as readonly string[]).includes(value)
+    ? (value as UpdatePhase)
+    : null;
+}
+
+function parseOptions(value: unknown): UpdateOptions | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  return {
+    applySchema: raw.applySchema !== false,
+    restartDaemon: raw.restartDaemon !== false,
+  };
+}
+
+export function normalizeUpdateOptions(input?: StartUpdateInput | null): UpdateOptions {
+  return {
+    applySchema: input?.applySchema !== false,
+    restartDaemon: input?.restartDaemon !== false,
+  };
+}
+
 export async function readUpdateJob(): Promise<UpdateJob> {
   const raw = await readJson(statusPath());
   if (!raw || typeof raw !== "object") {
@@ -80,6 +126,9 @@ export async function readUpdateJob(): Promise<UpdateJob> {
     error: typeof raw.error === "string" ? raw.error : null,
     sha: typeof raw.sha === "string" ? raw.sha : undefined,
     version: typeof raw.version === "string" ? raw.version : undefined,
+    phase: parsePhase(raw.phase),
+    activity: typeof raw.activity === "string" ? raw.activity : null,
+    options: parseOptions(raw.options),
   };
 }
 
@@ -264,7 +313,7 @@ function runHelper(command: string, args: string[]) {
   });
 }
 
-export async function startUpdate() {
+export async function startUpdate(input?: StartUpdateInput) {
   const status = await getUpdateStatus();
   if (!status.canUpdate) {
     throw FlutterError.unavailable(status.blockedReason || "This install cannot be updated in place.");
@@ -278,6 +327,7 @@ export async function startUpdate() {
     }
   }
   const startedAt = new Date().toISOString();
+  const options = normalizeUpdateOptions(input);
   await writeFile(
     statusPath(),
     `${JSON.stringify(
@@ -286,6 +336,9 @@ export async function startUpdate() {
         log: ["Starting updater…"],
         startedAt,
         error: null,
+        phase: null,
+        activity: "Starting updater…",
+        options,
       },
       null,
       2,
@@ -317,7 +370,7 @@ export async function startUpdate() {
     const message = error instanceof Error ? error.message : "Could not start updater";
     await writeFile(
       statusPath(),
-      `${JSON.stringify({ state: "failed", log: [message], startedAt, finishedAt: new Date().toISOString(), error: message }, null, 2)}\n`,
+      `${JSON.stringify({ state: "failed", log: [message], startedAt, finishedAt: new Date().toISOString(), error: message, options }, null, 2)}\n`,
       "utf8",
     );
     throw FlutterError.unavailable(message);

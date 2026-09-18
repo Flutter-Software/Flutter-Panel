@@ -21,29 +21,55 @@ if (!/^[A-Za-z0-9._/-]+$/.test(ref)) {
   process.exit(1);
 }
 
+const RED = "\x1b[1;31m";
+const BLUE = "\x1b[1;34m";
+const GREEN = "\x1b[1;32m";
+const YELLOW = "\x1b[1;33m";
+const BOLD = "\x1b[1m";
+const RESET = "\x1b[0m";
+
+const LOG_CAP = 400;
 const logLines = [];
+let currentPhase = null;
+let currentActivity = null;
+let options = { applySchema: true, restartDaemon: true };
+let statusTimer = null;
+let promoted = false;
 
 function now() {
   return new Date().toISOString();
 }
 
-let statusTimer = null;
+async function readStatusFile() {
+  if (!existsSync(statusPath)) return {};
+  try {
+    const raw = JSON.parse(await readFile(statusPath, "utf8"));
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+async function loadOptions() {
+  const raw = await readStatusFile();
+  const opts = raw.options && typeof raw.options === "object" ? raw.options : {};
+  return {
+    applySchema: opts.applySchema !== false,
+    restartDaemon: opts.restartDaemon !== false,
+  };
+}
 
 async function writeStatus(partial) {
-  let current = {};
-  if (existsSync(statusPath)) {
-    try {
-      current = JSON.parse(await readFile(statusPath, "utf8"));
-    } catch {
-      current = {};
-    }
-  }
+  const current = await readStatusFile();
   const next = {
     ...current,
     state: "running",
     startedAt: current.startedAt || now(),
+    phase: currentPhase,
+    activity: currentActivity,
+    options,
     ...partial,
-    log: logLines.slice(-200),
+    log: logLines.slice(-LOG_CAP),
     updatedAt: now(),
   };
   await writeFile(statusPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
@@ -61,9 +87,29 @@ function log(message) {
   }, 250);
 }
 
+function flutterLog(message, color = BLUE) {
+  log(`${color}[FLUTTER] ${RESET}${message}`);
+}
+
+async function setPhase(id, title) {
+  currentPhase = id;
+  currentActivity = title;
+  const inner = `  ${title.padEnd(50)}  `;
+  const bar = "═".repeat(54);
+  log("");
+  log(`${RED}${BOLD}╔${bar}╗`);
+  log(`║${inner}║`);
+  log(`╚${bar}╝${RESET}`);
+  log("");
+  await writeStatus({ state: "running", phase: id, activity: title });
+}
+
 function run(command, args, cwd = root) {
   return new Promise((resolveRun, reject) => {
-    log(`$ ${command} ${args.join(" ")}`);
+    const activity = `$ ${command} ${args.join(" ")}`;
+    currentActivity = activity;
+    log(activity);
+    void writeStatus({ state: "running" });
     const child = spawn(command, args, {
       cwd,
       env: process.env,
@@ -158,7 +204,7 @@ async function seedStagingEnv() {
 }
 
 async function prepareStaging() {
-  log("Preparing a staging copy. The live panel stays on the current version until this build succeeds.");
+  flutterLog("Preparing a staging copy. The live panel stays on the current version until this build succeeds.");
   await rm(staging, { recursive: true, force: true });
   await run("git", [
     "clone",
@@ -172,17 +218,23 @@ async function prepareStaging() {
   await seedStagingEnv();
 }
 
-async function buildStaging() {
-  log("Installing packages in staging");
+async function installPackages() {
+  flutterLog("Installing packages in staging");
   await run("npm", ["ci", "--include=dev"], staging);
-  log("Applying database schema");
+}
+
+async function applyDatabase() {
+  flutterLog("Applying database schema");
   await run("npm", ["run", "db:push"], staging);
-  log("Building panel in staging");
+}
+
+async function buildPanel() {
+  flutterLog("Building panel in staging");
   await run("npm", ["run", "build", "-w", "@flutter-software/web"], staging);
 }
 
 async function promoteStaging(sha) {
-  log("Staging build succeeded. Switching the live install over.");
+  flutterLog("Staging build succeeded. Switching the live install over.");
   if (hasGitRepo()) {
     try {
       await run("git", ["remote", "get-url", "origin"]);
@@ -190,7 +242,9 @@ async function promoteStaging(sha) {
       await run("git", ["remote", "add", "origin", `https://github.com/${repo}.git`]);
     }
     await run("git", ["fetch", "--tags", "origin", ref]);
-    log("Syncing compiled assets");
+    flutterLog("Syncing compiled assets");
+    currentActivity = "Syncing compiled assets";
+    void writeStatus({ state: "running" });
     await copyDirReplace(join(staging, "node_modules"), join(root, "node_modules"));
     await copyDirReplace(join(staging, "apps/web/.next"), join(root, "apps/web/.next"));
     await run("git", ["reset", "--hard", sha || "FETCH_HEAD"]);
@@ -198,6 +252,8 @@ async function promoteStaging(sha) {
     await run("node", ["scripts/link-shared.mjs"]);
     return;
   }
+  currentActivity = "Copying staging into the live install";
+  void writeStatus({ state: "running" });
   await cp(staging, root, {
     recursive: true,
     force: true,
@@ -206,22 +262,51 @@ async function promoteStaging(sha) {
   await run("node", ["scripts/link-shared.mjs"]);
 }
 
+async function syncHelpers() {
+  if (process.platform === "win32") return;
+  const mapping = [
+    [join(root, "install/systemd/flutter-restart"), "/usr/local/sbin/flutter-restart"],
+    [join(root, "install/systemd/flutter-update"), "/usr/local/sbin/flutter-update"],
+  ];
+  for (const [src, dest] of mapping) {
+    if (!existsSync(src)) continue;
+    try {
+      const text = (await readFile(src, "utf8")).split("/opt/flutter").join(root);
+      await writeFile(dest, text);
+      flutterLog(`Updated ${dest}`);
+    } catch {
+      /* production panel user cannot write /usr/local/sbin; flutter-update copies as root on later runs */
+    }
+  }
+}
+
 async function restartPanel() {
   const helper = "/usr/local/sbin/flutter-restart";
   if (process.platform === "win32") {
-    log("Restart the panel processes (npm run dev / npm start) to load the new build.");
+    flutterLog("Restart the panel processes (npm run dev / npm start) to load the new build.");
     return;
+  }
+  if (!options.restartDaemon) {
+    flutterLog("Leaving the game-node daemon running.");
   }
   try {
     if (existsSync(helper)) {
       await run("sudo", ["-n", helper]);
-      log("Restarted panel services.");
+      flutterLog(
+        options.restartDaemon ? "Restarted panel services." : "Restarted panel web and API services.",
+        GREEN,
+      );
       return;
     }
-    await run("sudo", ["-n", "systemctl", "restart", "flutter-api", "flutter-web", "flutter-daemon"]);
-    log("Restarted panel services.");
+    const units = ["flutter-api", "flutter-web"];
+    if (options.restartDaemon) units.push("flutter-daemon");
+    await run("sudo", ["-n", "systemctl", "restart", ...units]);
+    flutterLog("Restarted panel services.", GREEN);
   } catch {
-    log("Could not restart systemd automatically. Restart flutter-api, flutter-web, and flutter-daemon yourself.");
+    flutterLog(
+      "Could not restart systemd automatically. Restart flutter-api, flutter-web, and flutter-daemon yourself.",
+      YELLOW,
+    );
   }
 }
 
@@ -230,46 +315,62 @@ async function cleanupStaging() {
 }
 
 async function main() {
+  options = await loadOptions();
   await mkdir(root, { recursive: true });
-  log(`Flutter updater`);
-  log(`Install: ${root}`);
-  log(`Source: github.com/${repo} (${ref})`);
+  flutterLog("Flutter updater");
+  flutterLog(`Install: ${root}`);
+  flutterLog(`Source: github.com/${repo} (${ref})`);
+  flutterLog(`Database schema: ${options.applySchema ? "Yes" : "No"}`);
+  flutterLog(`Restart daemon: ${options.restartDaemon ? "Yes" : "No"}`);
 
   if (!(await gitAvailable())) throw new Error("git is required to update the panel");
 
   const sha = await latestSha();
+  await setPhase("preparing", "PREPARING STAGING....");
   await prepareStaging();
-  await buildStaging();
+  await setPhase("packages", "INSTALLING PACKAGES....");
+  await installPackages();
+  if (options.applySchema) {
+    await setPhase("database", "APPLYING DATABASE....");
+    await applyDatabase();
+  } else {
+    flutterLog("Skipping database schema push.");
+  }
+  await setPhase("building", "BUILDING PANEL....");
+  await buildPanel();
+  await setPhase("promoting", "PROMOTING LIVE INSTALL....");
   await promoteStaging(sha);
   promoted = true;
+  await syncHelpers();
   await cleanupStaging();
 
   if (sha) await writeFile(revisionPath, `${sha}\n`, "utf8");
 
-  log("Update is in place.");
+  flutterLog("Update is in place.", GREEN);
+  await setPhase("restarting", "RESTARTING SERVICES....");
   await restartPanel();
   if (statusTimer) {
     clearTimeout(statusTimer);
     statusTimer = null;
   }
+  currentActivity = "Update finished";
   await writeStatus({ state: "ok", finishedAt: now(), error: null, sha });
 }
 
-let promoted = false;
-
 main().catch(async (error) => {
   const message = error instanceof Error ? error.message : String(error);
-  log(`Update failed: ${message}`);
+  flutterLog(`Update failed: ${message}`, RED);
   if (promoted) {
-    log("The live install may have been partially switched. Review the log before restarting services.");
+    flutterLog("The live install may have been partially switched. Review the log before restarting services.", YELLOW);
   } else {
-    log("Live panel files were not replaced. The current site is still the last working install.");
+    flutterLog("Live panel files were not replaced. The current site is still the last working install.");
   }
   await cleanupStaging();
   if (statusTimer) {
     clearTimeout(statusTimer);
     statusTimer = null;
   }
+  currentActivity = `Update failed: ${message}`;
   await writeStatus({ state: "failed", finishedAt: now(), error: message });
   process.exit(1);
 });

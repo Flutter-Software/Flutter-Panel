@@ -100,6 +100,7 @@ export function kindFromFailure(error?: string | null, status?: number | null): 
   if (status === 403) return "forbidden";
   if (status === 404) return "not-found";
   if (status === 429) return "rate-limited";
+  if (status === 500) return "server-error";
   if (status === 502) return "bad-gateway";
   if (status === 503 || status === 504) return "unavailable";
   const text = error ?? "";

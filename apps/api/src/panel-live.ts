@@ -119,7 +119,7 @@ async function tickHealth() {
 async function tickUpdate() {
   if (!panelHasAdmins()) return;
   const job = await readUpdateJob();
-  const key = `${job.state}:${job.log.length}:${job.error ?? ""}:${job.finishedAt ?? ""}`;
+  const key = `${job.state}:${job.log.length}:${job.error ?? ""}:${job.finishedAt ?? ""}:${job.phase ?? ""}:${job.activity ?? ""}`;
   if (key === lastUpdateKey) return;
   lastUpdateKey = key;
   publish({ event: "update.job", data: job });

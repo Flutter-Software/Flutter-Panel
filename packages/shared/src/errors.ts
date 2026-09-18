@@ -44,6 +44,10 @@ export class FlutterError extends Error {
   static unavailable(message = "Node daemon is offline") {
     return new FlutterError("UNAVAILABLE", message, 503);
   }
+
+  static internal(message = "Internal server error") {
+    return new FlutterError("INTERNAL", message, 500);
+  }
 }
 
 export type ErrorBody = {

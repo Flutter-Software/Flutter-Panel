@@ -683,6 +683,7 @@ fi
 
 install -m 755 "$PREFIX/install/systemd/flutter-restart" /usr/local/sbin/flutter-restart
 install -m 755 "$PREFIX/install/systemd/flutter-update" /usr/local/sbin/flutter-update
+sed -i "s|/opt/flutter|${PREFIX}|g" /usr/local/sbin/flutter-restart
 sed -i "s|/opt/flutter|${PREFIX}|g" /usr/local/sbin/flutter-update
 sed -i "s/^USER_NAME=.*/USER_NAME=${SERVICE_USER}/" /usr/local/sbin/flutter-update
 printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/flutter-restart, /usr/local/sbin/flutter-update\n' "$SERVICE_USER" > /etc/sudoers.d/flutter-panel

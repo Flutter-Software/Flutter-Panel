@@ -4,6 +4,26 @@ ROOT=/opt/flutter
 USER_NAME=flutter
 UNIT="flutter-update"
 
+sync_helper() {
+  src="$1"
+  dest="$2"
+  [ -f "$src" ] || return 0
+  tmp="$(mktemp)"
+  sed "s|/opt/flutter|${ROOT}|g" "$src" >"$tmp"
+  if [ "$(basename "$dest")" = "flutter-update" ]; then
+    sed -i "s/^USER_NAME=.*/USER_NAME=${USER_NAME}/" "$tmp"
+  fi
+  if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  install -m 755 "$tmp" "$dest"
+  rm -f "$tmp"
+}
+
+sync_helper "$ROOT/install/systemd/flutter-restart" /usr/local/sbin/flutter-restart
+sync_helper "$ROOT/install/systemd/flutter-update" /usr/local/sbin/flutter-update
+
 systemctl reset-failed "${UNIT}.service" 2>/dev/null || true
 if systemctl is-active --quiet "${UNIT}.service" 2>/dev/null; then
   echo "An update is already running" >&2
@@ -15,6 +35,6 @@ exec systemd-run --collect --unit="$UNIT" \
   --working-directory="$ROOT" \
   --property="EnvironmentFile=$ROOT/.env" \
   --setenv=NODE_ENV=production \
-  --setenv=PATH=/opt/flutter/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
+  --setenv=PATH="$ROOT/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin" \
   --setenv=FLUTTER_UPDATE_ROOT="$ROOT" \
   /usr/bin/node "$ROOT/scripts/self-update.mjs"
