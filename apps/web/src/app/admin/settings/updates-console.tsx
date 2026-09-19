@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
-import { X } from "lucide-react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { cn } from "@/lib/cn";
 import { ansiSpans, stripConsoleAnsi } from "@/lib/console-ansi";
 
@@ -230,10 +229,14 @@ function StepEditor({
 
 function LiveWizard({
   status,
+  enabled,
+  shellRef,
   onStart,
   onOptions,
 }: {
   status: UpdateStatus | null;
+  enabled: boolean;
+  shellRef: RefObject<HTMLDivElement | null>;
   onStart: (options: UpdateOptions) => void;
   onOptions: (options: UpdateOptions) => void;
 }) {
@@ -304,10 +307,13 @@ function LiveWizard({
   confirmChoiceRef.current = confirmChoice;
 
   useEffect(() => {
+    if (!enabled) return;
     function onKey(event: KeyboardEvent) {
+      const shell = shellRef.current;
+      if (!shell?.getClientRects().length) return;
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      if (target?.closest('[aria-label="Close"], [aria-label="Close updater console"]')) return;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")) return;
+      if (target?.closest("button") && !shell.contains(target)) return;
       if (event.key === "ArrowUp" || event.key === "k") {
         event.preventDefault();
         setSelected((current) => {
@@ -329,7 +335,7 @@ function LiveWizard({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [enabled, shellRef]);
 
   const tableRows: [string, string][] = [
     ["Current", `v${status?.version ?? "…"} (${status?.currentShortSha || "unknown"})`],
@@ -341,8 +347,10 @@ function LiveWizard({
   ];
 
   return (
-    <div className="space-y-5">
-      <pre className="overflow-x-auto whitespace-pre text-primary">{BANNER}</pre>
+    <div className="space-y-4">
+      <pre className="overflow-x-auto whitespace-pre text-[8px] leading-[1.08] text-primary sm:text-[10px] sm:leading-[1.12]">
+        {BANNER}
+      </pre>
       <div>
         <div className="font-semibold text-zinc-100">FLUTTER updater</div>
         <div className="text-zinc-500">Arrow keys to move · enter to confirm</div>
@@ -379,6 +387,8 @@ function ConsolePane({
   starting,
   scroller,
   stickToBottom,
+  enabled,
+  shellRef,
   onStart,
   onOptions,
 }: {
@@ -389,13 +399,15 @@ function ConsolePane({
   starting: boolean;
   scroller: RefObject<HTMLDivElement | null>;
   stickToBottom: { current: boolean };
+  enabled: boolean;
+  shellRef: RefObject<HTMLDivElement | null>;
   onStart: (options: UpdateOptions) => void;
   onOptions: (options: UpdateOptions) => void;
 }) {
   if (showWizard) {
     return (
       <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4 font-mono text-[12px] leading-5 text-zinc-300">
-        <LiveWizard status={status} onStart={onStart} onOptions={onOptions} />
+        <LiveWizard status={status} enabled={enabled} shellRef={shellRef} onStart={onStart} onOptions={onOptions} />
       </div>
     );
   }
@@ -426,26 +438,24 @@ export function shouldOpenUpdaterWizard(intent: "wizard" | "logs", job: UpdateJo
   return job.state === "idle" && job.log.length === 0;
 }
 
-export function UpdateConsoleModal({
-  open,
-  onClose,
+export function UpdateConsole({
   running,
   job,
   status,
   wizard,
   starting,
   onStart,
+  className,
 }: {
-  open: boolean;
-  onClose: () => void;
   running: boolean;
   job: UpdateJob;
   status: UpdateStatus | null;
   wizard: boolean;
   starting: boolean;
   onStart: (options: UpdateOptions) => void;
+  className?: string;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const [wizardOptions, setWizardOptions] = useState<UpdateOptions>({
@@ -456,79 +466,46 @@ export function UpdateConsoleModal({
   const applySchema = job.options?.applySchema ?? wizardOptions.applySchema;
 
   useEffect(() => {
-    if (!open) return;
-    document.body.style.overflow = "hidden";
-    dialogRef.current?.focus();
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [open]);
-
-  useEffect(() => {
     if (showWizard) {
       setWizardOptions({ applySchema: true, restartDaemon: true });
       stickToBottom.current = true;
     }
-  }, [showWizard, open]);
+  }, [showWizard]);
 
   useEffect(() => {
     const el = scroller.current;
     if (!el || showWizard || !stickToBottom.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [job.log, open, showWizard, running]);
-
-  function onDialogKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-    }
-  }
-
-  if (!open) return null;
+  }, [job.log, showWizard, running]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
-      <button
-        type="button"
-        className="no-press absolute inset-0 bg-background/80 backdrop-blur-sm"
-        aria-label="Close updater console"
-        onClick={onClose}
+    <div
+      ref={shellRef}
+      data-updater-console=""
+      tabIndex={0}
+      aria-label="Updater console"
+      className={cn(
+        "flex h-[min(36rem,70vh)] flex-col overflow-hidden bg-black outline-none lg:flex-row",
+        className,
+      )}
+    >
+      <ConsolePane
+        showWizard={showWizard}
+        status={status}
+        job={job}
+        running={running || starting}
+        starting={starting}
+        scroller={scroller}
+        stickToBottom={stickToBottom}
+        enabled={showWizard}
+        shellRef={shellRef}
+        onStart={(next) => {
+          setWizardOptions(next);
+          onStart(next);
+        }}
+        onOptions={setWizardOptions}
       />
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Updater console"
-        tabIndex={0}
-        onKeyDown={onDialogKeyDown}
-        className="relative flex h-[min(88vh,48rem)] w-full max-w-5xl flex-col overflow-visible rounded-xl border border-border bg-black shadow-2xl outline-none"
-      >
-        <button
-          type="button"
-          className="absolute -right-3 -top-3 z-10 flex size-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-md hover:bg-muted hover:text-foreground"
-          aria-label="Close"
-          onClick={onClose}
-        >
-          <X className="size-4" />
-        </button>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl lg:flex-row">
-          <ConsolePane
-            showWizard={showWizard}
-            status={status}
-            job={job}
-            running={running || starting}
-            starting={starting}
-            scroller={scroller}
-            stickToBottom={stickToBottom}
-            onStart={(next) => {
-              setWizardOptions(next);
-              onStart(next);
-            }}
-            onOptions={setWizardOptions}
-          />
-          <StepEditor job={job} running={running || starting} applySchema={applySchema} preview={showWizard} />
-        </div>
-      </div>
+      <StepEditor job={job} running={running || starting} applySchema={applySchema} preview={showWizard} />
     </div>
   );
 }
