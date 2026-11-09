@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { MantineProvider } from "@mantine/core";
 import { ErrorPage } from "@/components/error-page";
 import { flutterMantineTheme } from "@/lib/mantine-theme";
+import { bindClientErrorHandlers, reportClientError } from "@/lib/telemetry";
 import "./globals.css";
 
 export default function GlobalError({
@@ -15,6 +16,8 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error(error);
+    reportClientError(error);
+    return bindClientErrorHandlers();
   }, [error]);
 
   return (

@@ -182,6 +182,7 @@ export type SetupResponse = {
     initialized: boolean;
     userCount: number;
     sso?: { enabled: boolean; buttonLabel: string; passwordLogin: boolean };
+    telemetry?: { anonymous: boolean };
   };
 };
 export type AuthResponse = {

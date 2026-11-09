@@ -213,7 +213,7 @@ export async function runScheduleNow(serverId: string, scheduleId: string, viewe
   void finishSchedule(claimed, { ignoreOnline: true }).catch((error) => {
     log("error", "schedule run failed", {
       scheduleId: row._id.toString(),
-      error: error instanceof Error ? error.message : String(error),
+      error,
     });
   });
   return { ok: true };
@@ -237,7 +237,7 @@ async function executeTasks(serverId: string, tasks: TaskDoc[]) {
       log("warn", "schedule task failed", {
         serverId,
         action: task.action,
-        error: error instanceof Error ? error.message : String(error),
+        error,
       });
     }
   }
@@ -289,7 +289,7 @@ async function finishSchedule(
     errorMessage = error instanceof Error ? error.message : "Schedule failed";
     log("error", "schedule failed", {
       scheduleId,
-      error: errorMessage,
+      error,
     });
   }
 
@@ -325,7 +325,7 @@ export async function runDueSchedules() {
     void executeSchedule(row._id.toString()).catch((error) => {
       log("error", "schedule run failed", {
         scheduleId: row._id.toString(),
-        error: error instanceof Error ? error.message : String(error),
+        error,
       });
     });
   }
@@ -342,7 +342,7 @@ export function startScheduleRunner() {
       await runDueSchedules();
     } catch (error) {
       log("error", "schedule runner failed", {
-        error: error instanceof Error ? error.message : String(error),
+        error,
       });
     } finally {
       ticking = false;

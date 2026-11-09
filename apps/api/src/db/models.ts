@@ -225,6 +225,9 @@ const panelSettingsSchema = new Schema(
     consoleTag: { type: String, default: "Flutter" },
     logoMime: { type: String, default: null },
     logo: { type: Buffer, default: null },
+    telemetryEnabled: { type: Boolean, default: true },
+    telemetryInstallId: { type: String, default: null },
+    telemetryLastHeartbeatAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

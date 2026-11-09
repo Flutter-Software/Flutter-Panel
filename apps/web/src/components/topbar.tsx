@@ -7,6 +7,7 @@ import { ChevronDown, LayoutDashboard, LogOut, Moon, Shield, Sun, UserRound } fr
 import { useTheme } from "next-themes";
 import { Wordmark } from "@/components/brand";
 import { useAuth } from "@/components/auth-provider";
+import { useSmoothTheme } from "@/components/theme-provider";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
@@ -22,7 +23,8 @@ export function Topbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, setUser } = useAuth();
-  const { resolvedTheme, setTheme } = useTheme();
+  const { resolvedTheme } = useTheme();
+  const switchTheme = useSmoothTheme();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const inAdmin = pathname.startsWith("/admin");
@@ -58,7 +60,7 @@ export function Topbar() {
         <button
           type="button"
           className="inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          onClick={() => switchTheme(resolvedTheme === "dark" ? "light" : "dark")}
           aria-label="Toggle theme"
         >
           <Sun className="size-4 dark:hidden" />

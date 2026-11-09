@@ -77,6 +77,8 @@ export default function AccountSecurityPage() {
 
   return (
     <SettingsSection title="Security" description="Password and two-factor authentication for this account.">
+      {/* Marker read by globals.css to hide the scrollbar of the shared <main>. */}
+      <span hidden data-hide-page-scrollbar />
       <Card className="p-5 sm:p-6">
         <h3 className="text-sm font-semibold">Reset password</h3>
         <p className="mt-1 text-sm text-muted-foreground">

@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 import { AdminError } from "@/components/admin-table";
 import { Card } from "@/components/ui";
 
-export const SETTINGS_SECTIONS = ["branding", "updates", "mail", "sso"] as const;
+export const SETTINGS_SECTIONS = ["branding", "updates", "mail", "sso", "telemetry"] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export type SettingsNavItem = {

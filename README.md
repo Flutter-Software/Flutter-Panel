@@ -26,7 +26,7 @@ git clone https://github.com/Flutter-Software/Flutter-Panel.git /usr/local/src/f
 sudo bash /usr/local/src/flutter-panel/install/ubuntu-24.04.sh
 ```
 
-The installer is an interactive TUI (arrow keys to move, enter to confirm). It asks whether you are switching from Pterodactyl or Pelican, the public panel URL, nginx / Let's Encrypt, whether to run a local game-node daemon, and whether to create a personal admin account. It then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`, creates the admin user, and prints a summary table (URL, admin login, database URL, ports).
+The installer is an interactive TUI (arrow keys to move, enter to confirm). It asks whether you are switching from Pterodactyl or Pelican, the public panel URL, nginx / Let's Encrypt, whether to run a local game-node daemon, whether to create a personal admin account, and warns that anonymous telemetry is on unless you turn it off. It then installs Docker, Node.js 22, MongoDB, Redis, nginx, and systemd units under `/opt/flutter`, creates the admin user, and prints a summary table (URL, admin login, database URL, ports).
 
 Coming from **Pterodactyl or Pelican**, choose Yes in the installer to optionally import eggs, recreate servers, and copy world files / server data, and/or wipe the old panel. You can still run the wipe script by itself:
 

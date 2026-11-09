@@ -3,11 +3,12 @@
 import { use, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AuthBrand } from "@/components/brand";
+import { AuthFooter } from "@/components/auth-footer";
 import { QueryErrorPage } from "@/components/error-page";
 import { Button, Input } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { api, HttpError } from "@/lib/api";
-import { PANEL_VERSION, type PublicUser } from "@flutter-software/shared";
+import { type PublicUser } from "@flutter-software/shared";
 
 type InviteInfo = {
   email: string;
@@ -139,7 +140,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
           ) : null}
         </div>
       </div>
-      <p className="absolute bottom-6 font-mono text-xs text-muted-foreground">v{PANEL_VERSION}</p>
+      <AuthFooter />
     </div>
   );
 }

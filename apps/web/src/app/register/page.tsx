@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthBrand } from "@/components/brand";
+import { AuthFooter } from "@/components/auth-footer";
 import { Button, Input } from "@/components/ui";
 import { api, type AuthResponse, type SetupResponse } from "@/lib/api";
-import { PANEL_VERSION } from "@flutter-software/shared";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -106,7 +106,7 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      <p className="absolute bottom-6 font-mono text-xs text-muted-foreground">v{PANEL_VERSION}</p>
+      <AuthFooter />
     </div>
   );
 }

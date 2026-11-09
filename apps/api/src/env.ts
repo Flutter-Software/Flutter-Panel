@@ -37,6 +37,8 @@ const envSchema = z.object({
   OIDC_ISSUER: z.preprocess(emptyToUndef, z.string().url().optional()),
   OIDC_CLIENT_ID: z.preprocess(emptyToUndef, z.string().min(1).optional()),
   OIDC_CLIENT_SECRET: z.preprocess(emptyToUndef, z.string().min(1).optional()),
+  TELEMETRY_URL: z.preprocess(emptyToUndef, z.string().url().optional()),
+  TELEMETRY_INGEST_KEY: z.preprocess(emptyToUndef, z.string().min(8).optional()),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -7,6 +7,7 @@ import { Button, Card } from "@/components/ui";
 import { StatGraph } from "@/components/status";
 import { PowerButtons } from "@/components/power-buttons";
 import { useLiveServerStatus, usePolledServerRecord } from "@/components/server-frame";
+import { usePowerLayout } from "@/components/use-power-layout";
 import { api } from "@/lib/api";
 import { browserConsoleSocketUrl } from "@/lib/console-socket";
 import { formatLimitMb, formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
@@ -292,7 +293,8 @@ export default function ConsolePage({
   const { consoleTag } = useBranding();
   const tags = useMemo(() => consoleTags(consoleTag), [consoleTag]);
   const framed = usePolledServerRecord();
-  const { setLiveStatus } = useLiveServerStatus();
+  const { setLiveStatus, powerHandler } = useLiveServerStatus();
+  const powerLayout = usePowerLayout();
   const [server, setServer] = useState<ServerRecord | null>(framed);
   const [command, setCommand] = useState("");
   const [suggestIndex, setSuggestIndex] = useState(0);
@@ -353,6 +355,17 @@ export default function ConsolePage({
   useEffect(() => {
     return () => setLiveStatus(null);
   }, [setLiveStatus]);
+
+  // Header power buttons live outside this page, so give them the console's own
+  // handler while it's open. The ref means they always call the latest version.
+  const latestPower = useRef(power);
+  latestPower.current = power;
+  useEffect(() => {
+    powerHandler.current = (action) => void latestPower.current(action);
+    return () => {
+      powerHandler.current = null;
+    };
+  }, [powerHandler]);
 
   useEffect(() => {
     if (!framed) return;
@@ -988,15 +1001,17 @@ export default function ConsolePage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <PowerButtons
-          status={server?.status}
-          canStart={canStart}
-          canRestart={canRestart}
-          canStop={canStop}
-          onPower={(action) => void power(action)}
-        />
-      </div>
+      {powerLayout === "standard" ? (
+        <div data-standard-power className="flex flex-wrap items-center justify-between gap-3">
+          <PowerButtons
+            status={server?.status}
+            canStart={canStart}
+            canRestart={canRestart}
+            canStop={canStop}
+            onPower={(action) => void power(action)}
+          />
+        </div>
+      ) : null}
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
         <Card className="overflow-hidden">

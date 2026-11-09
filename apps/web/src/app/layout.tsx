@@ -8,7 +8,9 @@ import { PanelSocketProvider } from "@/components/panel-socket";
 import { BrandingProvider } from "@/components/branding-provider";
 import { ConfirmProvider } from "@/components/confirm-dialog";
 import { ToastProvider } from "@/components/toast";
+import { TelemetryErrors } from "@/components/telemetry-errors";
 import { MOTION_BOOTSTRAP_SCRIPT } from "@/lib/motion";
+import { POWER_LAYOUT_BOOTSTRAP_SCRIPT } from "@/lib/power-layout";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -44,6 +46,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: MOTION_BOOTSTRAP_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: POWER_LAYOUT_BOOTSTRAP_SCRIPT }} />
         <ColorSchemeScript defaultColorScheme="dark" />
       </head>
       <body className="bg-background font-sans text-foreground">
@@ -53,7 +56,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <AuthProvider>
                 <PanelSocketProvider>
                   <ConfirmProvider>
-                    <ToastProvider>{children}</ToastProvider>
+                    <ToastProvider>
+                      <TelemetryErrors />
+                      {children}
+                    </ToastProvider>
                   </ConfirmProvider>
                 </PanelSocketProvider>
               </AuthProvider>

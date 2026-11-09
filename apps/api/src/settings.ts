@@ -5,12 +5,14 @@ import {
   oidcSettingsSchema,
   smtpSettingsSchema,
   smtpTestSchema,
+  telemetryUpdateSchema,
   normalizeConsoleTag,
   type SmtpEncryption,
 } from "@flutter-software/shared";
 import { PanelSettings } from "./db/models";
 import { env } from "./env";
 import { resolveSmtp, sendMail, verifySmtp, type SmtpConfig } from "./mail";
+import { getTelemetryPublic, setTelemetryEnabled } from "./telemetry";
 
 const KEY = "panel";
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
@@ -281,6 +283,7 @@ export async function getSettings() {
     smtp: publicSmtp(smtp, resolved),
     oidc: publicOidcDto(oidc, oidcResolved),
     branding: brandingDto(row),
+    telemetry: await getTelemetryPublic(),
   };
 }
 
@@ -351,6 +354,13 @@ export async function updateBranding(body: unknown) {
   }
   await row.save();
   return { branding: brandingDto(row) };
+}
+
+export async function updateTelemetry(body: unknown) {
+  const parsed = telemetryUpdateSchema.safeParse(body);
+  if (!parsed.success) throw FlutterError.validation("Invalid telemetry settings", parsed.error.flatten());
+  await setTelemetryEnabled(parsed.data.enabled);
+  return { telemetry: await getTelemetryPublic() };
 }
 
 export async function testSmtp(body: unknown) {

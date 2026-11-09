@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.72
+
+### Stability
+
+A browser dropping a live connection, such as by changing page or closing a tab, could crash the API and return 500 on every request until it restarted. Those disconnects are now handled.
+
+### Telemetry
+
+The panel can share anonymous telemetry: an install id, version, operating system, counts, file-download outcomes, and error reports with the message and stack trace. Emails, passwords, tokens, and database URLs are removed before sending. It is on by default. Turn it off in Admin → Settings, or set `TELEMETRY_DISABLED=true` on the panel host.
+
+### Sign-in
+
+The login, register, verify, and invite pages show the version with a tag icon. When telemetry is on, an amber icon sits beside it; hover, focus, or tap it to read what is shared.
+
+### Appearance
+
+Switching between light and dark is one smooth crossfade of the whole page. With Smooth transitions off, the theme changes instantly.
+
+Power actions can sit in the server header. Choose Header Power Actions in Account → Appearance to swap the labeled buttons above the console for square icon buttons at the right of the header, available on every server page.
+
+### Account
+
+The Security page no longer shows a scrollbar.
+
+### Files
+
+The file list has Date modified and Date created columns, like Windows Explorer. Click a heading to sort newest first, then oldest first, then back to the normal order. The arrow beside it filters by group (Today, Yesterday, Last week, and so on) or a custom date range. Filtered-out files leave the selection, so bulk actions only touch what is on screen. Update the node daemon to see Date created; until then that column shows a dash.
+
 ## 0.2.71
 
 ### Dashboard

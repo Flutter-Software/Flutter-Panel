@@ -6,6 +6,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -36,18 +37,38 @@ import {
   Upload,
 } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
+import { FileDateHeader } from "@/components/file-date-header";
 import { FileIdeModal } from "@/components/file-ide";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { toast } from "@/components/toast";
 import { Button, Card, Field, Input, Modal } from "@/components/ui";
 import { api, apiDownload, apiUpload } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import {
+  applyDateView,
+  countDateBuckets,
+  EMPTY_DATE_FILTERS,
+  hasActiveDateFilters,
+  localeWeekStart,
+  nextDateSort,
+  type DateField,
+  type DateFilter,
+  type DateFilters,
+  type DateSort,
+} from "@/lib/file-date-filter";
 import { useServerRecord } from "@/components/server-frame";
 import { can } from "@/lib/access";
 import { FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } from "@flutter-software/shared";
 import { formatBytes } from "@/lib/types";
 
-type Entry = { name: string; kind: "file" | "dir"; size: number; modifiedAt: string };
+type Entry = {
+  name: string;
+  kind: "file" | "dir";
+  size: number;
+  modifiedAt: string;
+  /** Null when the filesystem has no creation time, absent on older daemons. */
+  createdAt?: string | null;
+};
 type SearchHit = { path: string; name: string; kind: "file" | "dir"; size: number };
 
 type Menu =
@@ -63,6 +84,21 @@ type MoveModalState = {
   from: string;
   entries: Entry[];
 };
+
+const dateTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
+
+function DateCell({ value, className }: { value: string | null | undefined; className?: string }) {
+  const date = value ? new Date(value) : null;
+  const valid = date && !Number.isNaN(date.getTime());
+  return (
+    <td
+      className={cn("truncate whitespace-nowrap px-4 py-2.5 text-muted-foreground", className)}
+      title={valid ? date.toLocaleString() : undefined}
+    >
+      {valid ? dateTimeFormat.format(date) : "—"}
+    </td>
+  );
+}
 
 function joinPath(dir: string, name: string) {
   if (!dir || dir === "/") return name.startsWith("/") ? name : `/${name}`;
@@ -726,6 +762,37 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchHits, setSearchHits] = useState<{ matches: SearchHit[]; truncated: boolean } | null>(null);
+  const [dateSort, setDateSort] = useState<DateSort | null>(null);
+  const [dateFilters, setDateFilters] = useState<DateFilters>(EMPTY_DATE_FILTERS);
+  const dateFiltered = hasActiveDateFilters(dateFilters);
+
+  // What the table shows. Selection and row indexes use this list, while name
+  // collision checks keep using `entries` so hidden files still count.
+  const { visibleEntries, createdCounts, modifiedCounts } = useMemo(() => {
+    const now = Date.now();
+    // This component also renders on the server, where navigator may not exist.
+    const weekStart = localeWeekStart(typeof navigator === "undefined" ? "en-US" : navigator.language);
+    return {
+      visibleEntries: applyDateView(entries, dateFilters, dateSort, now, weekStart),
+      createdCounts: countDateBuckets(entries, "createdAt", now, weekStart),
+      modifiedCounts: countDateBuckets(entries, "modifiedAt", now, weekStart),
+    };
+  }, [entries, dateFilters, dateSort]);
+
+  // A row the filter hides must leave the selection, otherwise bulk delete,
+  // move, and archive would act on files the user can no longer see.
+  useEffect(() => {
+    lastIndex.current = null;
+    const names = new Set(visibleEntries.map((entry) => entry.name));
+    setSelected((current) => {
+      const kept = [...current].filter((name) => names.has(name));
+      return kept.length === current.size ? current : new Set(kept);
+    });
+  }, [visibleEntries]);
+
+  function setDateFilter(field: DateField, next: DateFilter) {
+    setDateFilters((current) => ({ ...current, [field]: next }));
+  }
 
   async function files(body: Record<string, unknown>) {
     return api<{ data: unknown }>(`/api/v1/client/servers/${id}/files`, {
@@ -802,6 +869,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     setMenu(null);
     setEditing(null);
     setSelected(new Set());
+    // Like Windows, a filter belongs to the folder it was set on.
+    setDateFilters(EMPTY_DATE_FILTERS);
     lastIndex.current = null;
     void load(path, { syncUrl: true });
   }, [id, path]);
@@ -921,7 +990,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       if (range && lastIndex.current !== null) {
         const from = Math.min(lastIndex.current, index);
         const to = Math.max(lastIndex.current, index);
-        for (let i = from; i <= to; i += 1) next.add(entries[i].name);
+        for (let i = from; i <= to; i += 1) next.add(visibleEntries[i].name);
       } else if (next.has(name)) {
         next.delete(name);
       } else {
@@ -933,7 +1002,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   }
 
   function selectAll(on: boolean) {
-    setSelected(on ? new Set(entries.map((entry) => entry.name)) : new Set());
+    setSelected(on ? new Set(visibleEntries.map((entry) => entry.name)) : new Set());
     lastIndex.current = null;
   }
 
@@ -1529,6 +1598,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
 
       <div
         className="relative"
+        data-stable-page-scrollbar
         onDragEnter={(event) => {
           event.preventDefault();
           if (canWrite) setDragging(true);
@@ -1551,8 +1621,21 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               Drop files to upload
             </div>
           ) : null}
+          {dateFiltered ? (
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-sm text-muted-foreground">
+              <p>
+                Showing <span className="font-medium text-foreground">{visibleEntries.length}</span> of{" "}
+                {entries.length} items
+              </p>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setDateFilters(EMPTY_DATE_FILTERS)}>
+                Clear filters
+              </Button>
+            </div>
+          ) : null}
         <table
-          className="w-full select-none text-sm outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none"
+          // Fixed layout keeps every column in place when sorting or filtering
+          // changes the rows. Narrow screens keep auto layout to fit the names.
+          className="w-full select-none text-sm outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none lg:table-fixed"
           tabIndex={0}
           aria-busy={listing}
           onKeyDown={(event: KeyboardEvent<HTMLTableElement>) => {
@@ -1570,21 +1653,41 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             <tr>
               <th className="w-12 p-0">
                 <SelectHit
-                  checked={entries.length > 0 && selected.size === entries.length}
-                  indeterminate={selected.size > 0 && selected.size < entries.length}
-                  disabled={!entries.length}
+                  checked={visibleEntries.length > 0 && selected.size === visibleEntries.length}
+                  indeterminate={selected.size > 0 && selected.size < visibleEntries.length}
+                  disabled={!visibleEntries.length}
                   label="Select all"
                   onChange={onSelectAll}
                 />
               </th>
               <th className="px-4 py-2.5 font-medium">Name</th>
-              <th className="px-4 py-2.5 font-medium">Type</th>
-              <th className="px-4 py-2.5 font-medium">Size</th>
-              <th className="px-4 py-2.5 font-medium" />
+              <th className="px-4 py-2.5 font-medium lg:w-24">Type</th>
+              <th className="px-4 py-2.5 font-medium lg:w-28">Size</th>
+              <FileDateHeader
+                field="modifiedAt"
+                label="Date modified"
+                className="hidden lg:table-cell lg:w-44"
+                sort={dateSort}
+                onSort={() => setDateSort((current) => nextDateSort(current, "modifiedAt"))}
+                filter={dateFilters.modifiedAt}
+                onFilter={(next) => setDateFilter("modifiedAt", next)}
+                counts={modifiedCounts}
+              />
+              <FileDateHeader
+                field="createdAt"
+                label="Date created"
+                className="hidden xl:table-cell xl:w-44"
+                sort={dateSort}
+                onSort={() => setDateSort((current) => nextDateSort(current, "createdAt"))}
+                filter={dateFilters.createdAt}
+                onFilter={(next) => setDateFilter("createdAt", next)}
+                counts={createdCounts}
+              />
+              <th className="px-4 py-2.5 font-medium lg:w-16" />
             </tr>
           </thead>
           <tbody className={cn(listing && "pointer-events-none")}>
-            {entries.map((entry, index) => {
+            {visibleEntries.map((entry, index) => {
               const active = menu?.kind === "entry" && menu.entry.name === entry.name;
               const checked = selected.has(entry.name);
               return (
@@ -1613,7 +1716,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                     />
                   </td>
                   <td className="px-4 py-2.5">
-                    <span className="inline-flex min-w-0 items-center gap-2">
+                    <span className="flex min-w-0 items-center gap-2">
                       {entry.kind === "dir" ? (
                         <Folder className="size-4 shrink-0 text-primary" />
                       ) : (
@@ -1628,6 +1731,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                   <td className="px-4 py-2.5 text-muted-foreground">
                     {entry.kind === "dir" ? "—" : formatBytes(entry.size)}
                   </td>
+                  <DateCell value={entry.modifiedAt} className="hidden lg:table-cell" />
+                  <DateCell value={entry.createdAt} className="hidden xl:table-cell" />
                   <td className="px-4 py-2.5">
                     <div className="flex justify-end">
                       <Button
@@ -1656,7 +1761,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             })}
             {listing && entries.length === 0 ? (
               <tr className="border-t border-border">
-                <td className="px-4 py-8 text-center text-sm text-muted-foreground" colSpan={5}>
+                <td className="px-4 py-8 text-center text-sm text-muted-foreground" colSpan={7}>
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="size-4 animate-spin" />
                     Loading folder…
@@ -1665,8 +1770,14 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               </tr>
             ) : !listing && entries.length === 0 ? (
               <tr className="border-t border-border">
-                <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={5}>
+                <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={7}>
                   This folder is empty. Drag files here, use Upload, or right-click.
+                </td>
+              </tr>
+            ) : visibleEntries.length === 0 && entries.length > 0 ? (
+              <tr className="border-t border-border">
+                <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={7}>
+                  No items match these date filters.
                 </td>
               </tr>
             ) : null}

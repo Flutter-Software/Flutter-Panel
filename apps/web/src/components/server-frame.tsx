@@ -1,23 +1,40 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import Link from "next/link";
 import { ArrowLeft, Box, Check, Copy, Cpu, Network, type LucideIcon } from "lucide-react";
+import { PowerButtons, type PowerAction } from "@/components/power-buttons";
 import { ServerSidebar } from "@/components/sidebar";
 import { StatusPill } from "@/components/status";
+import { toast } from "@/components/toast";
 import { useAuth } from "@/components/auth-provider";
 import { ErrorPage, QueryErrorPage } from "@/components/error-page";
+import { usePowerLayout } from "@/components/use-power-layout";
+import { can } from "@/lib/access";
+import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import { useLiveReload } from "@/components/panel-socket";
 import type { ServerRecord, ServerStatus } from "@/lib/types";
 
 type ServerPayload = { data: { server: ServerRecord } };
+type PowerHandler = (action: PowerAction) => void;
 
 const ServerRecordContext = createContext<ServerRecord | null>(null);
 const LiveStatusContext = createContext<{
   liveStatus: ServerStatus | null;
   setLiveStatus: (status: ServerStatus | null) => void;
-}>({ liveStatus: null, setLiveStatus: () => undefined });
+  /** Set by the console while open, so header buttons also reset its log. */
+  powerHandler: RefObject<PowerHandler | null>;
+}>({ liveStatus: null, setLiveStatus: () => undefined, powerHandler: { current: null } });
 
 export function useLiveServerStatus() {
   return useContext(LiveStatusContext);
@@ -47,6 +64,8 @@ export function ServerFrame({
   const { data, error, errorStatus, reload } = useQuery<ServerPayload>(path);
   const [liveStatus, setLiveStatus] = useState<ServerStatus | null>(null);
   const [copied, setCopied] = useState(false);
+  const powerHandler = useRef<PowerHandler | null>(null);
+  const powerLayout = usePowerLayout();
   const polled = data?.data.server ?? null;
   const server = useMemo(() => {
     if (!polled) return null;
@@ -66,6 +85,28 @@ export function ServerFrame({
   }, [serverId]);
   useLiveReload(reload, 4000);
 
+  async function headerPower(action: PowerAction) {
+    if (powerHandler.current) {
+      powerHandler.current(action);
+      return;
+    }
+    // On pages without the console's live socket: show the change right away,
+    // then hand back to the polled status once the panel has accepted it.
+    const fromOffline = server?.status === "offline" || server?.status === "install_failed";
+    setLiveStatus(action === "start" || (action === "restart" && fromOffline) ? "starting" : "stopping");
+    try {
+      await api(`/api/v1/client/servers/${serverId}/power`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      await reload();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Power action failed");
+    } finally {
+      setLiveStatus(null);
+    }
+  }
+
   if (error && !server) {
     return (
       <QueryErrorPage
@@ -83,7 +124,7 @@ export function ServerFrame({
   }
 
   return (
-    <LiveStatusContext.Provider value={{ liveStatus, setLiveStatus }}>
+    <LiveStatusContext.Provider value={{ liveStatus, setLiveStatus, powerHandler }}>
       <ServerRecordContext.Provider value={polled}>
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <ServerSidebar serverId={serverId} server={server} />
@@ -146,6 +187,16 @@ export function ServerFrame({
                     <div className="h-3.5 w-56 animate-pulse rounded-md bg-muted/70" />
                   </div>
                 )}
+                {server && powerLayout === "header" ? (
+                  <PowerButtons
+                    variant="header"
+                    status={server.status}
+                    canStart={can(server, "control.start")}
+                    canRestart={can(server, "control.restart")}
+                    canStop={can(server, "control.stop")}
+                    onPower={(action) => void headerPower(action)}
+                  />
+                ) : null}
               </div>
             </header>
             {maintenance && admin ? (
@@ -153,7 +204,9 @@ export function ServerFrame({
                 This node is in maintenance mode. Users cannot open their servers.
               </div>
             ) : null}
-            <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">{children}</div>
+            <div data-page-scroller className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
+              {children}
+            </div>
           </div>
         </div>
       </ServerRecordContext.Provider>

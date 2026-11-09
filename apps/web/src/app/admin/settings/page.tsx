@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Check, Copy, Image as ImageIcon, KeyRound, Mail, RefreshCw, Send } from "lucide-react";
+import { Check, Copy, Image as ImageIcon, KeyRound, Mail, Radio, RefreshCw, Send } from "lucide-react";
 import { Button, NumberInput, PasswordInput, Select, Switch, TextInput } from "@mantine/core";
 import { AdminError, AdminPage } from "@/components/admin-table";
 import { SettingsWorkspaceSkeleton } from "@/components/skeletons";
@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth-provider";
 import { DEFAULT_CONSOLE_TAG, DEFAULT_LOGO_SRC, DEFAULT_SITE_NAME, useBranding } from "@/components/branding-provider";
 import { UpdatesSection } from "./updates-section";
 import { IdentityStudio } from "./identity-studio";
+import { TelemetrySection, type TelemetryPublic } from "./telemetry-section";
 import {
   parseSettingsSection,
   SettingsActions,
@@ -95,12 +96,13 @@ export default function AdminSettingsPage() {
   const { user } = useAuth();
   const { reload: reloadBranding } = useBranding();
   const { data, error: loadError, reload } = useQuery<{
-    data: { smtp: SmtpPublic; oidc: OidcPublic; branding: BrandingPublic };
+    data: { smtp: SmtpPublic; oidc: OidcPublic; branding: BrandingPublic; telemetry: TelemetryPublic };
   }>("/api/v1/admin/settings");
   const updates = useQuery<{ data: UpdateStatus }>("/api/v1/admin/settings/update");
   const smtp = data?.data.smtp;
   const oidc = data?.data.oidc;
   const branding = data?.data.branding;
+  const telemetry = data?.data.telemetry;
   const [section, setSection] = useState<SettingsSection>("branding");
   const [siteName, setSiteName] = useState(DEFAULT_SITE_NAME);
   const [consoleTag, setConsoleTag] = useState(DEFAULT_CONSOLE_TAG);
@@ -131,6 +133,7 @@ export default function AdminSettingsPage() {
   const [oidcPending, setOidcPending] = useState(false);
   const [oidcTesting, setOidcTesting] = useState(false);
   const [copiedUri, setCopiedUri] = useState(false);
+  const [telemetryPending, setTelemetryPending] = useState(false);
 
   useEffect(() => {
     const apply = () => {
@@ -334,6 +337,23 @@ export default function AdminSettingsPage() {
     }
   }
 
+  async function onSaveTelemetry(enabled: boolean) {
+    setError(null);
+    setTelemetryPending(true);
+    try {
+      await api("/api/v1/admin/settings/telemetry", {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      });
+      await reload();
+      toast(enabled ? "Anonymous telemetry enabled." : "Anonymous telemetry turned off.", "info");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setTelemetryPending(false);
+    }
+  }
+
   async function copyRedirect() {
     if (!oidc?.redirectUri) return;
     try {
@@ -411,13 +431,22 @@ export default function AdminSettingsPage() {
       description: oidcLabel,
       icon: <KeyRound className="size-4" />,
     },
+    telemetry: {
+      title: "Telemetry",
+      description: telemetry?.envDisabled
+        ? "Disabled by the panel host environment."
+        : telemetry?.enabled
+          ? "This install is sharing anonymous usage and errors."
+          : "Anonymous telemetry is off for this install.",
+      icon: <Radio className="size-4" />,
+    },
   };
 
   return (
     <AdminPage
       className="max-w-7xl"
       title="Settings"
-      description="Identity, updates, mail, and how people sign in."
+      description="Identity, updates, mail, sign-in, and telemetry."
     >
       <AdminError message={loadError} />
       {!data && !loadError ? (
@@ -469,6 +498,20 @@ export default function AdminSettingsPage() {
               hint: ssoHint,
               icon: <KeyRound className="size-4" />,
               tone: oidcEnabled ? "ok" : "off",
+            },
+            {
+              id: "telemetry",
+              kicker: "Product",
+              title: "Telemetry",
+              hint: telemetry?.envDisabled
+                ? "Disabled by env"
+                : telemetry?.sending
+                  ? "Sharing anonymously"
+                  : telemetry?.enabled
+                    ? "On, not sending"
+                    : "Opted out",
+              icon: <Radio className="size-4" />,
+              tone: telemetry?.envDisabled ? "off" : telemetry?.sending ? "ok" : telemetry?.enabled ? "warn" : "off",
             },
           ]}
         >
@@ -713,6 +756,14 @@ export default function AdminSettingsPage() {
                 </Button>
               </SettingsActions>
             </form>
+          ) : null}
+
+          {section === "telemetry" ? (
+            <TelemetrySection
+              telemetry={telemetry}
+              pending={telemetryPending}
+              onSave={onSaveTelemetry}
+            />
           ) : null}
         </SettingsWorkspace>
       )}

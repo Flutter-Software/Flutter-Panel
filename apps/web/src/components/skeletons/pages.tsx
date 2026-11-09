@@ -241,7 +241,7 @@ export function SettingsWorkspaceSkeleton() {
   return (
     <SkeletonRoot className="grid items-start gap-4 lg:grid-cols-[17.5rem_minmax(0,1fr)] lg:gap-6">
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-1 lg:gap-1.5">
-        {skeletonKeys(4).map((index) => (
+        {skeletonKeys(5).map((index) => (
           <div
             key={index}
             className="flex min-h-[4.5rem] items-start gap-3 rounded-xl border border-border bg-background/60 px-3 py-3"
@@ -281,7 +281,7 @@ export function SettingsSkeleton() {
     <AdminPage
       className="max-w-7xl"
       title="Settings"
-      description="Identity, updates, mail, and how people sign in."
+      description="Identity, updates, mail, sign-in, and telemetry."
     >
       <SettingsWorkspaceSkeleton />
     </AdminPage>

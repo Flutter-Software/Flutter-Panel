@@ -194,7 +194,7 @@ async function writeActivity(input: {
     log("warn", "activity log failed", {
       serverId: input.serverId,
       event: input.event,
-      error: error instanceof Error ? error.message : String(error),
+      error,
     });
   }
 }
@@ -316,7 +316,7 @@ async function writeFileWrite(input: {
     log("warn", "activity log failed", {
       serverId: input.serverId,
       event: "file.write",
-      error: error instanceof Error ? error.message : String(error),
+      error,
     });
   }
 }

@@ -31,6 +31,7 @@ import { verifyPanelTicket } from "./panel-ticket";
 import { attachPanelSession, detachPanelSession, mintPanelSocket } from "./panel-hub";
 import { startPanelLive } from "./panel-live";
 import { log } from "./log";
+import * as telemetry from "./telemetry";
 
 type Variables = {
   requestId: string;
@@ -70,7 +71,8 @@ export function createApp() {
       path.endsWith("/auth/verify") ||
       path.endsWith("/auth/verify/resend") ||
       path.endsWith("/auth/totp/login") ||
-      path.includes("/auth/invite");
+      path.includes("/auth/invite") ||
+      path.endsWith("/client/telemetry/error");
     if (!skipCsrf) {
       assertCsrf(c);
     }
@@ -101,6 +103,11 @@ export function createApp() {
 
   app.onError((error, c) => {
     const requestIdValue = c.get("requestId") ?? "unknown";
+    const route = c.req.routePath || c.req.path;
+    telemetry.trackApiError(error, route, {
+      method: c.req.method,
+      requestId: requestIdValue,
+    });
     if (error instanceof FlutterError) {
       return c.json(
         {
@@ -110,9 +117,16 @@ export function createApp() {
         error.status as 400 | 401 | 403 | 404 | 409 | 500 | 503,
       );
     }
-    log("error", error instanceof Error ? error.message : "unknown error", {
-      requestId: requestIdValue,
-    });
+    log(
+      "error",
+      error instanceof Error ? error.message : "unknown error",
+      {
+        requestId: requestIdValue,
+        name: error instanceof Error ? error.name : "Error",
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      { telemetry: false },
+    );
     return c.json(
       {
         error: { code: "INTERNAL", message: "Internal server error" },
@@ -141,9 +155,20 @@ export function createApp() {
 
   app.get("/auth/setup", async (c) => {
     const setup = await auth.setupStatus();
-    return c.json({ data: { ...setup, sso: await settings.publicOidc() } });
+    return c.json({
+      data: {
+        ...setup,
+        sso: await settings.publicOidc(),
+        telemetry: { anonymous: await telemetry.anonymousTelemetryActive() },
+      },
+    });
   });
   app.get("/auth/me", async (c) => c.json({ data: { user: await auth.me(c) } }));
+  app.post("/client/telemetry/error", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    telemetry.trackClientError(body, { userAgent: c.req.header("user-agent") });
+    return c.json({ ok: true });
+  });
   app.post("/auth/register", async (c) => {
     const result = await auth.register(c, await c.req.json());
     return c.json({ data: result }, 201);
@@ -364,21 +389,41 @@ export function createApp() {
   app.get("/client/servers/:id/files/download", async (c) => {
     const session = await requireUser(c);
     const names = (c.req.queries("names") ?? []).map((value) => value.trim()).filter(Boolean);
-    const file = await servers.downloadServerFiles(
-      c.req.param("id"),
-      session.user.id,
-      session.user.role === "admin",
-      c.req.query("path") || "/",
-      names,
-    );
-    const ascii = file.filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
-    c.header("Content-Type", file.mime);
-    c.header("Content-Length", String(file.body.length));
-    c.header(
-      "Content-Disposition",
-      `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
-    );
-    return c.body(new Uint8Array(file.body));
+    const started = Date.now();
+    const itemCount = names.length || 1;
+    try {
+      const file = await servers.downloadServerFiles(
+        c.req.param("id"),
+        session.user.id,
+        session.user.role === "admin",
+        c.req.query("path") || "/",
+        names,
+      );
+      telemetry.trackDownload({
+        outcome: "success",
+        kind: file.mime.includes("zip") ? "zip" : "file",
+        bytes: file.body.length,
+        itemCount,
+        durationMs: Date.now() - started,
+      });
+      const ascii = file.filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+      c.header("Content-Type", file.mime);
+      c.header("Content-Length", String(file.body.length));
+      c.header(
+        "Content-Disposition",
+        `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+      );
+      return c.body(new Uint8Array(file.body));
+    } catch (error) {
+      telemetry.trackDownload({
+        outcome: "fail",
+        kind: itemCount > 1 ? "zip" : "file",
+        itemCount,
+        durationMs: Date.now() - started,
+        error,
+      });
+      throw error;
+    }
   });
   app.post("/client/servers/:id/backups", async (c) => {
     const session = await requireUser(c);
@@ -650,6 +695,10 @@ export function createApp() {
   app.patch("/admin/settings/oidc", async (c) => {
     await requireAdmin(c);
     return c.json({ data: await settings.updateOidc(await c.req.json()) });
+  });
+  app.patch("/admin/settings/telemetry", async (c) => {
+    await requireAdmin(c);
+    return c.json({ data: await settings.updateTelemetry(await c.req.json()) });
   });
   app.post("/admin/settings/oidc/test", async (c) => {
     await requireAdmin(c);

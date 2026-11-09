@@ -15,6 +15,7 @@
 #   --letsencrypt         Request a Let's Encrypt certificate (https URL + hostname)
 #   --no-nginx            Skip nginx reverse proxy
 #   --no-daemon           Skip installing the local game-node daemon
+#   --no-telemetry        Do not send anonymous telemetry
 #   --admin-email EMAIL   Admin account email
 #   --admin-password PW   Admin account password
 #   --admin-username NAME Admin username (default Administrator)
@@ -38,6 +39,8 @@ YES=0
 FORCE=0
 INSTALL_NGINX=1
 INSTALL_DAEMON=1
+TELEMETRY=1
+TELEMETRY_SET=0
 LETSENCRYPT=0
 FROM_PTERO=0
 MIGRATE_SERVERS=0
@@ -63,6 +66,13 @@ if [[ "${FLUTTER_NO_NGINX:-}" == "1" ]]; then
 fi
 if [[ "${FLUTTER_NO_DAEMON:-}" == "1" ]]; then
   INSTALL_DAEMON=0
+fi
+if [[ "${FLUTTER_TELEMETRY:-}" == "0" ]]; then
+  TELEMETRY=0
+  TELEMETRY_SET=1
+elif [[ "${FLUTTER_TELEMETRY:-}" == "1" ]]; then
+  TELEMETRY=1
+  TELEMETRY_SET=1
 fi
 if [[ "${FLUTTER_FROM_PTERODACTYL:-}" == "1" ]]; then
   FROM_PTERO=1
@@ -92,6 +102,7 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE=1 ;;
     --no-nginx) INSTALL_NGINX=0 ;;
     --no-daemon) INSTALL_DAEMON=0 ;;
+    --no-telemetry) TELEMETRY=0; TELEMETRY_SET=1 ;;
     --letsencrypt) LETSENCRYPT=1 ;;
     --from-pterodactyl) FROM_PTERO=1 ;;
     --migrate-servers) FROM_PTERO=1; MIGRATE_SERVERS=1 ;;
@@ -316,16 +327,25 @@ run_wizard() {
     ADMIN_GENERATED=1
   fi
 
+  warn "Anonymous telemetry is used by default. Flutter receives an install id, panel version, operating system, counts, file-download outcomes, and error reports with the message and stack trace. Emails, passwords, tokens, and database URLs are removed before sending."
+  if ui_confirm "Keep anonymous telemetry on? You can change this later in Admin → Settings → Telemetry." "Yes"; then
+    TELEMETRY=1
+  else
+    TELEMETRY=0
+  fi
+  TELEMETRY_SET=1
+
   apply_letsencrypt_rules
   prepare_admin_account
 
-  local nginx_label="No" daemon_label="No" le_label="No" ptero_label="No" transfer_label="No" wipe_label="No" admin_label
+  local nginx_label="No" daemon_label="No" le_label="No" ptero_label="No" transfer_label="No" wipe_label="No" telemetry_label="No" admin_label
   [[ "$INSTALL_NGINX" -eq 1 ]] && nginx_label="Yes"
   [[ "$INSTALL_DAEMON" -eq 1 ]] && daemon_label="Yes"
   [[ "$LETSENCRYPT" -eq 1 ]] && le_label="Yes"
   [[ "$FROM_PTERO" -eq 1 ]] && ptero_label="Yes"
   [[ "$MIGRATE_SERVERS" -eq 1 ]] && transfer_label="Yes"
   [[ "$WIPE_PTERO" -eq 1 ]] && wipe_label="Yes"
+  [[ "$TELEMETRY" -eq 1 ]] && telemetry_label="Yes"
   if [[ "$ADMIN_GENERATED" -eq 1 ]]; then
     admin_label="${ADMIN_USERNAME} <${ADMIN_EMAIL}> (password shown at the end)"
   else
@@ -342,6 +362,7 @@ run_wizard() {
     "Transfer servers" "$transfer_label" \
     "Wipe Pterodactyl/Pelican" "$wipe_label" \
     "Admin" "$admin_label" \
+    "Anonymous telemetry" "$telemetry_label" \
     "Install dir" "$PREFIX"
 
   ui_confirm "Start installation with these settings?" "Yes" || die "Aborted."
@@ -599,6 +620,11 @@ DAEMON_DATA_DIR=${DATA_DIR}
 EOF
   chown "$SERVICE_USER:$SERVICE_USER" "$ENV_FILE"
   chmod 640 "$ENV_FILE"
+  if [[ "$TELEMETRY" -eq 0 ]]; then
+    echo 'TELEMETRY_DISABLED=true' >> "$ENV_FILE"
+  else
+    echo '# Anonymous telemetry is on. Turn it off in Admin → Settings → Telemetry.' >> "$ENV_FILE"
+  fi
 else
   log "Keeping existing ${ENV_FILE}"
   sed -i "s|^APP_URL=.*|APP_URL=${APP_URL}|" "$ENV_FILE"
@@ -608,6 +634,15 @@ else
   grep -q '^DAEMON_CONFIG=' "$ENV_FILE" || echo "DAEMON_CONFIG=${PREFIX}/apps/daemon/data/config.json" >> "$ENV_FILE"
   DATABASE_URL="$(awk -F= '$1=="DATABASE_URL"{sub(/^[^=]+=/,""); print; exit}' "$ENV_FILE")"
   REDIS_URL="$(awk -F= '$1=="REDIS_URL"{sub(/^[^=]+=/,""); print; exit}' "$ENV_FILE")"
+  if [[ "$TELEMETRY_SET" -eq 1 ]]; then
+    if [[ "$TELEMETRY" -eq 1 ]]; then
+      sed -i '/^TELEMETRY_DISABLED=/d' "$ENV_FILE"
+    elif grep -q '^TELEMETRY_DISABLED=' "$ENV_FILE"; then
+      sed -i 's|^TELEMETRY_DISABLED=.*|TELEMETRY_DISABLED=true|' "$ENV_FILE"
+    else
+      echo 'TELEMETRY_DISABLED=true' >> "$ENV_FILE"
+    fi
+  fi
 fi
 
 cat > "$PREFIX/apps/web/.env.local" <<EOF
@@ -847,6 +882,7 @@ ui_kv_table \
   "SFTP port" "$SFTP_LABEL" \
   "Install dir" "$PREFIX" \
   "Data dir" "$DATA_DIR" \
+  "Anonymous telemetry" "$([[ "$TELEMETRY" -eq 1 ]] && echo Yes || echo No)" \
   "Nginx" "$([[ "$INSTALL_NGINX" -eq 1 ]] && echo Yes || echo No)" \
   "Let's Encrypt" "$([[ "$LETSENCRYPT" -eq 1 ]] && echo Yes || echo No)" \
   "Migrated eggs" "$MIGRATED_EGGS" \

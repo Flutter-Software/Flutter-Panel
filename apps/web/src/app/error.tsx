@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { HttpError } from "@/lib/api";
 import { ErrorPage, kindFromUnknown } from "@/components/error-page";
+import { reportClientError } from "@/lib/telemetry";
 
 export default function AppError({
   error,
@@ -13,6 +14,7 @@ export default function AppError({
 }) {
   useEffect(() => {
     console.error(error);
+    reportClientError(error);
   }, [error]);
 
   return (

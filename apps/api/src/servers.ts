@@ -719,7 +719,7 @@ async function finishPower(serverId: string, nodeId: string, spec: InstallSpec, 
     log("error", "power action failed", {
       serverId,
       action,
-      error: error instanceof Error ? error.message : String(error),
+      error,
     });
     const row = await Server.findById(serverId);
     if (!row || row.status === "installing" || row.status === "install_failed") return;
@@ -779,7 +779,7 @@ async function runInstall(serverId: string) {
   } catch (error) {
     log("error", "server install failed", {
       serverId,
-      error: error instanceof Error ? error.message : String(error),
+      error,
     });
     const server = await Server.findById(serverId);
     if (server && server.status === "installing") {

@@ -229,7 +229,7 @@ export async function sendSubuserInvite(options: SubuserInviteMail) {
   } catch (error) {
     log("error", "invite email failed", {
       to: options.to,
-      error: error instanceof Error ? error.message : String(error),
+      error,
     });
     return false;
   }
@@ -308,7 +308,7 @@ export async function sendVerificationEmail(options: VerificationMail) {
   } catch (error) {
     log("error", "verification email failed", {
       to: options.to,
-      error: error instanceof Error ? error.message : String(error),
+      error,
     });
     return false;
   }

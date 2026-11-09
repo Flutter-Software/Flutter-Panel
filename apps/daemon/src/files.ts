@@ -52,10 +52,13 @@ export async function listFiles(config: DaemonConfig, uuid: string, relPath: str
     const full = join(dir, entry.name);
     let size = 0;
     let modifiedAt = new Date().toISOString();
+    let createdAt: string | null = null;
     try {
       const meta = await stat(full);
       size = entry.isDirectory() ? 0 : meta.size;
       modifiedAt = meta.mtime.toISOString();
+      // Some filesystems don't record a creation time and report it as 0.
+      createdAt = meta.birthtimeMs > 0 ? meta.birthtime.toISOString() : null;
     } catch {
       /* ignore */
     }
@@ -64,6 +67,7 @@ export async function listFiles(config: DaemonConfig, uuid: string, relPath: str
       kind: entry.isDirectory() ? ("dir" as const) : ("file" as const),
       size,
       modifiedAt,
+      createdAt,
     });
   }
   rows.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));

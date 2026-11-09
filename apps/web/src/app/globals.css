@@ -250,6 +250,37 @@ html[data-reduce-motion="off"] button {
   border-radius: 999px;
 }
 
+/*
+ * Holds the scrollbar's space open, so content doesn't widen when a page's list
+ * gets short enough for the scrollbar to disappear.
+ */
+[data-page-scroller]:has([data-stable-page-scrollbar]) {
+  scrollbar-gutter: stable;
+}
+
+/* Hides the console's power row before React loads, so it can't flash in Header mode. */
+html[data-power-layout="header"] [data-standard-power] {
+  display: none;
+}
+
+/* Whole-page crossfade played by useSmoothTheme when the theme changes. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * <main> is shared by every signed-in page, so a page opts out of its scrollbar
+ * by rendering [data-hide-page-scrollbar]. The content can still be scrolled.
+ */
+main:has([data-hide-page-scrollbar]) {
+  scrollbar-width: none;
+}
+main:has([data-hide-page-scrollbar])::-webkit-scrollbar {
+  display: none;
+}
+
 .console-fg-black { color: #6b7280; }
 .console-fg-red { color: var(--status-error); }
 .console-fg-green { color: var(--status-running); }

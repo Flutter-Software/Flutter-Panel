@@ -4,10 +4,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AuthBrand } from "@/components/brand";
+import { AuthFooter } from "@/components/auth-footer";
 import { Button, buttonClass, Input } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { api, type AuthResponse, type SetupResponse } from "@/lib/api";
-import { PANEL_VERSION } from "@flutter-software/shared";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -243,7 +243,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <p className="absolute bottom-6 font-mono text-xs text-muted-foreground">v{PANEL_VERSION}</p>
+      <AuthFooter />
     </div>
   );
 }

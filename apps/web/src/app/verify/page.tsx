@@ -4,9 +4,9 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AuthBrand } from "@/components/brand";
+import { AuthFooter } from "@/components/auth-footer";
 import { VerifyEmailForm } from "@/components/verify-email-form";
 import { useAuth } from "@/components/auth-provider";
-import { PANEL_VERSION } from "@flutter-software/shared";
 
 function VerifyContent() {
   const router = useRouter();
@@ -52,7 +52,7 @@ function VerifyContent() {
           )}
         </div>
       </div>
-      <p className="absolute bottom-6 font-mono text-xs text-muted-foreground">v{PANEL_VERSION}</p>
+      <AuthFooter />
     </div>
   );
 }

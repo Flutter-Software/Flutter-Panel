@@ -166,7 +166,7 @@ export async function startOidc(c: Context) {
     });
     return c.redirect(redirectTo.href);
   } catch (error) {
-    log("warn", "oidc start failed", { err: error instanceof Error ? error.message : String(error) });
+    log("warn", "oidc start failed", { error });
     return c.redirect(loginErrorUrl());
   }
 }
@@ -212,7 +212,7 @@ export async function finishOidc(c: Context) {
     return c.redirect(`${appOrigin()}${challenge.next}`);
   } catch (error) {
     clear();
-    log("warn", "oidc callback failed", { err: error instanceof Error ? error.message : String(error) });
+    log("warn", "oidc callback failed", { error });
     return c.redirect(loginErrorUrl());
   }
 }

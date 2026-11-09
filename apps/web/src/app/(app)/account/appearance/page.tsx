@@ -1,10 +1,12 @@
 "use client";
 
-import { Monitor, Moon, Sun } from "lucide-react";
+import { LayoutList, Monitor, Moon, PanelTop, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Switch } from "@/components/admin-create";
 import { useMotion } from "@/components/motion-provider";
+import { useSmoothTheme } from "@/components/theme-provider";
 import { Card } from "@/components/ui";
+import { setPowerLayout, usePowerLayout } from "@/components/use-power-layout";
 import { cn } from "@/lib/cn";
 import { SettingsSection } from "../settings-nav";
 
@@ -15,9 +17,16 @@ const THEMES = [
 
 // No "system" option — ThemeProvider has enableSystem={false}.
 
+const POWER_LAYOUTS = [
+  { id: "standard", label: "Standard Power Actions", icon: LayoutList, hint: "Labeled buttons above the console." },
+  { id: "header", label: "Header Power Actions", icon: PanelTop, hint: "Icon buttons in the server header, on every server page." },
+] as const;
+
 export default function AccountAppearancePage() {
-  const { theme, setTheme } = useTheme();
+  const { theme } = useTheme();
+  const switchTheme = useSmoothTheme();
   const { enabled: motionEnabled, setEnabled: setMotionEnabled } = useMotion();
+  const powerLayout = usePowerLayout();
 
   return (
     <SettingsSection title="Appearance" description="Choose how Flutter looks on this device.">
@@ -32,7 +41,7 @@ export default function AccountAppearancePage() {
               <button
                 key={option.id}
                 type="button"
-                onClick={() => setTheme(option.id)}
+                onClick={() => switchTheme(option.id)}
                 className={cn(
                   "flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors",
                   active
@@ -53,6 +62,37 @@ export default function AccountAppearancePage() {
           <Monitor className="size-3.5" />
           The top bar sun/moon control switches the same setting.
         </p>
+      </Card>
+
+      <Card className="p-5 sm:p-6">
+        <h3 className="text-sm font-semibold">Power actions</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Saved in this browser only.</p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          {POWER_LAYOUTS.map((option) => {
+            const Icon = option.icon;
+            const active = powerLayout === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setPowerLayout(option.id)}
+                className={cn(
+                  "flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors",
+                  active
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:border-primary/40 hover:bg-muted/40",
+                )}
+              >
+                <Icon className={cn("mt-0.5 size-4", active ? "text-primary" : "text-muted-foreground")} />
+                <span>
+                  <span className="block text-sm font-medium">{option.label}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{option.hint}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </Card>
 
       <Card className="p-5 sm:p-6">
