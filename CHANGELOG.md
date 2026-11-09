@@ -6,6 +6,8 @@
 
 A browser dropping a live connection, such as by changing page or closing a tab, could crash the API and return 500 on every request until it restarted. Those disconnects are now handled.
 
+Updates no longer fail at the database step on panels with more than one Unassigned server.
+
 ### Telemetry
 
 The panel can share anonymous telemetry: an install id, version, operating system, counts, file-download outcomes, and error reports with the message and stack trace. Emails, passwords, tokens, and database URLs are removed before sending. It is on by default. Turn it off in Admin → Settings, or set `TELEMETRY_DISABLED=true` on the panel host.

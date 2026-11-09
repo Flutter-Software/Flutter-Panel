@@ -116,7 +116,10 @@ model Server {
   nodeId        String   @db.ObjectId
   eggId         String   @db.ObjectId
   egg           Egg      @relation(fields: [eggId], references: [id])
-  allocationId  String   @unique @db.ObjectId
+  // Optional because a server can be Unassigned. Uniqueness among assigned
+  // servers comes from the partial index in src/db/models.ts: Prisma can't
+  // declare one, and a plain unique index rejects a second empty value.
+  allocationId  String?  @db.ObjectId
   memoryMb      Int
   diskMb        Int
   cpuPercent    Int      @default(100)
