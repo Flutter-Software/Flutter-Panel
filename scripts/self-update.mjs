@@ -195,7 +195,11 @@ async function copyDirReplace(src, dest) {
   if (!existsSync(src)) return;
   await rm(dest, { recursive: true, force: true });
   await mkdir(dirname(dest), { recursive: true });
-  await cp(src, dest, { recursive: true, force: true });
+  // verbatimSymlinks: by default fs.cp rewrites relative symlinks into absolute
+  // paths inside `src`. node_modules/.bin/* and the npm workspace links are
+  // relative symlinks, so they ended up pointing into .staging, which is
+  // deleted right after promotion: `prisma: not found`, broken workspace links.
+  await cp(src, dest, { recursive: true, force: true, verbatimSymlinks: true });
 }
 
 async function seedStagingEnv() {
@@ -278,6 +282,7 @@ async function promoteStaging(sha) {
   await cp(staging, root, {
     recursive: true,
     force: true,
+    verbatimSymlinks: true,
     filter: (from) => !preserveLive(relative(staging, from).split(sep).join("/")),
   });
   await run("node", ["scripts/link-shared.mjs"]);
