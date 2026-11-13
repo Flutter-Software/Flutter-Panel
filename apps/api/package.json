@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "prestart": "node ../../scripts/ensure-prisma.mjs",
     "start": "node --import tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "node ../../scripts/with-root-env.mjs prisma generate",

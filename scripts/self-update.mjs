@@ -223,6 +223,27 @@ async function installPackages() {
   await run("npm", ["ci", "--include=dev"], staging);
 }
 
+/**
+ * Always generate the Prisma client in staging. `npm ci` only installs a
+ * placeholder that throws "@prisma/client did not initialize yet" on import,
+ * and `prisma db push` (the only other step that generated it) is skipped
+ * when "Apply database schema" is off. Promoting that node_modules left the
+ * API crash-looping behind a 502.
+ */
+async function generatePrismaClient() {
+  flutterLog("Generating database client");
+  await run("npm", ["run", "prisma:generate", "-w", "@flutter-software/api"], staging);
+}
+
+/** Refuse to promote a staging tree whose Prisma client the API could not load. */
+async function verifyStaging() {
+  flutterLog("Verifying staging build");
+  await run("node", ["scripts/ensure-prisma.mjs", "--check"], staging);
+  if (!existsSync(join(staging, "apps/web/.next/BUILD_ID"))) {
+    throw new Error("The web build did not produce apps/web/.next/BUILD_ID");
+  }
+}
+
 async function applyDatabase() {
   flutterLog("Applying database schema");
   await run("npm", ["run", "db:push"], staging);
@@ -330,6 +351,7 @@ async function main() {
   await prepareStaging();
   await setPhase("packages", "INSTALLING PACKAGES....");
   await installPackages();
+  await generatePrismaClient();
   if (options.applySchema) {
     await setPhase("database", "APPLYING DATABASE....");
     await applyDatabase();
@@ -338,6 +360,7 @@ async function main() {
   }
   await setPhase("building", "BUILDING PANEL....");
   await buildPanel();
+  await verifyStaging();
   await setPhase("promoting", "PROMOTING LIVE INSTALL....");
   await promoteStaging(sha);
   promoted = true;
