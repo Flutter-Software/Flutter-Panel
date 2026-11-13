@@ -12,6 +12,7 @@ import {
   Database,
   Folder,
   History,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -56,7 +57,7 @@ export const ADMIN_NAV = [
   {
     group: "Server",
     items: [
-      { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/admin", label: "Overview", icon: LayoutDashboard },
       { href: "/admin/servers", label: "Servers", icon: Server },
       { href: "/admin/nodes", label: "Nodes", icon: Cpu },
       { href: "/admin/locations", label: "Locations", icon: MapPin },
@@ -73,7 +74,10 @@ export const ADMIN_NAV = [
   },
   {
     group: "Management",
-    items: [{ href: "/admin/settings", label: "Settings", icon: Settings }],
+    items: [
+      { href: "/admin/api-keys", label: "API Keys", icon: KeyRound },
+      { href: "/admin/settings", label: "Settings", icon: Settings },
+    ],
   },
 ];
 
@@ -93,6 +97,7 @@ const ADMIN_PREFETCH: Record<string, string[]> = {
   "/admin/users": ["/api/v1/admin/users"],
   "/admin/settings": ["/api/v1/admin/settings"],
   "/admin/database-hosts": ["/api/v1/admin/database-hosts"],
+  "/admin/api-keys": ["/api/v1/admin/api-keys"],
 };
 
 function prefetchAdmin(href: string) {

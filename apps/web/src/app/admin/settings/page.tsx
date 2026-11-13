@@ -1,20 +1,53 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Check, Copy, Image as ImageIcon, KeyRound, Mail, Radio, RefreshCw, Send } from "lucide-react";
-import { Button, NumberInput, PasswordInput, Select, Switch, TextInput } from "@mantine/core";
+/**
+ * Admin → Settings.
+ *
+ * Owns the form state for every section and the "is it dirty?" logic.
+ * Layout primitives (grouped nav, cards, unsaved-changes bar) live in
+ * ./workspace; Branding, Updates and Telemetry render from their own files.
+ *
+ * UX rules applied across sections:
+ * - Edits are tracked against the last loaded values. Once anything differs,
+ *   a floating bar offers Discard / Save (Ctrl/⌘+S). No permanent Save button.
+ * - Switching sections or leaving the page with unsaved edits asks first.
+ * - Single toggles that stand alone (telemetry) save immediately.
+ * - Secrets (SMTP password, OIDC client secret) are never echoed back; an
+ *   empty field means "keep the saved value".
+ */
+
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import {
+  Check,
+  Copy,
+  Globe,
+  Image as ImageIcon,
+  KeyRound,
+  Mail,
+  Radio,
+  RefreshCw,
+  Send,
+  TriangleAlert,
+} from "lucide-react";
+import { Button, NumberInput, PasswordInput, Switch, TextInput } from "@mantine/core";
 import { AdminError, AdminPage } from "@/components/admin-table";
 import { SettingsWorkspaceSkeleton } from "@/components/skeletons";
 import { useAuth } from "@/components/auth-provider";
 import { DEFAULT_CONSOLE_TAG, DEFAULT_LOGO_SRC, DEFAULT_SITE_NAME, useBranding } from "@/components/branding-provider";
+import { confirm } from "@/components/confirm-dialog";
 import { UpdatesSection } from "./updates-section";
 import { IdentityStudio } from "./identity-studio";
 import { TelemetrySection, type TelemetryPublic } from "./telemetry-section";
 import {
   parseSettingsSection,
-  SettingsActions,
+  SettingsCard,
+  SettingsSegmented,
+  SettingsToggleRow,
   SettingsWorkspace,
+  UnsavedChangesBar,
+  type SettingsNavGroup,
   type SettingsSection,
+  type SettingsTone,
 } from "./workspace";
 import { toast } from "@/components/toast";
 import { api } from "@/lib/api";
@@ -64,8 +97,27 @@ type UpdateStatus = {
   job: { state: string };
 };
 
+/** Form ids: the unsaved-changes bar submits these by id. */
+const FORM_ID: Partial<Record<SettingsSection, string>> = {
+  branding: "settings-branding-form",
+  mail: "settings-mail-form",
+  sso: "settings-sso-form",
+};
+
+const DEFAULT_SSO_LABEL = "Sign in with SSO";
+const DEFAULT_SSO_SCOPES = "openid email profile";
+
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Conventional port per encryption mode, used to auto-adjust the port field. */
+const SMTP_PORT: Record<SmtpEncryption, number> = { none: 25, starttls: 587, tls: 465 };
+
+const ENCRYPTION_OPTIONS: { value: SmtpEncryption; label: string }[] = [
+  { value: "starttls", label: "STARTTLS" },
+  { value: "tls", label: "TLS / SSL" },
+  { value: "none", label: "None" },
+];
 
 function logoMime(file: File): "image/png" | "image/jpeg" | "image/webp" | "image/gif" | null {
   if (LOGO_TYPES.has(file.type)) {
@@ -76,6 +128,13 @@ function logoMime(file: File): "image/png" | "image/jpeg" | "image/webp" | "imag
   if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
   if (name.endsWith(".webp")) return "image/webp";
   if (name.endsWith(".gif")) return "image/gif";
+  return null;
+}
+
+/** Returns an error message for an unusable logo file, or null when it's fine. */
+function logoProblem(file: File) {
+  if (!logoMime(file)) return "Logo must be a PNG, JPEG, WebP, or GIF.";
+  if (file.size > LOGO_MAX_BYTES) return "Logo must be 2 MB or smaller.";
   return null;
 }
 
@@ -104,11 +163,17 @@ export default function AdminSettingsPage() {
   const branding = data?.data.branding;
   const telemetry = data?.data.telemetry;
   const [section, setSection] = useState<SettingsSection>("branding");
+  const [error, setError] = useState<string | null>(null);
+
+  // Branding
   const [siteName, setSiteName] = useState(DEFAULT_SITE_NAME);
   const [consoleTag, setConsoleTag] = useState(DEFAULT_CONSOLE_TAG);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [removeLogo, setRemoveLogo] = useState(false);
+  const [brandingPending, setBrandingPending] = useState(false);
+
+  // Mail
   const [enabled, setEnabled] = useState(false);
   const [host, setHost] = useState("");
   const [port, setPort] = useState(587);
@@ -118,34 +183,35 @@ export default function AdminSettingsPage() {
   const [fromEmail, setFromEmail] = useState("");
   const [fromName, setFromName] = useState(DEFAULT_SITE_NAME);
   const [testTo, setTestTo] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [brandingPending, setBrandingPending] = useState(false);
   const [testing, setTesting] = useState(false);
+
+  // Sign-in (OIDC)
   const [oidcEnabled, setOidcEnabled] = useState(false);
   const [oidcIssuer, setOidcIssuer] = useState("");
   const [oidcClientId, setOidcClientId] = useState("");
   const [oidcClientSecret, setOidcClientSecret] = useState("");
-  const [oidcButtonLabel, setOidcButtonLabel] = useState("Sign in with SSO");
-  const [oidcScopes, setOidcScopes] = useState("openid email profile");
+  const [oidcButtonLabel, setOidcButtonLabel] = useState(DEFAULT_SSO_LABEL);
+  const [oidcScopes, setOidcScopes] = useState(DEFAULT_SSO_SCOPES);
   const [oidcDomains, setOidcDomains] = useState("");
   const [oidcPasswordLogin, setOidcPasswordLogin] = useState(true);
   const [oidcPending, setOidcPending] = useState(false);
   const [oidcTesting, setOidcTesting] = useState(false);
   const [copiedUri, setCopiedUri] = useState(false);
+
   const [telemetryPending, setTelemetryPending] = useState(false);
 
-  useEffect(() => {
-    const apply = () => {
-      const parsed = parseSettingsSection(window.location.hash.replace(/^#/, ""));
-      if (parsed) setSection(parsed);
-    };
-    apply();
-    window.addEventListener("hashchange", apply);
-    return () => window.removeEventListener("hashchange", apply);
-  }, []);
+  /* ---- Load / reset: copy the saved values into the form ---------------- */
 
-  useEffect(() => {
+  const resetBranding = useCallback(() => {
+    if (!branding) return;
+    setSiteName(branding.siteName || DEFAULT_SITE_NAME);
+    setConsoleTag(branding.consoleTag || DEFAULT_CONSOLE_TAG);
+    setLogoFile(null);
+    setRemoveLogo(false);
+  }, [branding]);
+
+  const resetMail = useCallback(() => {
     if (!smtp) return;
     setEnabled(smtp.enabled);
     setHost(smtp.host);
@@ -157,13 +223,21 @@ export default function AdminSettingsPage() {
     setFromName(smtp.fromName || DEFAULT_SITE_NAME);
   }, [smtp]);
 
-  useEffect(() => {
-    if (!branding) return;
-    setSiteName(branding.siteName || DEFAULT_SITE_NAME);
-    setConsoleTag(branding.consoleTag || DEFAULT_CONSOLE_TAG);
-    setLogoFile(null);
-    setRemoveLogo(false);
-  }, [branding]);
+  const resetOidc = useCallback(() => {
+    if (!oidc) return;
+    setOidcEnabled(oidc.enabled);
+    setOidcIssuer(oidc.issuer);
+    setOidcClientId(oidc.clientId);
+    setOidcClientSecret("");
+    setOidcButtonLabel(oidc.buttonLabel || DEFAULT_SSO_LABEL);
+    setOidcScopes(oidc.scopes || DEFAULT_SSO_SCOPES);
+    setOidcDomains(oidc.allowedDomains);
+    setOidcPasswordLogin(oidc.passwordLogin);
+  }, [oidc]);
+
+  useEffect(resetBranding, [resetBranding]);
+  useEffect(resetMail, [resetMail]);
+  useEffect(resetOidc, [resetOidc]);
 
   useEffect(() => {
     if (!logoFile) {
@@ -176,40 +250,115 @@ export default function AdminSettingsPage() {
   }, [logoFile]);
 
   useEffect(() => {
-    if (!oidc) return;
-    setOidcEnabled(oidc.enabled);
-    setOidcIssuer(oidc.issuer);
-    setOidcClientId(oidc.clientId);
-    setOidcClientSecret("");
-    setOidcButtonLabel(oidc.buttonLabel || "Sign in with SSO");
-    setOidcScopes(oidc.scopes || "openid email profile");
-    setOidcDomains(oidc.allowedDomains);
-    setOidcPasswordLogin(oidc.passwordLogin);
-  }, [oidc]);
-
-  useEffect(() => {
     if (user?.email && !testTo) setTestTo(user.email);
   }, [user?.email, testTo]);
 
-  function selectSection(id: SettingsSection) {
+  /* ---- Dirty tracking ----------------------------------------------------- */
+
+  const brandingDirty = Boolean(
+    branding &&
+      (siteName !== (branding.siteName || DEFAULT_SITE_NAME) ||
+        consoleTag !== (branding.consoleTag || DEFAULT_CONSOLE_TAG) ||
+        logoFile ||
+        removeLogo),
+  );
+  const mailDirty = Boolean(
+    smtp &&
+      (enabled !== smtp.enabled ||
+        host !== smtp.host ||
+        port !== (smtp.port || 587) ||
+        username !== smtp.username ||
+        password !== "" ||
+        encryption !== smtp.encryption ||
+        fromEmail !== smtp.fromEmail ||
+        fromName !== (smtp.fromName || DEFAULT_SITE_NAME)),
+  );
+  const ssoDirty = Boolean(
+    oidc &&
+      (oidcEnabled !== oidc.enabled ||
+        oidcIssuer !== oidc.issuer ||
+        oidcClientId !== oidc.clientId ||
+        oidcClientSecret !== "" ||
+        oidcButtonLabel !== (oidc.buttonLabel || DEFAULT_SSO_LABEL) ||
+        oidcScopes !== (oidc.scopes || DEFAULT_SSO_SCOPES) ||
+        oidcDomains !== oidc.allowedDomains ||
+        oidcPasswordLogin !== oidc.passwordLogin),
+  );
+  const dirtyBySection: Partial<Record<SettingsSection, boolean>> = {
+    branding: brandingDirty,
+    mail: mailDirty,
+    sso: ssoDirty,
+  };
+  const dirtySections = new Set(
+    (Object.keys(dirtyBySection) as SettingsSection[]).filter((key) => dirtyBySection[key]),
+  );
+  const anyDirty = dirtySections.size > 0;
+
+  // Browser-level guard for reloads, tab closes and external navigation.
+  useEffect(() => {
+    if (!anyDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [anyDirty]);
+
+  function discard(target: SettingsSection) {
+    if (target === "branding") resetBranding();
+    if (target === "mail") resetMail();
+    if (target === "sso") resetOidc();
+    setError(null);
+  }
+
+  /* ---- Navigation ----------------------------------------------------------- */
+
+  const applySection = useCallback((id: SettingsSection) => {
     setSection(id);
     setError(null);
     if (window.location.hash.replace(/^#/, "") !== id) {
       history.replaceState(null, "", `#${id}`);
     }
+  }, []);
+
+  useEffect(() => {
+    const apply = () => {
+      const parsed = parseSettingsSection(window.location.hash.replace(/^#/, ""));
+      if (parsed) setSection(parsed);
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, []);
+
+  async function selectSection(id: SettingsSection) {
+    if (id === section) return;
+    if (dirtyBySection[section]) {
+      const ok = await confirm({
+        title: "Discard unsaved changes?",
+        description: "You have edits in this section that haven't been saved.",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+        danger: true,
+      });
+      if (!ok) return;
+      discard(section);
+    }
+    applySection(id);
   }
 
-  function smtpBody() {
-    return {
-      enabled,
-      host: host.trim(),
-      port: port || 587,
-      username: username.trim(),
-      encryption,
-      fromEmail: fromEmail.trim(),
-      fromName: fromName.trim() || DEFAULT_SITE_NAME,
-      ...(password ? { password } : {}),
-    };
+  /* ---- Branding ------------------------------------------------------------- */
+
+  function pickLogo(file: File) {
+    const problem = logoProblem(file);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setError(null);
+    setLogoFile(file);
+    setRemoveLogo(false);
   }
 
   async function onSaveBranding(event: FormEvent) {
@@ -217,19 +366,16 @@ export default function AdminSettingsPage() {
     setError(null);
     const name = siteName.trim();
     if (!name) {
-      setError("Site name is required.");
+      setError("Panel name is required.");
       return;
     }
     const tag = normalizeConsoleTag(consoleTag);
-    if (logoFile && logoFile.size > LOGO_MAX_BYTES) {
-      setError("Logo must be 2 MB or smaller.");
+    const problem = logoFile ? logoProblem(logoFile) : null;
+    if (problem) {
+      setError(problem);
       return;
     }
     const mime = logoFile ? logoMime(logoFile) : null;
-    if (logoFile && !mime) {
-      setError("Logo must be a PNG, JPEG, WebP, or GIF.");
-      return;
-    }
     setBrandingPending(true);
     try {
       await api("/api/v1/admin/settings/branding", {
@@ -244,7 +390,7 @@ export default function AdminSettingsPage() {
       setRemoveLogo(false);
       await reload();
       await reloadBranding();
-      toast("Branding saved.", "info");
+      toast("Branding saved.", "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -252,9 +398,34 @@ export default function AdminSettingsPage() {
     }
   }
 
+  /* ---- Mail ------------------------------------------------------------------ */
+
+  function smtpBody() {
+    return {
+      enabled,
+      host: host.trim(),
+      port: port || 587,
+      username: username.trim(),
+      encryption,
+      fromEmail: fromEmail.trim(),
+      fromName: fromName.trim() || DEFAULT_SITE_NAME,
+      ...(password ? { password } : {}),
+    };
+  }
+
+  /** Switching encryption moves the port along when it's still a conventional default. */
+  function changeEncryption(next: SmtpEncryption) {
+    if (Object.values(SMTP_PORT).includes(port)) setPort(SMTP_PORT[next]);
+    setEncryption(next);
+  }
+
   async function onSave(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    if (enabled && (!host.trim() || !fromEmail.trim())) {
+      setError("Host and from address are required while email delivery is on.");
+      return;
+    }
     setPending(true);
     try {
       await api("/api/v1/admin/settings", {
@@ -263,7 +434,7 @@ export default function AdminSettingsPage() {
       });
       setPassword("");
       await reload();
-      toast("SMTP settings saved.", "info");
+      toast("Mail settings saved.", "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -279,7 +450,7 @@ export default function AdminSettingsPage() {
         method: "POST",
         body: JSON.stringify({ to: testTo.trim(), ...smtpBody() }),
       });
-      toast(`Test email sent to ${result.data.to}.`, "info");
+      toast(`Test email sent to ${result.data.to}.`, "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Test failed");
     } finally {
@@ -287,13 +458,15 @@ export default function AdminSettingsPage() {
     }
   }
 
+  /* ---- Sign-in ------------------------------------------------------------- */
+
   function oidcBody() {
     return {
       enabled: oidcEnabled,
       issuer: oidcIssuer.trim(),
       clientId: oidcClientId.trim(),
-      buttonLabel: oidcButtonLabel.trim() || "Sign in with SSO",
-      scopes: oidcScopes.trim() || "openid email profile",
+      buttonLabel: oidcButtonLabel.trim() || DEFAULT_SSO_LABEL,
+      scopes: oidcScopes.trim() || DEFAULT_SSO_SCOPES,
       allowedDomains: oidcDomains.trim(),
       passwordLogin: oidcPasswordLogin,
       ...(oidcClientSecret ? { clientSecret: oidcClientSecret } : {}),
@@ -303,6 +476,10 @@ export default function AdminSettingsPage() {
   async function onSaveOidc(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    if (oidcEnabled && (!oidcIssuer.trim() || !oidcClientId.trim())) {
+      setError("Issuer URL and client ID are required while SSO is on.");
+      return;
+    }
     setOidcPending(true);
     try {
       await api("/api/v1/admin/settings/oidc", {
@@ -311,7 +488,7 @@ export default function AdminSettingsPage() {
       });
       setOidcClientSecret("");
       await reload();
-      toast("SSO settings saved.", "info");
+      toast("Sign-in settings saved.", "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -329,28 +506,11 @@ export default function AdminSettingsPage() {
         method: "POST",
         body: JSON.stringify({ issuer: oidcIssuer.trim() }),
       });
-      toast(`Discovery succeeded. Authorization endpoint: ${result.data.authorizationEndpoint}`, "info");
+      toast(`Discovery succeeded. Authorization endpoint: ${result.data.authorizationEndpoint}`, "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Discovery failed");
     } finally {
       setOidcTesting(false);
-    }
-  }
-
-  async function onSaveTelemetry(enabled: boolean) {
-    setError(null);
-    setTelemetryPending(true);
-    try {
-      await api("/api/v1/admin/settings/telemetry", {
-        method: "PATCH",
-        body: JSON.stringify({ enabled }),
-      });
-      await reload();
-      toast(enabled ? "Anonymous telemetry enabled." : "Anonymous telemetry turned off.", "info");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setTelemetryPending(false);
     }
   }
 
@@ -365,88 +525,105 @@ export default function AdminSettingsPage() {
     }
   }
 
-  const sourceLabel =
-    smtp?.source === "database"
-      ? "Mail is sent using these panel settings."
-      : smtp?.source === "env"
-        ? "Mail is currently sent using SMTP variables from the server environment. Saving here takes over."
-        : smtp?.envFallback
-          ? "Panel SMTP is off. The server environment still has SMTP variables as a fallback."
-          : "Mail is not configured. Invites will show a copyable setup link instead.";
+  /* ---- Telemetry (saves immediately) ----------------------------------------- */
 
-  const oidcLabel =
+  async function onSaveTelemetry(next: boolean) {
+    setError(null);
+    setTelemetryPending(true);
+    try {
+      await api("/api/v1/admin/settings/telemetry", {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: next }),
+      });
+      await reload();
+      toast(next ? "Anonymous telemetry turned on." : "Anonymous telemetry turned off.", "success");
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+      return false;
+    } finally {
+      setTelemetryPending(false);
+    }
+  }
+
+  /* ---- Derived status (from *saved* values, not the draft) ------------------- */
+
+  const update = updates.data?.data;
+  const updateState: { tone: SettingsTone; status: string } =
+    update?.job.state === "running"
+      ? { tone: "info", status: "Updating" }
+      : update?.updateAvailable
+        ? { tone: "warn", status: "Update available" }
+        : update?.checkError
+          ? { tone: "warn", status: "Check failed" }
+          : update
+            ? { tone: "ok", status: `Up to date · v${update.version}` }
+            : { tone: "off", status: "Checking…" };
+
+  const mailState: { tone: SettingsTone; status: string } =
+    smtp?.source === "database"
+      ? { tone: "ok", status: "Active" }
+      : smtp?.source === "env"
+        ? { tone: "warn", status: "Using environment" }
+        : smtp?.envFallback
+          ? { tone: "warn", status: "Off · env fallback" }
+          : { tone: "off", status: "Not configured" };
+
+  const ssoState: { tone: SettingsTone; status: string } =
     oidc?.source === "database"
-      ? "Users can sign in through this OpenID Connect provider."
+      ? { tone: "ok", status: oidc.passwordLogin ? "SSO + passwords" : "SSO only" }
       : oidc?.source === "env"
-        ? "SSO is currently using OIDC variables from the server environment. Saving here takes over."
-        : oidc?.envFallback
-          ? "Panel SSO is off. The server environment still has OIDC variables as a fallback."
-          : "Add an OpenID Connect issuer so users can sign in with your internal IdP.";
+        ? { tone: "warn", status: "Using environment" }
+        : { tone: "off", status: "Passwords only" };
+
+  const telemetryState: { tone: SettingsTone; status: string } = telemetry?.envDisabled
+    ? { tone: "off", status: "Disabled by host" }
+    : telemetry?.sending
+      ? { tone: "ok", status: "Sharing" }
+      : telemetry?.enabled
+        ? { tone: "warn", status: "On · not sending" }
+        : { tone: "off", status: "Off" };
+
+  const groups: SettingsNavGroup[] = [
+    {
+      label: "General",
+      items: [{ id: "branding", label: "Branding", icon: <ImageIcon /> }],
+    },
+    {
+      label: "Authentication",
+      items: [
+        { id: "sso", label: "Sign-in", icon: <KeyRound />, ...ssoState },
+        { id: "mail", label: "Email", icon: <Mail />, ...mailState },
+      ],
+    },
+    {
+      label: "System",
+      items: [
+        { id: "updates", label: "Updates", icon: <RefreshCw />, ...updateState },
+        { id: "telemetry", label: "Telemetry", icon: <Radio />, ...telemetryState },
+      ],
+    },
+  ];
+
+  const pane: Record<SettingsSection, { title: string; description: string }> = {
+    branding: { title: "Branding", description: "How this panel presents itself to users and in server consoles." },
+    updates: { title: "Updates", description: "Compare this install with the latest build and apply updates in place." },
+    mail: { title: "Email", description: "How the panel sends invites, verification links, and password resets." },
+    sso: { title: "Sign-in", description: "Let users sign in through your OpenID Connect identity provider." },
+    telemetry: { title: "Telemetry", description: "Anonymous crash and usage reports that help improve Flutter." },
+  };
 
   const previewSrc = logoPreview ?? (removeLogo ? DEFAULT_LOGO_SRC : branding?.logoUrl || DEFAULT_LOGO_SRC);
   const canResetLogo = Boolean(logoFile || (branding?.hasLogo && !removeLogo));
-  const update = updates.data?.data;
-  const updateHint = update?.job.state === "running"
-    ? "Installing…"
-    : update?.updateAvailable
-      ? "Update ready"
-      : update?.checkError
-        ? "Could not check"
-        : update?.version
-          ? `v${update.version}`
-          : "Checking…";
-  const mailHint = enabled
-    ? host.trim() || "Waiting for host"
-    : smtp?.source === "env" || smtp?.envFallback
-      ? "Using .env"
-      : "Not sending";
-  const ssoHint = oidcEnabled
-    ? oidcPasswordLogin
-      ? "OIDC + passwords"
-      : "OIDC only"
-    : oidcPasswordLogin
-      ? "Passwords only"
-      : "Sign-in locked";
-
-  const pane: Record<SettingsSection, { title: string; description: string; icon: ReactNode }> = {
-    branding: {
-      title: "Identity",
-      description: "Site name, logo, and the tag on server consoles.",
-      icon: <ImageIcon className="size-4" />,
-    },
-    updates: {
-      title: "Updates",
-      description: update?.updateAvailable
-        ? "A newer panel build is available from GitHub."
-        : update?.checkError || "This panel is up to date.",
-      icon: <RefreshCw className="size-4" />,
-    },
-    mail: {
-      title: "Mail",
-      description: sourceLabel,
-      icon: <Mail className="size-4" />,
-    },
-    sso: {
-      title: "Sign-in",
-      description: oidcLabel,
-      icon: <KeyRound className="size-4" />,
-    },
-    telemetry: {
-      title: "Telemetry",
-      description: telemetry?.envDisabled
-        ? "Disabled by the panel host environment."
-        : telemetry?.enabled
-          ? "This install is sharing anonymous usage and errors."
-          : "Anonymous telemetry is off for this install.",
-      icon: <Radio className="size-4" />,
-    },
-  };
+  const signInLocked = !oidcEnabled && !oidcPasswordLogin;
+  const formId = FORM_ID[section];
+  const saving = section === "branding" ? brandingPending : section === "mail" ? pending : oidcPending;
 
   return (
     <AdminPage
-      className="max-w-7xl"
+      className="max-w-6xl"
       title="Settings"
-      description="Identity, updates, mail, sign-in, and telemetry."
+      description="Manage your panel's identity, sign-in, email delivery, and updates."
     >
       <AdminError message={loadError} />
       {!data && !loadError ? (
@@ -454,80 +631,24 @@ export default function AdminSettingsPage() {
       ) : (
         <SettingsWorkspace
           section={section}
-          onSection={selectSection}
+          onSection={(id) => void selectSection(id)}
+          groups={groups}
           title={pane[section].title}
           description={pane[section].description}
-          icon={pane[section].icon}
           error={error}
-          items={[
-            {
-              id: "branding",
-              kicker: "Identity",
-              title: siteName.trim() || "Panel name",
-              hint: "Logo, name, and console",
-              icon: <ImageIcon className="size-4" />,
-              media: (
-                <img src={previewSrc} alt="" className="size-9 object-contain p-0.5" />
-              ),
-              tone: "info",
-            },
-            {
-              id: "updates",
-              kicker: "Panel",
-              title: "Updates",
-              hint: updateHint,
-              icon: <RefreshCw className="size-4" />,
-              tone: update?.job.state === "running"
-                ? "info"
-                : update?.updateAvailable || update?.checkError
-                  ? "warn"
-                  : "ok",
-            },
-            {
-              id: "mail",
-              kicker: "Delivery",
-              title: "Mail",
-              hint: mailHint,
-              icon: <Mail className="size-4" />,
-              tone: enabled ? "ok" : smtp?.source === "env" || smtp?.envFallback ? "warn" : "off",
-            },
-            {
-              id: "sso",
-              kicker: "Access",
-              title: "Sign-in",
-              hint: ssoHint,
-              icon: <KeyRound className="size-4" />,
-              tone: oidcEnabled ? "ok" : "off",
-            },
-            {
-              id: "telemetry",
-              kicker: "Product",
-              title: "Telemetry",
-              hint: telemetry?.envDisabled
-                ? "Disabled by env"
-                : telemetry?.sending
-                  ? "Sharing anonymously"
-                  : telemetry?.enabled
-                    ? "On, not sending"
-                    : "Opted out",
-              icon: <Radio className="size-4" />,
-              tone: telemetry?.envDisabled ? "off" : telemetry?.sending ? "ok" : telemetry?.enabled ? "warn" : "off",
-            },
-          ]}
+          dirtySections={dirtySections}
         >
           {section === "branding" ? (
             <IdentityStudio
+              formId={FORM_ID.branding!}
               siteName={siteName}
               onSiteName={setSiteName}
               consoleTag={consoleTag}
               onConsoleTag={setConsoleTag}
               previewSrc={previewSrc}
               canReset={canResetLogo}
-              pending={brandingPending}
-              onFile={(file) => {
-                setLogoFile(file);
-                setRemoveLogo(false);
-              }}
+              pendingFileName={logoFile?.name ?? null}
+              onFile={pickLogo}
               onReset={() => {
                 setLogoFile(null);
                 setRemoveLogo(true);
@@ -536,137 +657,199 @@ export default function AdminSettingsPage() {
             />
           ) : null}
 
+          {/* Kept mounted so a running update keeps streaming while you browse other sections. */}
           <div className={section === "updates" ? "block" : "hidden"}>
             <UpdatesSection framed={false} />
           </div>
 
           {section === "mail" ? (
-            <form className="space-y-4" onSubmit={(event) => void onSave(event)}>
-              <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">Send email through SMTP</p>
+            <form id={FORM_ID.mail} className="space-y-5" onSubmit={(event) => void onSave(event)} noValidate>
+              <SettingsCard
+                footer={
+                  smtp?.source === "env" ? (
+                    <EnvNote>SMTP variables in the server environment are in use. Saving here takes over.</EnvNote>
+                  ) : smtp?.envFallback && !enabled ? (
+                    <EnvNote>The server environment still has SMTP variables as a fallback.</EnvNote>
+                  ) : !enabled ? (
+                    <span>While off, invites show a copyable setup link instead of sending email.</span>
+                  ) : undefined
+                }
+              >
+                <SettingsToggleRow
+                  title="Send email through SMTP"
+                  description="Deliver invites, verification links, and password resets from this panel."
+                  control={
+                    <Switch
+                      checked={enabled}
+                      onChange={(event) => setEnabled(event.currentTarget.checked)}
+                      aria-label="Send email through SMTP"
+                    />
+                  }
+                />
+              </SettingsCard>
+
+              <SettingsCard title="SMTP server" description="Your mail provider's outgoing server.">
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
+                  <TextInput
+                    label="Host"
+                    withAsterisk={enabled}
+                    value={host}
+                    onChange={(event) => setHost(event.currentTarget.value)}
+                    placeholder="smtp.example.com"
+                    autoComplete="off"
+                    leftSection={<Globe className="size-3.5" />}
+                  />
+                  <NumberInput
+                    label="Port"
+                    withAsterisk={enabled}
+                    min={1}
+                    max={65535}
+                    hideControls
+                    value={port}
+                    onChange={(value) => setPort(typeof value === "number" ? value : 587)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-sm font-medium">Encryption</p>
+                  <SettingsSegmented
+                    label="Encryption"
+                    value={encryption}
+                    options={ENCRYPTION_OPTIONS}
+                    onChange={changeEncryption}
+                  />
                   <p className="text-xs text-muted-foreground">
-                    When this is off, the panel will not send mail from these settings.
+                    STARTTLS usually uses port 587, TLS/SSL uses 465. The port follows your choice.
                   </p>
                 </div>
-                <Switch
-                  checked={enabled}
-                  onChange={(event) => setEnabled(event.currentTarget.checked)}
-                  aria-label="Send email through SMTP"
-                />
-              </div>
+              </SettingsCard>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <TextInput
-                  label="Host"
-                  required={enabled}
-                  value={host}
-                  onChange={(event) => setHost(event.currentTarget.value)}
-                  placeholder="smtp.example.com"
-                  autoComplete="off"
-                />
-                <NumberInput
-                  label="Port"
-                  required={enabled}
-                  min={1}
-                  max={65535}
-                  value={port}
-                  onChange={(value) => setPort(typeof value === "number" ? value : 587)}
-                />
-              </div>
+              <SettingsCard title="Authentication" description="Credentials for the SMTP server, if it requires them.">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextInput
+                    label="Username"
+                    value={username}
+                    onChange={(event) => setUsername(event.currentTarget.value)}
+                    autoComplete="off"
+                  />
+                  <PasswordInput
+                    label="Password"
+                    description={smtp?.passwordSet ? "Leave blank to keep the saved password." : undefined}
+                    value={password}
+                    onChange={(event) => setPassword(event.currentTarget.value)}
+                    autoComplete="new-password"
+                    placeholder={smtp?.passwordSet ? "••••••••" : ""}
+                  />
+                </div>
+              </SettingsCard>
 
-              <Select
-                label="Encryption"
-                description="STARTTLS is typical on port 587. TLS/SSL is typical on 465."
-                data={[
-                  { value: "none", label: "None" },
-                  { value: "starttls", label: "STARTTLS" },
-                  { value: "tls", label: "TLS / SSL" },
-                ]}
-                value={encryption}
-                onChange={(value) => {
-                  if (value === "none" || value === "starttls" || value === "tls") setEncryption(value);
-                }}
-              />
+              <SettingsCard
+                title="Sender"
+                description="Who emails appear to come from."
+                footer={
+                  <span className="min-w-0 truncate">
+                    Recipients see{" "}
+                    <span className="font-medium text-foreground">
+                      {fromName.trim() || DEFAULT_SITE_NAME}
+                    </span>{" "}
+                    <span className="font-mono text-xs">&lt;{fromEmail.trim() || "noreply@example.com"}&gt;</span>
+                  </span>
+                }
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextInput
+                    label="From name"
+                    value={fromName}
+                    onChange={(event) => setFromName(event.currentTarget.value)}
+                  />
+                  <TextInput
+                    type="email"
+                    label="From address"
+                    withAsterisk={enabled}
+                    value={fromEmail}
+                    onChange={(event) => setFromEmail(event.currentTarget.value)}
+                    placeholder="noreply@example.com"
+                  />
+                </div>
+              </SettingsCard>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <TextInput
-                  label="Username"
-                  value={username}
-                  onChange={(event) => setUsername(event.currentTarget.value)}
-                  autoComplete="off"
-                />
-                <PasswordInput
-                  label="Password"
-                  description={smtp?.passwordSet ? "Leave blank to keep the saved password." : undefined}
-                  value={password}
-                  onChange={(event) => setPassword(event.currentTarget.value)}
-                  autoComplete="new-password"
-                  placeholder={smtp?.passwordSet ? "••••••••" : ""}
-                />
-                <TextInput
-                  label="From name"
-                  value={fromName}
-                  onChange={(event) => setFromName(event.currentTarget.value)}
-                />
-                <TextInput
-                  type="email"
-                  label="From address"
-                  required={enabled}
-                  value={fromEmail}
-                  onChange={(event) => setFromEmail(event.currentTarget.value)}
-                  placeholder="noreply@example.com"
-                />
-              </div>
+              <SettingsCard
+                title="Send a test email"
+                description="Uses the values above, including unsaved edits, so you can verify before saving."
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                  <TextInput
+                    className="flex-1"
+                    type="email"
+                    aria-label="Test recipient"
+                    value={testTo}
+                    onChange={(event) => setTestTo(event.currentTarget.value)}
+                    placeholder="you@example.com"
+                  />
+                  <Button
+                    type="button"
+                    variant="default"
+                    loading={testing}
+                    disabled={!testTo.trim() || !host.trim()}
+                    leftSection={<Send className="size-3.5" />}
+                    onClick={() => void onTest()}
+                  >
+                    Send test
+                  </Button>
+                </div>
+              </SettingsCard>
 
-              <SettingsActions>
-                <TextInput
-                  className="min-w-56 flex-1"
-                  type="email"
-                  label="Send a test to"
-                  value={testTo}
-                  onChange={(event) => setTestTo(event.currentTarget.value)}
-                  placeholder="you@example.com"
-                />
-                <Button
-                  type="button"
-                  variant="default"
-                  disabled={testing || !testTo.trim()}
-                  leftSection={<Send className="size-3.5" />}
-                  onClick={() => void onTest()}
-                >
-                  {testing ? "Sending…" : "Send test"}
-                </Button>
-                <Button type="submit" disabled={pending}>
-                  {pending ? "Saving…" : "Save mail"}
-                </Button>
-              </SettingsActions>
+              <button type="submit" hidden aria-hidden tabIndex={-1} />
             </form>
           ) : null}
 
           {section === "sso" ? (
-            <form className="space-y-4" onSubmit={(event) => void onSaveOidc(event)}>
-              <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">Enable OpenID Connect</p>
-                  <p className="text-xs text-muted-foreground">
-                    Shows a sign-in button on the login page when the issuer, client ID, and secret are set.
-                  </p>
-                </div>
-                <Switch
-                  checked={oidcEnabled}
-                  onChange={(event) => setOidcEnabled(event.currentTarget.checked)}
-                  aria-label="Enable OpenID Connect"
+            <form id={FORM_ID.sso} className="space-y-5" onSubmit={(event) => void onSaveOidc(event)} noValidate>
+              <SettingsCard
+                footer={
+                  oidc?.source === "env" ? (
+                    <EnvNote>OIDC variables in the server environment are in use. Saving here takes over.</EnvNote>
+                  ) : oidc?.envFallback && !oidcEnabled ? (
+                    <EnvNote>The server environment still has OIDC variables as a fallback.</EnvNote>
+                  ) : undefined
+                }
+              >
+                <SettingsToggleRow
+                  title="Enable single sign-on"
+                  description="Adds a sign-in button to the login page once the provider below is configured."
+                  control={
+                    <Switch
+                      checked={oidcEnabled}
+                      onChange={(event) => setOidcEnabled(event.currentTarget.checked)}
+                      aria-label="Enable single sign-on"
+                    />
+                  }
                 />
-              </div>
+                <div className="border-t border-border" />
+                <SettingsToggleRow
+                  title="Allow password sign-in"
+                  description="Turn off to require SSO for everyone after the first admin account exists."
+                  control={
+                    <Switch
+                      checked={oidcPasswordLogin}
+                      onChange={(event) => setOidcPasswordLogin(event.currentTarget.checked)}
+                      aria-label="Allow password sign-in"
+                    />
+                  }
+                />
+                {signInLocked ? (
+                  <p className="flex items-start gap-2 rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
+                    <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                    With both SSO and passwords off, nobody will be able to sign in.
+                  </p>
+                ) : null}
+              </SettingsCard>
 
-              <div className="rounded-xl border border-border bg-background px-4 py-3">
-                <p className="text-sm font-medium">Redirect URI</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Register this exact URL on the identity provider.
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-card px-3 py-2 font-mono text-xs">
+              <SettingsCard
+                title="Redirect URI"
+                description="Register this exact URL as an allowed callback on your identity provider."
+              >
+                <div className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs">
                     {oidc?.redirectUri || "—"}
                   </code>
                   <Button
@@ -679,94 +862,115 @@ export default function AdminSettingsPage() {
                     {copiedUri ? "Copied" : "Copy"}
                   </Button>
                 </div>
-              </div>
+              </SettingsCard>
 
-              <TextInput
-                label="Issuer URL"
-                required={oidcEnabled}
-                value={oidcIssuer}
-                onChange={(event) => setOidcIssuer(event.currentTarget.value)}
-                placeholder="https://auth.example.com/application/o/flutter/"
-                autoComplete="off"
-              />
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <TextInput
-                  label="Client ID"
-                  required={oidcEnabled}
-                  value={oidcClientId}
-                  onChange={(event) => setOidcClientId(event.currentTarget.value)}
-                  autoComplete="off"
-                />
-                <PasswordInput
-                  label="Client secret"
-                  description={oidc?.clientSecretSet ? "Leave blank to keep the saved secret." : undefined}
-                  value={oidcClientSecret}
-                  onChange={(event) => setOidcClientSecret(event.currentTarget.value)}
-                  autoComplete="new-password"
-                  placeholder={oidc?.clientSecretSet ? "••••••••" : ""}
-                />
-                <TextInput
-                  label="Button label"
-                  value={oidcButtonLabel}
-                  onChange={(event) => setOidcButtonLabel(event.currentTarget.value)}
-                  placeholder="Sign in with SSO"
-                />
+              <SettingsCard
+                title="Identity provider"
+                description="From your provider's OAuth / OIDC application (Authentik, Keycloak, Entra ID, Google…)."
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <TextInput
+                    className="flex-1"
+                    label="Issuer URL"
+                    withAsterisk={oidcEnabled}
+                    value={oidcIssuer}
+                    onChange={(event) => setOidcIssuer(event.currentTarget.value)}
+                    placeholder="https://auth.example.com/application/o/flutter/"
+                    autoComplete="off"
+                  />
+                  <Button
+                    type="button"
+                    variant="default"
+                    loading={oidcTesting}
+                    disabled={!oidcIssuer.trim()}
+                    onClick={() => void onTestOidc()}
+                  >
+                    Test discovery
+                  </Button>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextInput
+                    label="Client ID"
+                    withAsterisk={oidcEnabled}
+                    value={oidcClientId}
+                    onChange={(event) => setOidcClientId(event.currentTarget.value)}
+                    autoComplete="off"
+                  />
+                  <PasswordInput
+                    label="Client secret"
+                    description={oidc?.clientSecretSet ? "Leave blank to keep the saved secret." : undefined}
+                    value={oidcClientSecret}
+                    onChange={(event) => setOidcClientSecret(event.currentTarget.value)}
+                    autoComplete="new-password"
+                    placeholder={oidc?.clientSecretSet ? "••••••••" : ""}
+                  />
+                </div>
                 <TextInput
                   label="Scopes"
+                  description="Space-separated. The defaults work for most providers."
                   value={oidcScopes}
                   onChange={(event) => setOidcScopes(event.currentTarget.value)}
-                  placeholder="openid email profile"
+                  placeholder={DEFAULT_SSO_SCOPES}
                 />
-              </div>
+              </SettingsCard>
 
-              <TextInput
-                label="Allowed email domains"
-                description="Optional. Comma-separated, for example company.com. Leave blank to allow any domain."
-                value={oidcDomains}
-                onChange={(event) => setOidcDomains(event.currentTarget.value)}
-                placeholder="company.com"
-              />
-
-              <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">Allow password sign-in</p>
-                  <p className="text-xs text-muted-foreground">
-                    Turn this off to require SSO after the first admin account exists.
-                  </p>
+              <SettingsCard
+                title="Login page"
+                footer={
+                  <span className="flex flex-wrap items-center gap-2">
+                    Preview
+                    <span className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground">
+                      <KeyRound className="size-3.5" />
+                      {oidcButtonLabel.trim() || DEFAULT_SSO_LABEL}
+                    </span>
+                  </span>
+                }
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextInput
+                    label="Button label"
+                    value={oidcButtonLabel}
+                    onChange={(event) => setOidcButtonLabel(event.currentTarget.value)}
+                    placeholder={DEFAULT_SSO_LABEL}
+                  />
+                  <TextInput
+                    label="Allowed email domains"
+                    description="Comma-separated. Leave blank to allow any domain."
+                    value={oidcDomains}
+                    onChange={(event) => setOidcDomains(event.currentTarget.value)}
+                    placeholder="company.com"
+                  />
                 </div>
-                <Switch
-                  checked={oidcPasswordLogin}
-                  onChange={(event) => setOidcPasswordLogin(event.currentTarget.checked)}
-                  aria-label="Allow password sign-in"
-                />
-              </div>
+              </SettingsCard>
 
-              <SettingsActions>
-                <Button
-                  type="button"
-                  variant="default"
-                  disabled={oidcTesting || !oidcIssuer.trim()}
-                  onClick={() => void onTestOidc()}
-                >
-                  {oidcTesting ? "Testing…" : "Test discovery"}
-                </Button>
-                <Button type="submit" disabled={oidcPending} className="ml-auto">
-                  {oidcPending ? "Saving…" : "Save sign-in"}
-                </Button>
-              </SettingsActions>
+              <button type="submit" hidden aria-hidden tabIndex={-1} />
             </form>
           ) : null}
 
           {section === "telemetry" ? (
-            <TelemetrySection
-              telemetry={telemetry}
-              pending={telemetryPending}
-              onSave={onSaveTelemetry}
+            <TelemetrySection telemetry={telemetry} pending={telemetryPending} onSave={onSaveTelemetry} />
+          ) : null}
+
+          {formId ? (
+            <UnsavedChangesBar
+              visible={Boolean(dirtyBySection[section])}
+              formId={formId}
+              saving={saving}
+              onDiscard={() => discard(section)}
             />
           ) : null}
         </SettingsWorkspace>
       )}
     </AdminPage>
+  );
+}
+
+/** Amber note for settings currently coming from the server environment (.env). */
+function EnvNote({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex items-start gap-2 text-status-warn">
+      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+      <span>{children}</span>
+    </span>
   );
 }

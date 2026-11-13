@@ -41,94 +41,55 @@ export function HomeServersSkeleton({ count }: { count?: number }) {
   );
 }
 
-export function DashboardSkeleton({
-  servers,
-  nodes,
-}: {
-  servers?: number;
-  nodes?: number;
-}) {
-  const serverRows = Math.min(8, clampSkeletonCount(servers));
-  const nodeRows = Math.min(6, clampSkeletonCount(nodes, 1));
+/** Shared with the live Overview page so the header text never flickers on load. */
+export const OVERVIEW_DESCRIPTION = "Manage your users, infrastructure, servers, and panel settings.";
+
+/**
+ * Admin Overview skeleton: version banner, project link row, 3×3 section
+ * grid, then the attention/services pair, matching `admin/(dashboard)/view.tsx`.
+ */
+export function DashboardSkeleton() {
   return (
-    <AdminPage
-      title="Dashboard"
-      description="Fleet, nodes, eggs, and accounts on this panel."
-      actions={<ActionSkeleton />}
-    >
+    <AdminPage title="Overview" description={OVERVIEW_DESCRIPTION}>
       <SkeletonRoot className="space-y-6">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {skeletonKeys(5).map((index) => (
-            <SkeletonCard key={index} className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1 space-y-2">
-                  <Skeleton className="h-3 w-16" />
-                  <Skeleton className="h-8 w-12" />
-                  <Skeleton className="h-3 w-24" />
-                </div>
-                <Skeleton className="size-9" />
-              </div>
-            </SkeletonCard>
-          ))}
-        </div>
-        <div className="flex flex-wrap gap-2">
+        <SkeletonCard className="flex items-center gap-3 border-l-4 px-4 py-3.5">
+          <Skeleton className="size-5 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-3.5 w-64" />
+          </div>
+        </SkeletonCard>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {skeletonKeys(4).map((index) => (
-            <Skeleton key={index} className="h-8 w-24" />
+            <Skeleton key={index} className="h-10 w-full" />
           ))}
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          <SkeletonCard className="overflow-hidden lg:col-span-2">
-            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-3 w-12" />
-            </div>
-            {serverRows ? (
-              <ul className="divide-y divide-border">
-                {skeletonKeys(serverRows).map((index) => (
-                  <li key={index} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
-                    <Skeleton className="h-4 min-w-0 flex-1" />
-                    <Skeleton className="h-5 w-16 rounded-full" />
-                    <Skeleton className="h-3 w-40" />
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </SkeletonCard>
-          <div className="space-y-4">
-            <SkeletonCard className="overflow-hidden">
-              <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-                <Skeleton className="h-4 w-16" />
-                <Skeleton className="h-3 w-12" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {skeletonKeys(9).map((index) => (
+            <SkeletonCard key={index} className="space-y-2.5 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-5 w-7" />
               </div>
-              {nodeRows ? (
-                <ul className="divide-y divide-border">
-                  {skeletonKeys(nodeRows).map((index) => (
-                    <li key={index} className="flex items-center gap-3 px-4 py-3">
-                      <div className="min-w-0 flex-1 space-y-1.5">
-                        <Skeleton className="h-4 w-28" />
-                        <Skeleton className="h-3 w-36" />
-                      </div>
-                      <Skeleton className="h-5 w-14 rounded-full" />
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <Skeleton className="h-3.5 w-full max-w-60" />
+              <Skeleton className="h-3 w-20" />
             </SkeletonCard>
-            <SkeletonCard className="p-4">
-              <Skeleton className="h-3 w-16" />
+          ))}
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {skeletonKeys(2).map((index) => (
+            <SkeletonCard key={index} className="p-4">
+              <Skeleton className="h-3 w-24" />
               <ul className="mt-3 space-y-2.5">
-                {skeletonKeys(3).map((index) => (
-                  <li key={index} className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-2">
-                      <Skeleton className="h-4 w-20" />
-                      <Skeleton className="size-3.5 rounded-full" />
-                    </span>
+                {skeletonKeys(3).map((row) => (
+                  <li key={row} className="flex items-center justify-between gap-3">
+                    <Skeleton className="h-4 w-40" />
                     <Skeleton className="h-3 w-12" />
                   </li>
                 ))}
               </ul>
             </SkeletonCard>
-          </div>
+          ))}
         </div>
       </SkeletonRoot>
     </AdminPage>
@@ -237,41 +198,38 @@ export function AdminDatabaseHostsPageSkeleton({ count }: { count?: number }) {
   );
 }
 
+/** Matches app/admin/settings/workspace.tsx: grouped nav on the left, header + cards on the right. */
 export function SettingsWorkspaceSkeleton() {
   return (
-    <SkeletonRoot className="grid items-start gap-4 lg:grid-cols-[17.5rem_minmax(0,1fr)] lg:gap-6">
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-1 lg:gap-1.5">
-        {skeletonKeys(5).map((index) => (
-          <div
-            key={index}
-            className="flex min-h-[4.5rem] items-start gap-3 rounded-xl border border-border bg-background/60 px-3 py-3"
-          >
-            <Skeleton className="mt-0.5 size-9" />
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <Skeleton className="h-3 w-14" />
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-3 w-32" />
-            </div>
+    <SkeletonRoot className="grid items-start gap-6 lg:grid-cols-[13.5rem_minmax(0,1fr)] lg:gap-10">
+      <div className="flex gap-1 overflow-hidden lg:flex-col lg:gap-5">
+        {[1, 2, 2].map((count, group) => (
+          <div key={group} className="flex shrink-0 gap-1 lg:flex-col lg:gap-1">
+            <Skeleton className="mx-3 mb-1 hidden h-3 w-20 lg:block" />
+            {skeletonKeys(count).map((index) => (
+              <div key={index} className="flex items-center gap-2.5 px-3 py-2">
+                <Skeleton className="size-4" />
+                <Skeleton className="h-4 w-20" />
+              </div>
+            ))}
           </div>
         ))}
       </div>
-      <SkeletonCard className="overflow-hidden">
-        <div className="flex items-start gap-3 border-b border-border px-5 py-4 sm:px-6">
-          <Skeleton className="mt-0.5 size-9" />
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <Skeleton className="h-5 w-28" />
-            <Skeleton className="h-4 w-48" />
-          </div>
+      <div className="min-w-0 space-y-5">
+        <div className="space-y-1.5">
+          <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-4 w-72 max-w-full" />
         </div>
-        <div className="space-y-4 px-5 py-5 sm:px-6">
-          {skeletonKeys(4).map((index) => (
-            <div key={index} className="space-y-1.5">
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-10 w-full" />
+        {skeletonKeys(3).map((index) => (
+          <SkeletonCard key={index} className="space-y-4 px-5 py-5 sm:px-6">
+            <div className="space-y-1.5">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-64 max-w-full" />
             </div>
-          ))}
-        </div>
-      </SkeletonCard>
+            <Skeleton className="h-9 w-full" />
+          </SkeletonCard>
+        ))}
+      </div>
     </SkeletonRoot>
   );
 }
@@ -279,9 +237,9 @@ export function SettingsWorkspaceSkeleton() {
 export function SettingsSkeleton() {
   return (
     <AdminPage
-      className="max-w-7xl"
+      className="max-w-6xl"
       title="Settings"
-      description="Identity, updates, mail, sign-in, and telemetry."
+      description="Manage your panel's identity, sign-in, email delivery, and updates."
     >
       <SettingsWorkspaceSkeleton />
     </AdminPage>
@@ -386,5 +344,34 @@ export function NodeDetailSkeleton() {
         </div>
       </SkeletonCard>
     </div>
+  );
+}
+
+/** Admin → API Keys: header action, usage hint, then a few key rows. */
+export function AdminApiKeysPageSkeleton() {
+  return (
+    <AdminPage
+      title="API Keys"
+      description="Application keys give scripts, bots, and billing systems full or scoped access to the admin API."
+      actions={<ActionSkeleton className="h-10 w-32" />}
+    >
+      <SkeletonRoot className="space-y-6">
+        <SkeletonCard className="p-4">
+          <Skeleton className="h-4 w-full max-w-md" />
+        </SkeletonCard>
+        <SkeletonCard className="divide-y divide-border overflow-hidden">
+          {skeletonKeys(3).map((index) => (
+            <div key={index} className="flex items-start justify-between gap-3 px-5 py-4">
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-64" />
+              </div>
+              <Skeleton className="h-8 w-20" />
+            </div>
+          ))}
+        </SkeletonCard>
+      </SkeletonRoot>
+    </AdminPage>
   );
 }

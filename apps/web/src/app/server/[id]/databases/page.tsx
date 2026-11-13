@@ -138,7 +138,7 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
       setOpen(false);
       setName("");
       setRemote("%");
-      toast("Database created", "info");
+      toast("Database created", "success");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create database");
@@ -160,7 +160,7 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
     setPending(true);
     try {
       await api(`/api/v1/client/servers/${id}/databases/${row.id}/rotate`, { method: "POST" });
-      toast("Password rotated", "info");
+      toast("Password rotated", "success");
       await load();
       setRevealed((current) => ({ ...current, [row.id]: true }));
     } catch (err) {
@@ -183,7 +183,7 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
     setPending(true);
     try {
       await api(`/api/v1/client/servers/${id}/databases/${row.id}`, { method: "DELETE" });
-      toast("Database deleted", "info");
+      toast("Database deleted", "success");
       await load();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Delete failed");

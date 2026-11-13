@@ -3,23 +3,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  BookOpen,
   Box,
   CircleHelp,
+  Code,
   Cpu,
+  Database,
+  KeyRound,
+  LifeBuoy,
+  Mail,
   MapPin,
-  Plus,
+  ScrollText,
   Server,
   Settings,
   SquareArrowOutUpRight,
-  Upload,
   Users,
+  type LucideIcon,
 } from "lucide-react";
 import { Popover } from "@mantine/core";
 import { AdminError, AdminPage } from "@/components/admin-table";
-import { DashboardSkeleton } from "@/components/skeletons";
+import { DashboardSkeleton, OVERVIEW_DESCRIPTION } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
-import { statusMeta, statusPillClass } from "@/components/status";
-import { Badge, ButtonLink, Card } from "@/components/ui";
+import { Badge, Card, buttonClass } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
@@ -27,6 +32,7 @@ import type { ServerRecord } from "@/lib/types";
 import type { PublicUser } from "@flutter-software/shared";
 import type { LocationRecord } from "../locations/location-form";
 import type { NestRecord } from "../nests/nest-form";
+import { VersionBanner } from "./version-banner";
 
 type HealthCheck = { ok: boolean; latencyMs?: number };
 type Health = {
@@ -43,12 +49,6 @@ type NodeRow = {
   online: boolean;
   maintenanceMode?: boolean;
   serverCount?: number;
-};
-
-type UpdateStatus = {
-  version: string;
-  updateAvailable: boolean;
-  latest: { message: string; shortSha: string };
 };
 
 type ServiceKind = "ORM" | "Service";
@@ -80,19 +80,40 @@ const HEALTH_META: Record<
   },
 };
 
-export default function AdminDashboardPage({
-  skeletonServers,
-  skeletonNodes,
-}: {
-  skeletonServers?: number;
-  skeletonNodes?: number;
-}) {
+/** External project links shown as the button row under the version banner. */
+const PROJECT_REPO = "https://github.com/Flutter-Software/Flutter-Panel";
+const PROJECT_LINKS: { label: string; href: string; icon: LucideIcon }[] = [
+  { label: "Documentation", href: "https://docs.flutter.software", icon: BookOpen },
+  { label: "GitHub", href: PROJECT_REPO, icon: Code },
+  { label: "Report an issue", href: `${PROJECT_REPO}/issues/new`, icon: LifeBuoy },
+  { label: "Changelog", href: `${PROJECT_REPO}/blob/main/CHANGELOG.md`, icon: ScrollText },
+];
+
+/** One tile in the Overview grid: an admin section plus an optional live figure. */
+type SectionTile = {
+  title: string;
+  description: string;
+  href: string;
+  icon: LucideIcon;
+  /** Live count shown top-right; omitted for settings tiles. */
+  count?: number;
+  /** One-line live summary pinned to the bottom of the tile (e.g. "3 running"). */
+  hint?: string;
+  /** API path to warm on hover so the destination page opens instantly. */
+  prefetch?: string;
+};
+
+type Alert = { href: string; label: string; tone: string; dot: string };
+
+export default function AdminDashboardPage() {
   const users = useQuery<{ data: { users: PublicUser[] } }>("/api/v1/admin/users");
   const locations = useQuery<{ data: { locations: LocationRecord[] } }>("/api/v1/admin/locations");
   const nodes = useQuery<{ data: { nodes: NodeRow[] } }>("/api/v1/admin/nodes");
   const servers = useQuery<{ data: { servers: ServerRecord[] } }>("/api/v1/admin/servers");
   const nests = useQuery<{ data: { nests: NestRecord[] } }>("/api/v1/admin/nests");
-  const updates = useQuery<{ data: UpdateStatus }>("/api/v1/admin/settings/update");
+  // Database hosts only feed one tile's count, so they never hold up the page.
+  const dbHosts = useQuery<{ data: { hosts: unknown[] } }>("/api/v1/admin/database-hosts");
+  const apiKeys = useQuery<{ data: { keys: unknown[] } }>("/api/v1/admin/api-keys");
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
@@ -101,6 +122,8 @@ export default function AdminDashboardPage({
   const nestRows = nests.data?.data.nests ?? [];
   const locationRows = locations.data?.data.locations ?? [];
   const userRows = users.data?.data.users ?? [];
+  const hostRows = dbHosts.data?.data.hosts;
+  const apiKeyRows = apiKeys.data?.data.keys;
 
   useLiveReload(servers.reload, 8000);
   useLiveReload(nodes.reload, 8000);
@@ -132,6 +155,7 @@ export default function AdminDashboardPage({
   const offlineNodes = nodeRows.filter((row) => !row.online);
   const eggCount = nestRows.reduce((sum, nest) => sum + (nest.eggCount ?? nest.eggs?.length ?? 0), 0);
   const adminCount = userRows.filter((row) => row.role === "admin").length;
+  const assignedNodes = locationRows.reduce((sum, row) => sum + (row.nodeCount ?? 0), 0);
   const loadError = servers.error ?? nodes.error ?? locations.error ?? users.error ?? nests.error;
   const loading =
     (!servers.data && !servers.error) ||
@@ -140,21 +164,24 @@ export default function AdminDashboardPage({
     (!users.data && !users.error) ||
     (!nests.data && !nests.error);
 
-  const alerts = [
+  const alerts: Alert[] = [
     ...offlineNodes.map((node) => ({
       href: `/admin/nodes/${node.id}`,
       label: `${node.name} is offline`,
       tone: "text-status-offline",
+      dot: "bg-status-offline",
     })),
     ...maintenanceNodes.map((node) => ({
       href: `/admin/nodes/${node.id}/settings`,
       label: `${node.name} is in maintenance`,
       tone: "text-status-warn",
+      dot: "bg-status-warn",
     })),
     ...installFailed.map((server) => ({
       href: `/admin/servers/${server.id}`,
       label: `${server.name} failed to install`,
       tone: "text-status-error",
+      dot: "bg-status-error",
     })),
     ...serverRows
       .filter((row) => row.status === "installing")
@@ -162,46 +189,89 @@ export default function AdminDashboardPage({
         href: `/admin/servers/${server.id}`,
         label: `${server.name} is installing`,
         tone: "text-status-info",
+        dot: "bg-status-info",
       })),
   ];
 
-  const stats = [
+  // Grid order follows the setup flow: accounts → where machines live →
+  // machines → workloads → templates, then the most-used settings panes.
+  const tiles: SectionTile[] = [
     {
-      label: "Servers",
-      value: serverRows.length,
-      href: "/admin/servers",
-      icon: Server,
-      hint: serverRows.length ? `${running} running` : "Create a server",
-    },
-    {
-      label: "Nodes",
-      value: nodeRows.length,
-      href: "/admin/nodes",
-      icon: Cpu,
-      hint: nodeRows.length ? `${onlineNodes} online` : "Add a machine",
-    },
-    {
-      label: "Locations",
-      value: locationRows.length,
-      href: "/admin/locations",
-      icon: MapPin,
-      hint: locationRows.length
-        ? `${locationRows.reduce((sum, row) => sum + (row.nodeCount ?? 0), 0)} nodes`
-        : "Group your nodes",
-    },
-    {
-      label: "Nests",
-      value: nestRows.length,
-      href: "/admin/nests",
-      icon: Box,
-      hint: nestRows.length ? `${eggCount} egg${eggCount === 1 ? "" : "s"}` : "Import or create eggs",
-    },
-    {
-      label: "Users",
-      value: userRows.length,
+      title: "Users",
+      description: "Create, edit, and remove user accounts.",
       href: "/admin/users",
       icon: Users,
+      count: userRows.length,
       hint: userRows.length ? `${adminCount} admin${adminCount === 1 ? "" : "s"}` : "Invite an account",
+      prefetch: "/api/v1/admin/users",
+    },
+    {
+      title: "Locations",
+      description: "Group nodes into physical locations.",
+      href: "/admin/locations",
+      icon: MapPin,
+      count: locationRows.length,
+      hint: locationRows.length
+        ? `${assignedNodes} node${assignedNodes === 1 ? "" : "s"} assigned`
+        : "Group your nodes",
+      prefetch: "/api/v1/admin/locations",
+    },
+    {
+      title: "Nodes",
+      description: "Manage daemon machines and their allocations.",
+      href: "/admin/nodes",
+      icon: Cpu,
+      count: nodeRows.length,
+      hint: nodeRows.length ? `${onlineNodes} of ${nodeRows.length} online` : "Add a machine",
+      prefetch: "/api/v1/admin/nodes",
+    },
+    {
+      title: "Servers",
+      description: "Provision and manage game servers.",
+      href: "/admin/servers",
+      icon: Server,
+      count: serverRows.length,
+      hint: serverRows.length ? `${running} running` : "Create a server",
+      prefetch: "/api/v1/admin/servers",
+    },
+    {
+      title: "Database Hosts",
+      description: "Configure MySQL hosts for server databases.",
+      href: "/admin/database-hosts",
+      icon: Database,
+      count: hostRows?.length,
+      hint: hostRows && hostRows.length === 0 ? "Add a host" : undefined,
+      prefetch: "/api/v1/admin/database-hosts",
+    },
+    {
+      title: "Nests & Eggs",
+      description: "Manage server templates and their variables.",
+      href: "/admin/nests",
+      icon: Box,
+      count: nestRows.length,
+      hint: nestRows.length ? `${eggCount} egg${eggCount === 1 ? "" : "s"}` : "Import or create eggs",
+      prefetch: "/api/v1/admin/nests",
+    },
+    {
+      title: "API Keys",
+      description: "Issue application keys for billing systems, bots, and scripts.",
+      href: "/admin/api-keys",
+      icon: KeyRound,
+      count: apiKeyRows?.length,
+      hint: apiKeyRows && apiKeyRows.length === 0 ? "Create a key" : undefined,
+      prefetch: "/api/v1/admin/api-keys",
+    },
+    {
+      title: "Settings",
+      description: "Branding, updates, and telemetry.",
+      href: "/admin/settings",
+      icon: Settings,
+    },
+    {
+      title: "Mail & Sign-in",
+      description: "SMTP delivery and single sign-on providers.",
+      href: "/admin/settings#mail",
+      icon: Mail,
     },
   ];
 
@@ -236,224 +306,134 @@ export default function AdminDashboardPage({
   }
 
   if (loading) {
-    return <DashboardSkeleton servers={skeletonServers} nodes={skeletonNodes} />;
+    return <DashboardSkeleton />;
   }
 
   return (
-    <AdminPage
-      title="Dashboard"
-      description="Fleet, nodes, eggs, and accounts on this panel."
-      actions={
-        <ButtonLink href="/admin/servers/new">
-          <Plus className="size-4" />
-          New server
-        </ButtonLink>
-      }
-    >
+    <AdminPage title="Overview" description={OVERVIEW_DESCRIPTION}>
       <AdminError message={loadError} />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {stats.map((stat) => {
-              const Icon = stat.icon;
-              return (
-                <Link key={stat.label} href={stat.href}>
-                  <Card className="p-4 transition-colors hover:border-primary/40">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          {stat.label}
-                        </p>
-                        <p className="mt-2 text-2xl font-semibold tabular-nums">{stat.value}</p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">{stat.hint}</p>
-                      </div>
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                        <Icon className="size-4" />
-                      </span>
-                    </div>
-                  </Card>
-                </Link>
-              );
-            })}
-          </div>
+      <VersionBanner />
 
-          <div className="flex flex-wrap gap-2">
-            <ButtonLink href="/admin/nodes/new" variant="secondary" size="sm">
-              <Plus className="size-3.5" />
-              New node
-            </ButtonLink>
-            <ButtonLink href="/admin/nests/eggs/import" variant="secondary" size="sm">
-              <Upload className="size-3.5" />
-              Import egg
-            </ButtonLink>
-            <ButtonLink href="/admin/users/new" variant="secondary" size="sm">
-              <Plus className="size-3.5" />
-              New user
-            </ButtonLink>
-            <ButtonLink href="/admin/settings" variant="secondary" size="sm">
-              <Settings className="size-3.5" />
-              Settings
-            </ButtonLink>
-          </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {PROJECT_LINKS.map((link) => {
+          const Icon = link.icon;
+          return (
+            <a
+              key={link.label}
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonClass({ variant: "secondary", className: "w-full justify-center" })}
+            >
+              <Icon className="size-4" />
+              {link.label}
+            </a>
+          );
+        })}
+      </div>
 
-          {updates.data?.data.updateAvailable ? (
-            <Link href="/admin/settings#updates">
-              <Card className="p-4 transition-colors hover:border-primary/40">
-                <p className="text-sm font-semibold">Panel update available</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {updates.data.data.latest.message || "A newer build is on GitHub."} Open Settings to review
-                  and apply it.
-                </p>
-              </Card>
-            </Link>
-          ) : null}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {tiles.map((tile) => (
+          <SectionCard key={tile.title} tile={tile} />
+        ))}
+      </div>
 
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card className="p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Needs attention
+          </p>
           {alerts.length ? (
-            <Card className="p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Needs attention
-              </p>
-              <ul className="mt-3 space-y-2">
-                {alerts.slice(0, 8).map((alert) => (
-                  <li key={`${alert.href}-${alert.label}`}>
-                    <Link href={alert.href} className={cn("text-sm hover:underline", alert.tone)}>
-                      {alert.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          ) : null}
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Card className="overflow-hidden lg:col-span-2">
-              <SectionHead title="Servers" href="/admin/servers" count={serverRows.length} />
-              {serverRows.length === 0 ? (
-                <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-                  Create a node and allocations first, then place a game server.
-                </p>
-              ) : (
-                <ul className="divide-y divide-border">
-                  {serverRows.slice(0, 8).map((server) => {
-                    const meta = statusMeta(server.status);
-                    return (
-                      <li key={server.id}>
-                        <Link
-                          href={`/admin/servers/${server.id}`}
-                          onMouseEnter={() => prefetchQuery(`/api/v1/admin/servers/${server.id}`)}
-                          className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-muted/40"
-                        >
-                          <span className="min-w-0 flex-1 font-medium">{server.name}</span>
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
-                              statusPillClass(server.status),
-                            )}
-                          >
-                            <span className={cn("size-1.5 rounded-full", meta.bar)} />
-                            {meta.label}
-                          </span>
-                          <span className="w-full text-xs text-muted-foreground sm:w-auto">
-                            {server.egg}
-                            {server.node ? ` · ${server.node}` : ""}
-                            {server.allocation ? ` · ${server.allocation}` : ""}
-                          </span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {serverRows.length > 8 ? (
-                <p className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
-                  Showing 8 of {serverRows.length}.{" "}
-                  <Link href="/admin/servers" className="text-foreground hover:underline">
-                    View all
+            <ul className="mt-3 space-y-2">
+              {alerts.slice(0, 8).map((alert) => (
+                <li key={`${alert.href}-${alert.label}`} className="flex min-w-0 items-center gap-2">
+                  <span className={cn("size-1.5 shrink-0 rounded-full", alert.dot)} />
+                  <Link href={alert.href} className={cn("truncate text-sm hover:underline", alert.tone)}>
+                    {alert.label}
                   </Link>
-                </p>
+                </li>
+              ))}
+              {alerts.length > 8 ? (
+                <li className="text-xs text-muted-foreground">and {alerts.length - 8} more</li>
               ) : null}
-            </Card>
+            </ul>
+          ) : (
+            <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="size-1.5 shrink-0 rounded-full bg-status-running" />
+              All nodes are online and no servers need action.
+            </p>
+          )}
+        </Card>
 
-            <div className="space-y-4">
-              <Card className="overflow-hidden">
-                <SectionHead title="Nodes" href="/admin/nodes" count={nodeRows.length} />
-                {nodeRows.length === 0 ? (
-                  <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-                    Create a location first, then add a machine to run the daemon.
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-border">
-                    {nodeRows.slice(0, 6).map((node) => (
-                      <li key={node.id}>
-                        <Link
-                          href={`/admin/nodes/${node.id}`}
-                          className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40"
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate font-medium">{node.name}</span>
-                            <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                              {node.fqdn}
-                              {node.location ? ` · ${node.location}` : ""}
-                            </span>
-                          </span>
-                          <span
-                            className={cn(
-                              "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                              node.maintenanceMode
-                                ? "bg-status-warn/15 text-status-warn"
-                                : node.online
-                                  ? "bg-status-running/15 text-status-running"
-                                  : "bg-status-offline/15 text-status-offline",
-                            )}
-                          >
-                            {node.maintenanceMode ? "Maintenance" : node.online ? "Online" : "Offline"}
-                          </span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Card>
-
-              <Card className="p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Services
-                </p>
-                {healthError ? (
-                  <p className="mt-3 text-sm text-destructive">{healthError}</p>
-                ) : !health ? (
-                  <p className="mt-3 text-sm text-muted-foreground">Checking…</p>
-                ) : (
-                  <ul className="mt-3 space-y-2.5">
-                    {Object.entries(health.checks).map(([name, check]) => {
-                      const meta = HEALTH_META[name];
-                      const label = meta?.label ?? name;
-                      return (
-                        <li key={name} className="flex items-center justify-between gap-3 text-sm">
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span
-                              className={cn(
-                                "size-1.5 shrink-0 rounded-full",
-                                check.ok ? "bg-status-running" : "bg-status-error",
-                              )}
-                            />
-                            <span className="truncate">{label}</span>
-                            {meta ? <ServiceHint meta={meta} /> : null}
-                          </span>
-                          <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
-                            {check.ok
-                              ? check.latencyMs != null
-                                ? `${check.latencyMs} ms`
-                                : "Up"
-                              : "Down"}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </Card>
-            </div>
-          </div>
+        <Card className="p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Services
+          </p>
+          {healthError ? (
+            <p className="mt-3 text-sm text-destructive">{healthError}</p>
+          ) : !health ? (
+            <p className="mt-3 text-sm text-muted-foreground">Checking…</p>
+          ) : (
+            <ul className="mt-3 space-y-2.5">
+              {Object.entries(health.checks).map(([name, check]) => {
+                const meta = HEALTH_META[name];
+                const label = meta?.label ?? name;
+                return (
+                  <li key={name} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          check.ok ? "bg-status-running" : "bg-status-error",
+                        )}
+                      />
+                      <span className="truncate">{label}</span>
+                      {meta ? <ServiceHint meta={meta} /> : null}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
+                      {check.ok
+                        ? check.latencyMs != null
+                          ? `${check.latencyMs} ms`
+                          : "Up"
+                        : "Down"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      </div>
     </AdminPage>
+  );
+}
+
+/** Section tile: icon, title and count on top, description, live hint pinned to the bottom. */
+function SectionCard({ tile }: { tile: SectionTile }) {
+  const Icon = tile.icon;
+  const prefetch = tile.prefetch;
+  return (
+    <Link
+      href={tile.href}
+      onMouseEnter={prefetch ? () => prefetchQuery(prefetch) : undefined}
+      className="group block h-full"
+    >
+      <Card className="flex h-full flex-col p-5 transition-colors group-hover:border-primary/40 group-hover:bg-muted/30">
+        <div className="flex items-center justify-between gap-3">
+          <p className="flex min-w-0 items-center gap-2 font-semibold">
+            <Icon className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+            <span className="truncate">{tile.title}</span>
+          </p>
+          {tile.count != null ? (
+            <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+              {tile.count}
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1.5 text-sm text-muted-foreground">{tile.description}</p>
+        {tile.hint ? <p className="mt-auto pt-3 text-xs text-muted-foreground/80">{tile.hint}</p> : null}
+      </Card>
+    </Link>
   );
 }
 
@@ -550,19 +530,5 @@ function ServiceHint({
         </div>
       </Popover.Dropdown>
     </Popover>
-  );
-}
-
-function SectionHead({ title, href, count }: { title: string; href: string; count: number }) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-      <p className="text-sm font-semibold">
-        {title}
-        <span className="ml-2 text-xs font-normal text-muted-foreground">{count}</span>
-      </p>
-      <Link href={href} className="text-xs text-muted-foreground hover:text-foreground">
-        View all
-      </Link>
-    </div>
   );
 }

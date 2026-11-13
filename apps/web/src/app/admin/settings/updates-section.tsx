@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@mantine/core";
 import { AdminSection } from "@/components/admin-create";
+import { Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
 import {
@@ -92,58 +93,67 @@ export function UpdatesSection({ framed = true }: { framed?: boolean }) {
       : "This panel is up to date.";
 
   const body = (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {error ? (
-        <p className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-destructive">{error}</p>
+        <p className="rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
+          {error}
+        </p>
       ) : null}
 
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="grid min-w-0 flex-1 gap-3 text-sm sm:grid-cols-2">
-          <div>
-            <p className="text-xs text-muted-foreground">This install</p>
-            <p className="mt-1 font-medium">v{status?.version ?? "…"}</p>
-            <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-              {status?.currentShortSha || "unknown revision"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">GitHub {status?.ref ?? "main"}</p>
-            <p className="mt-1 font-medium">{status?.latest.message || "Checking…"}</p>
-            <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-              {status?.latest.shortSha || "—"}
-              {status?.latest.date ? ` · ${shortDate(status.latest.date)}` : ""}
-            </p>
-          </div>
+      <Card className="overflow-hidden">
+        {/* Side-by-side "installed vs latest" comparison, the core question this page answers. */}
+        <div className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+          <VersionTile
+            label="Installed"
+            primary={`v${status?.version ?? "…"}`}
+            secondary={status?.currentShortSha || "unknown revision"}
+          />
+          <VersionTile
+            label={`Latest on ${status?.ref ?? "main"}`}
+            primary={status?.latest.message || (checking ? "Checking…" : "—")}
+            secondary={
+              `${status?.latest.shortSha || "—"}${status?.latest.date ? ` · ${shortDate(status.latest.date)}` : ""}`
+            }
+            highlight={Boolean(status?.updateAvailable)}
+          />
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/25 px-5 py-3 sm:px-6">
           {hasLog && !running ? (
             <Button
               type="button"
-              variant="default"
+              variant="subtle"
+              color="gray"
               onClick={() => setConsoleIntent(wizard ? "logs" : "wizard")}
             >
               {wizard ? "View last log" : "Start another update"}
             </Button>
           ) : null}
-          <Button type="button" variant="default" disabled={checking || running} onClick={() => void onCheck()}>
-            {checking ? "Checking…" : "Check for updates"}
+          <Button
+            type="button"
+            variant="default"
+            loading={checking}
+            disabled={running}
+            leftSection={<RefreshCw className="size-3.5" />}
+            onClick={() => void onCheck()}
+          >
+            Check for updates
           </Button>
         </div>
-      </div>
+      </Card>
 
       {status?.job.state === "ok" && !wizard ? (
-        <p className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
+        <p className="rounded-lg border border-status-running/30 bg-status-running/10 px-3 py-2 text-sm">
           Update finished. Reload this page after the panel comes back. If services did not restart
           automatically, run <span className="font-mono">sudo /usr/local/sbin/flutter-restart</span>.
         </p>
       ) : null}
       {status?.job.state === "failed" && status.job.error && !wizard ? (
-        <p className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-destructive">
+        <p className="rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
           {status.job.error}
         </p>
       ) : null}
 
-      <div className="-mx-5 -mb-5 overflow-hidden border-t border-border sm:-mx-6 sm:-mb-6">
+      <Card className="overflow-hidden">
         <UpdateConsole
           running={running}
           job={job}
@@ -152,7 +162,7 @@ export function UpdatesSection({ framed = true }: { framed?: boolean }) {
           starting={starting}
           onStart={(options) => void onStart(options)}
         />
-      </div>
+      </Card>
     </div>
   );
 
@@ -161,5 +171,34 @@ export function UpdatesSection({ framed = true }: { framed?: boolean }) {
     <AdminSection icon={<RefreshCw className="size-4" />} title="Updates" description={description}>
       {body}
     </AdminSection>
+  );
+}
+
+function VersionTile({
+  label,
+  primary,
+  secondary,
+  highlight = false,
+}: {
+  label: string;
+  primary: string;
+  secondary: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="min-w-0 px-5 py-4 sm:px-6">
+      <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        {label}
+        {highlight ? (
+          <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-semibold text-status-warn">
+            NEW
+          </span>
+        ) : null}
+      </p>
+      <p className="mt-1.5 truncate font-semibold" title={primary}>
+        {primary}
+      </p>
+      <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{secondary}</p>
+    </div>
   );
 }

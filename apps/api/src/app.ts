@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { requestId } from "hono/request-id";
 import { createNodeWebSocket } from "@hono/node-ws";
@@ -703,6 +703,30 @@ export function createApp() {
   app.post("/admin/settings/oidc/test", async (c) => {
     await requireAdmin(c);
     return c.json({ data: await oidc.testOidcDiscovery(await c.req.json()) });
+  });
+  // Application (admin) API keys. These deliberately require a signed-in
+  // browser session rather than requireAdmin(): an application key must never
+  // be able to mint or revoke other keys, and "/admin/api-keys" is not covered
+  // by any application scope, so requireAdmin() would let any key through.
+  const requireAdminSession = async (c: Context) => {
+    const session = await requireSession(c);
+    if (session.user.role !== "admin") throw FlutterError.forbidden();
+    return session;
+  };
+  app.get("/admin/api-keys", async (c) => {
+    await requireAdminSession(c);
+    return c.json({ data: await apiKeys.listApplicationKeys() });
+  });
+  app.post("/admin/api-keys", async (c) => {
+    const session = await requireAdminSession(c);
+    return c.json(
+      { data: await apiKeys.createApplicationKey(session.user, await c.req.json(), activity.requestIp(c)) },
+      201,
+    );
+  });
+  app.delete("/admin/api-keys/:id", async (c) => {
+    await requireAdminSession(c);
+    return c.json({ data: await apiKeys.revokeApplicationKey(c.req.param("id")) });
   });
   app.get("/admin/users", async (c) => {
     await requireAdmin(c);

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.73
+
+### Admin
+
+The admin dashboard is now called Overview. A colored card at the top shows whether the panel is up to date, has an update waiting, is installing one, or could not check, and links to Settings → Updates. Below it are links to the documentation, GitHub, issue tracker, and changelog, then a grid of cards for each admin area with a live count and a one-line status. Needs attention and Services sit at the bottom.
+
+### API keys
+
+Admin → API Keys lists every application key on the panel with its owner, access, last use, and expiry, and can revoke any of them. New keys can have full access or per-resource read or read-and-write access, and the key is shown once with a ready-to-run `curl` example. Creating and revoking keys here requires a signed-in browser session, so an API key cannot create other keys.
+
+### Settings
+
+Settings has a grouped sidebar (General, Authentication, System) and splits each section into focused cards. Changes are saved from a floating bar that appears once something is edited, with Discard and Save (or Ctrl/⌘+S). Leaving a section or the page with unsaved edits asks first. Branding previews the panel name, logo, and console tag as you type, and the logo accepts drag and drop. Email moves the port to match the chosen encryption and shows how the sender will appear. Sign-in warns when both SSO and passwords are off. Telemetry saves as soon as the switch is flipped.
+
+### Notifications
+
+Toasts have an icon per type (success, error, info, warning), a countdown bar, and pause while hovered. The same message raised again shows a counter instead of stacking. Errors stay on screen longer.
+
 ## 0.2.72
 
 ### Stability

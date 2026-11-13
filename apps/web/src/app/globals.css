@@ -337,22 +337,32 @@ main:has([data-hide-page-scrollbar])::-webkit-scrollbar {
 @keyframes flutter-toast-in {
   from {
     opacity: 0;
-    transform: translateY(12px) scale(0.96);
+    transform: translateX(24px) scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateX(0) scale(1);
   }
 }
 
 @keyframes flutter-toast-out {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateX(0) scale(1);
   }
   to {
     opacity: 0;
-    transform: translateY(8px) scale(0.96);
+    transform: translateX(24px) scale(0.97);
+  }
+}
+
+/* Countdown bar along the bottom of each toast; its end dismisses the toast. */
+@keyframes flutter-toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
   }
 }
 
@@ -361,8 +371,28 @@ main:has([data-hide-page-scrollbar])::-webkit-scrollbar {
 }
 
 .flutter-toast-out {
-  animation: flutter-toast-out 220ms ease-in both;
+  animation: flutter-toast-out 200ms ease-in both;
   pointer-events: none;
+}
+
+.flutter-toast-progress {
+  transform-origin: left;
+  animation-name: flutter-toast-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+/* Reading a toast (hover or keyboard focus anywhere in the stack) pauses every countdown. */
+.flutter-toast-stack:hover .flutter-toast-progress,
+.flutter-toast-stack:focus-within .flutter-toast-progress {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flutter-toast-in,
+  .flutter-toast-out {
+    animation-duration: 1ms;
+  }
 }
 
 @keyframes flutter-modal-backdrop-in {

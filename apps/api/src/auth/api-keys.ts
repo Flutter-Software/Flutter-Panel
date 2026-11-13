@@ -172,3 +172,46 @@ export async function destroyApiKey(userId: string, id: string) {
   if (!result.deletedCount) throw FlutterError.notFound("API key not found");
   return { ok: true };
 }
+
+/* ------------------------------------------------------------------------- */
+/* Admin-area management of application keys                                 */
+/*                                                                           */
+/* The account page only shows the caller's own keys. The admin "API Keys"   */
+/* page needs the panel-wide picture: every application key, who owns it,    */
+/* and the ability to revoke any of them (e.g. after an admin leaves).        */
+/* ------------------------------------------------------------------------- */
+
+/** Every application key on the panel, newest first, with its owner's username. */
+export async function listApplicationKeys() {
+  const rows = await ApiKey.find({ kind: "application" }).sort({ createdAt: -1 });
+  const ownerIds = [...new Set(rows.map((row) => row.userId.toString()))];
+  const owners = await User.find({ _id: { $in: ownerIds } }, { username: 1 });
+  const usernameById = new Map(owners.map((row) => [row._id.toString(), row.username as string]));
+  return {
+    keys: rows.map((row) => {
+      const ownerId = row.userId.toString();
+      return {
+        ...publicKey(row),
+        owner: { id: ownerId, username: usernameById.get(ownerId) ?? null },
+      };
+    }),
+  };
+}
+
+/** Creates an application key owned by the calling admin. `kind` in the body is ignored. */
+export async function createApplicationKey(
+  user: { id: string; role: string },
+  body: unknown,
+  ip: string | null,
+) {
+  const input = body && typeof body === "object" ? body : {};
+  return createApiKey(user, { ...input, kind: "application" }, ip);
+}
+
+/** Revokes any admin's application key. Client (account) keys are out of scope here. */
+export async function revokeApplicationKey(id: string) {
+  if (!mongoose.isValidObjectId(id)) throw FlutterError.notFound("API key not found");
+  const result = await ApiKey.deleteOne({ _id: id, kind: "application" });
+  if (!result.deletedCount) throw FlutterError.notFound("API key not found");
+  return { ok: true };
+}

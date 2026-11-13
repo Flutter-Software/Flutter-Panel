@@ -232,7 +232,7 @@ export default function NetworkPage({ params }: { params: Promise<{ id: string }
     }
     try {
       await patch(row.id, { primary: true });
-      toast("Primary address updated", "info");
+      toast("Primary address updated", "success");
     } catch {
       /* toasted */
     }
