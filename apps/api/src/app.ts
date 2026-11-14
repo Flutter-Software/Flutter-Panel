@@ -34,6 +34,7 @@ import { startPanelLive } from "./panel-live";
 import { log } from "./log";
 import * as telemetry from "./telemetry";
 import * as extensions from "./extensions";
+import { idempotency } from "./idempotency";
 
 type Variables = {
   requestId: string;
@@ -102,6 +103,9 @@ export function createApp() {
       ),
     );
   });
+  // After CSRF + auth, so a replayed response is only ever served to a request
+  // that would have been allowed to run the handler itself.
+  app.use("*", idempotency);
 
   app.onError((error, c) => {
     const requestIdValue = c.get("requestId") ?? "unknown";

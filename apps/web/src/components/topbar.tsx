@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, LayoutDashboard, LogOut, Moon, Shield, Sun, UserRound } from "lucide-react";
+import { ChevronDown, LayoutDashboard, LogOut, Moon, Search, Shield, Sun, UserRound } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Wordmark } from "@/components/brand";
+import { CommandMenu } from "@/components/command-menu";
+import { Kbd, useModKeyLabel } from "@/components/kbd";
 import { useAuth } from "@/components/auth-provider";
 import { useSmoothTheme } from "@/components/theme-provider";
 import { UserAvatar } from "@/components/user-avatar";
@@ -26,6 +28,8 @@ export function Topbar() {
   const { resolvedTheme } = useTheme();
   const switchTheme = useSmoothTheme();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const modKey = useModKeyLabel();
   const menuRef = useRef<HTMLDivElement>(null);
   const inAdmin = pathname.startsWith("/admin");
   const inAccount = pathname.startsWith("/account");
@@ -57,6 +61,18 @@ export function Topbar() {
       </Link>
       <p className="hidden text-sm text-muted-foreground sm:block">{kicker}</p>
       <div className="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          className="mr-1 inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-background/60 px-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-56"
+          onClick={() => setCommandOpen(true)}
+          aria-label="Open command menu"
+          aria-keyshortcuts="Control+K Meta+K"
+        >
+          <Search className="size-4 shrink-0" />
+          <span className="hidden flex-1 text-left sm:block">Search…</span>
+          <Kbd className="hidden sm:inline-flex">{modKey}K</Kbd>
+        </button>
+        <CommandMenu open={commandOpen} onOpenChange={setCommandOpen} />
         <button
           type="button"
           className="inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

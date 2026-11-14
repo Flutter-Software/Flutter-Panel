@@ -3,22 +3,25 @@
 /**
  * Layout primitives for Admin → Settings.
  *
- * The page follows the common settings pattern used by Vercel, Linear,
- * GitHub and Stripe:
+ * Modelled on the settings screens of Pterodactyl, Pelican and most hosting
+ * control panels: a single row of tabs, then cards made of label/field rows.
  *
- *   ┌────────────┬──────────────────────────────────────────────┐
- *   │ GENERAL    │ Mail                              ● Active   │
- *   │  Branding  │ How the panel sends invites and resets.      │
- *   │ SYSTEM     │ ┌─ SettingsCard ───────────────────────────┐ │
- *   │  Updates • │ │ title / description / fields             │ │
- *   │  Telemetry │ ├──────────────────────────────────────────┤ │
- *   │ AUTH       │ │ footer (secondary actions)               │ │
- *   │  Mail      │ └──────────────────────────────────────────┘ │
- *   │  Sign-in   │          ╭ Unsaved changes  Discard  Save ╮  │
- *   └────────────┴──────────────────────────────────────────────┘
+ *   General   Authentication   Email   Updates   Telemetry
+ *   ───────────────────────────────────────────────────────
+ *   Email                                        ● Active
+ *   How the panel sends invites and password resets.
+ *   ┌─ SettingsCard ─────────────────────────────────────┐
+ *   │ Connection                                         │
+ *   ├────────────────────┬───────────────────────────────┤
+ *   │ Host               │ [ smtp.example.com ] [ 587 ]  │  ← SettingsRow
+ *   │ Your mail server.  │                               │
+ *   ├────────────────────┴───────────────────────────────┤
+ *   │ footer (hints, env notes)                          │
+ *   └────────────────────────────────────────────────────┘
+ *              ╭ Unsaved changes   Discard   Save ╮
  *
- * - A compact, grouped nav (horizontal scrolling tabs on mobile).
- * - Content split into focused cards instead of one long form.
+ * - Rows put the explanation on the left and the control on the right, so
+ *   every setting reads the same way. On phones they stack.
  * - No always-visible Save button: a floating bar appears once something
  *   changes, with Discard and Save (and Ctrl/⌘+S). Saving submits the
  *   section's <form> by id, so each section keeps its own submit handler.
@@ -30,22 +33,20 @@ import { cn } from "@/lib/cn";
 import { AdminError } from "@/components/admin-table";
 import { Card } from "@/components/ui";
 
-export const SETTINGS_SECTIONS = ["branding", "updates", "mail", "sso", "telemetry"] as const;
+export const SETTINGS_SECTIONS = ["branding", "sso", "mail", "updates", "telemetry"] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export type SettingsTone = "ok" | "warn" | "off" | "info";
 
-export type SettingsNavItem = {
+export type SettingsTab = {
   id: SettingsSection;
   label: string;
   icon: ReactNode;
-  /** Small status dot at the end of the row. */
+  /** Health of the section; drives the header badge and a small dot on the tab. */
   tone?: SettingsTone;
-  /** Short status text shown in the content header badge. */
+  /** Short status text shown in the section header badge. */
   status?: string;
 };
-
-export type SettingsNavGroup = { label: string; items: SettingsNavItem[] };
 
 const DOT: Record<SettingsTone, string> = {
   ok: "bg-status-running",
@@ -66,10 +67,11 @@ export function parseSettingsSection(value: string | null | undefined): Settings
   return null;
 }
 
+/** Tab bar + section header + content. */
 export function SettingsWorkspace({
   section,
   onSection,
-  groups,
+  tabs,
   title,
   description,
   error,
@@ -78,68 +80,64 @@ export function SettingsWorkspace({
 }: {
   section: SettingsSection;
   onSection: (id: SettingsSection) => void;
-  groups: SettingsNavGroup[];
+  tabs: SettingsTab[];
   title: string;
   description: string;
   error: string | null;
-  /** Sections with unsaved edits get a dot in the nav. */
+  /** Sections with unsaved edits get a dot on their tab. */
   dirtySections?: ReadonlySet<SettingsSection>;
   children: ReactNode;
 }) {
-  const active = groups.flatMap((group) => group.items).find((item) => item.id === section);
+  const active = tabs.find((tab) => tab.id === section);
 
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[13.5rem_minmax(0,1fr)] lg:gap-10">
-      <nav aria-label="Settings sections" className="lg:sticky lg:top-0">
-        {/* Mobile: one horizontally scrolling row of tabs. Desktop: grouped vertical list. */}
-        <div className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 lg:mx-0 lg:flex-col lg:gap-5 lg:overflow-visible lg:px-0 lg:pb-0">
-          {groups.map((group) => (
-            <div key={group.label} className="flex shrink-0 gap-1 lg:flex-col lg:gap-0.5">
-              <p className="hidden px-3 pb-1.5 text-[11px] font-semibold tracking-wider text-muted-foreground/80 uppercase lg:block">
-                {group.label}
-              </p>
-              {group.items.map((item) => {
-                const current = item.id === section;
-                const dirty = dirtySections?.has(item.id);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => onSection(item.id)}
-                    aria-current={current ? "page" : undefined}
-                    className={cn(
-                      "group flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/40",
-                      current
-                        ? "bg-muted font-medium text-foreground"
-                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "flex size-4 shrink-0 items-center justify-center transition-colors [&>svg]:size-4",
-                        current ? "text-primary" : "text-muted-foreground group-hover:text-foreground",
-                      )}
-                    >
-                      {item.icon}
-                    </span>
-                    <span className="flex-1 text-left">{item.label}</span>
-                    {dirty ? (
-                      <span className="size-1.5 shrink-0 rounded-full bg-primary" title="Unsaved changes" />
-                    ) : item.tone && item.tone !== "off" ? (
-                      <span className={cn("size-1.5 shrink-0 rounded-full", DOT[item.tone])} />
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+    <div className="space-y-6">
+      <nav aria-label="Settings sections" className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div role="tablist" className="flex min-w-max gap-1 border-b border-border">
+          {tabs.map((tab) => {
+            const current = tab.id === section;
+            const dirty = dirtySections?.has(tab.id);
+            // Only surface a dot when it means something: unsaved edits, or a warning.
+            const dot = dirty ? "bg-primary" : tab.tone === "warn" ? DOT.warn : null;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={current}
+                onClick={() => onSection(tab.id)}
+                className={cn(
+                  "group relative -mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap outline-none transition-colors focus-visible:bg-muted/50",
+                  current
+                    ? "border-primary font-medium text-foreground"
+                    : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex size-4 items-center justify-center [&>svg]:size-4",
+                    current ? "text-primary" : "text-muted-foreground group-hover:text-foreground",
+                  )}
+                >
+                  {tab.icon}
+                </span>
+                {tab.label}
+                {dot ? (
+                  <span
+                    className={cn("size-1.5 rounded-full", dot)}
+                    title={dirty ? "Unsaved changes" : tab.status}
+                  />
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </nav>
 
       <section aria-labelledby="settings-pane-title" className="min-w-0 space-y-5">
         <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
           <div className="min-w-0">
-            <h2 id="settings-pane-title" className="text-lg font-semibold tracking-tight">
+            <h2 id="settings-pane-title" className="text-base font-semibold tracking-tight">
               {title}
             </h2>
             <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">{description}</p>
@@ -167,38 +165,39 @@ export function StatusBadge({ tone, children }: { tone: SettingsTone; children: 
   );
 }
 
-/** One focused group of settings: header, body, optional footer strip. */
+/**
+ * A card of settings. Children are normally `SettingsRow` / `SettingsToggleRow`,
+ * which pad themselves and are separated by hairlines.
+ */
 export function SettingsCard({
   title,
   description,
   aside,
   footer,
   className,
-  bodyClassName,
   children,
 }: {
   title?: string;
   description?: ReactNode;
-  /** Right side of the header (a switch, a badge…). */
+  /** Right side of the header (a button, a badge…). */
   aside?: ReactNode;
-  /** Muted strip under the body for hints and secondary actions. */
+  /** Muted strip under the rows for hints and notes. */
   footer?: ReactNode;
   className?: string;
-  bodyClassName?: string;
   children?: ReactNode;
 }) {
   return (
     <Card className={cn("overflow-hidden", className)}>
       {title ? (
-        <div className={cn("flex items-start justify-between gap-4 px-5 pt-5 sm:px-6", !children && "pb-5")}>
+        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">{title}</h3>
-            {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+            {description ? <p className="mt-0.5 text-sm text-muted-foreground">{description}</p> : null}
           </div>
           {aside ? <div className="shrink-0">{aside}</div> : null}
         </div>
       ) : null}
-      {children ? <div className={cn("space-y-4 px-5 py-5 sm:px-6", bodyClassName)}>{children}</div> : null}
+      {children ? <div className="divide-y divide-border">{children}</div> : null}
       {footer ? (
         <div className="flex flex-wrap items-center gap-3 border-t border-border bg-muted/25 px-5 py-3 text-sm text-muted-foreground sm:px-6">
           {footer}
@@ -208,7 +207,38 @@ export function SettingsCard({
   );
 }
 
-/** A labelled on/off row: text on the left, control on the right. */
+/**
+ * One setting: label and help text on the left, the control on the right.
+ * Pass `htmlFor` with the control's `id` so clicking the label focuses it.
+ */
+export function SettingsRow({
+  label,
+  description,
+  htmlFor,
+  required = false,
+  children,
+}: {
+  label: string;
+  description?: ReactNode;
+  htmlFor?: string;
+  required?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid gap-x-8 gap-y-2.5 px-5 py-5 sm:px-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)]">
+      <div className="min-w-0">
+        <label htmlFor={htmlFor} className="text-sm font-medium">
+          {label}
+          {required ? <span className="ml-0.5 text-status-error">*</span> : null}
+        </label>
+        {description ? <p className="mt-0.5 text-sm text-muted-foreground">{description}</p> : null}
+      </div>
+      <div className="min-w-0 space-y-2 md:pt-0.5">{children}</div>
+    </div>
+  );
+}
+
+/** A labelled on/off row: text on the left, a switch on the right. */
 export function SettingsToggleRow({
   title,
   description,
@@ -219,10 +249,10 @@ export function SettingsToggleRow({
   control: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex items-start justify-between gap-6 px-5 py-5 sm:px-6">
       <div className="min-w-0">
         <p className="text-sm font-medium">{title}</p>
-        {description ? <p className="mt-0.5 text-sm text-muted-foreground">{description}</p> : null}
+        {description ? <p className="mt-0.5 max-w-xl text-sm text-muted-foreground">{description}</p> : null}
       </div>
       <div className="shrink-0 pt-0.5">{control}</div>
     </div>
@@ -265,6 +295,30 @@ export function SettingsSegmented<T extends string>({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** Read-only value with a copy button (redirect URIs, install IDs…). */
+export function CopyField({
+  value,
+  copied,
+  onCopy,
+  label,
+}: {
+  value: string;
+  copied: boolean;
+  onCopy: () => void;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-3 py-2 font-mono text-xs">
+        {value || "—"}
+      </code>
+      <Button type="button" variant="default" disabled={!value} onClick={onCopy} aria-label={label}>
+        {copied ? "Copied" : "Copy"}
+      </Button>
     </div>
   );
 }

@@ -8,6 +8,8 @@ import {
   useRef,
   useState,
   type ComponentPropsWithRef,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type InputHTMLAttributes,
   type ReactNode,
   type TextareaHTMLAttributes,
@@ -188,6 +190,73 @@ export function EmptyState({
   );
 }
 
+/** Downward drag (px) past which a released sheet closes. */
+const SHEET_DISMISS_PX = 120;
+/** A quick downward flick (px/ms) closes it even if it hasn't moved far. */
+const SHEET_FLICK_SPEED = 0.5;
+
+/**
+ * Swipe-down-to-dismiss for the mobile bottom sheet. Only touch and pen drags
+ * count (mouse users have the close button and Esc), and only on small screens
+ * where the modal is a sheet. Upward drags are resisted so it can't be pulled
+ * off its edge. Releasing short of the threshold springs back.
+ */
+function useSheetDrag(open: boolean, onClose: () => void) {
+  const [dy, setDy] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const start = useRef<{ y: number; t: number; id: number } | null>(null);
+
+  // A sheet dismissed by dragging keeps its offset for the exit animation;
+  // clear it when the modal opens again.
+  useEffect(() => {
+    if (open) setDy(0);
+  }, [open]);
+
+  function finish(event: ReactPointerEvent<HTMLElement>, cancelled: boolean) {
+    const origin = start.current;
+    if (!origin || origin.id !== event.pointerId) return;
+    start.current = null;
+    setDragging(false);
+    const delta = event.clientY - origin.y;
+    const speed = delta / Math.max(1, event.timeStamp - origin.t);
+    if (!cancelled && (delta > SHEET_DISMISS_PX || (delta > 24 && speed > SHEET_FLICK_SPEED))) {
+      // Keep the offset: the exit animation continues from it (--sheet-y).
+      onClose();
+      return;
+    }
+    setDy(0);
+  }
+
+  return {
+    style: dy
+      ? ({
+          transform: `translateY(${dy}px)`,
+          "--sheet-y": `${dy}px`,
+          transition: dragging ? "none" : "transform 260ms cubic-bezier(0.22, 1, 0.36, 1)",
+        } as CSSProperties)
+      : undefined,
+    handlers: {
+      onPointerDown(event: ReactPointerEvent<HTMLElement>) {
+        if (event.pointerType === "mouse" || !window.matchMedia("(max-width: 639px)").matches) return;
+        // Let buttons in the header (close) keep working.
+        if ((event.target as HTMLElement).closest("button, a, input")) return;
+        start.current = { y: event.clientY, t: event.timeStamp, id: event.pointerId };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      },
+      onPointerMove(event: ReactPointerEvent<HTMLElement>) {
+        const origin = start.current;
+        if (!origin || origin.id !== event.pointerId) return;
+        const delta = event.clientY - origin.y;
+        setDragging(true);
+        // Rubber-band upward drags to a fraction of the finger's travel.
+        setDy(delta > 0 ? delta : delta / 6);
+      },
+      onPointerUp: (event: ReactPointerEvent<HTMLElement>) => finish(event, false),
+      onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => finish(event, true),
+    },
+  };
+}
+
 export function Modal({
   title,
   description,
@@ -242,12 +311,20 @@ export function Modal({
     };
   }, [shown, leaving, onClose]);
 
+  const sheet = useSheetDrag(open, onClose);
+
   if (!shown) return null;
 
   const view = frame.current;
 
   return (
-    <div className={cn("fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6", leaving && "pointer-events-none")}>
+    <div
+      className={cn(
+        // Below `sm` the modal docks to the bottom as a sheet; above, it's centred.
+        "fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6",
+        leaving && "pointer-events-none",
+      )}
+    >
       <button
         type="button"
         className={cn(
@@ -262,12 +339,20 @@ export function Modal({
         aria-modal="true"
         aria-labelledby="flutter-modal-title"
         className={cn(
-          "relative flex max-h-[min(92vh,52rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl",
+          "flutter-sheet relative flex max-h-[92dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-xl border border-b-0 border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-2xl sm:max-h-[min(92vh,52rem)] sm:rounded-xl sm:border-b sm:pb-0",
           leaving ? "flutter-modal-out" : "flutter-modal-in",
           className,
         )}
+        style={sheet.style}
       >
-        <div className="flex shrink-0 items-start gap-3 border-b border-border px-4 py-3">
+        {/* Grab handle + header are the drag area for swipe-down-to-dismiss on phones. */}
+        <div className="flex shrink-0 justify-center pt-2 sm:hidden" {...sheet.handlers} style={{ touchAction: "none" }}>
+          <span className="h-1 w-10 rounded-full bg-muted-foreground/30" aria-hidden />
+        </div>
+        <div
+          className="flex shrink-0 touch-none items-start gap-3 border-b border-border px-4 py-3 sm:touch-auto"
+          {...sheet.handlers}
+        >
           <div className="min-w-0 flex-1">
             <h2 id="flutter-modal-title" className="text-base font-semibold">
               {view.title}
@@ -276,7 +361,7 @@ export function Modal({
               <p className="mt-0.5 text-sm text-muted-foreground">{view.description}</p>
             ) : null}
           </div>
-          <Button type="button" size="sm" variant="ghost" className="size-8 px-0" onClick={onClose} aria-label="Close">
+          <Button type="button" size="sm" variant="ghost" className="hit-slop size-8 px-0" onClick={onClose} aria-label="Close">
             <X className="size-4" />
           </Button>
         </div>

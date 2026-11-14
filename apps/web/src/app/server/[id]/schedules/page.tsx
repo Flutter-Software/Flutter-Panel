@@ -20,6 +20,7 @@ import { useServerRecord } from "@/components/server-frame";
 import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
 import { api } from "@/lib/api";
 import { can } from "@/lib/access";
+import { undoable } from "@/lib/undoable";
 
 type TaskAction = "power" | "command" | "backup";
 type PowerPayload = "start" | "stop" | "restart" | "kill";
@@ -173,6 +174,12 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
   const server = useServerRecord();
   const allowRead = can(server, "schedule.read");
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  // Schedules deleted optimistically and still inside their Undo window.
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set());
+  const visibleSchedules = useMemo(
+    () => (hiddenIds.size ? schedules.filter((row) => !hiddenIds.has(row.id)) : schedules),
+    [hiddenIds, schedules],
+  );
   const [canCreate, setCanCreate] = useState(false);
   const [canUpdate, setCanUpdate] = useState(false);
   const [canDelete, setCanDelete] = useState(false);
@@ -293,9 +300,16 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
     }
   }
 
+  /**
+   * Optimistic: the switch flips immediately and the row is patched locally;
+   * if the API refuses, it flips back and the error shows. No page-wide
+   * `pending` lock, so other rows stay usable while this saves.
+   */
   async function toggleEnabled(row: Schedule, enabled: boolean) {
     setError(null);
-    setPending(true);
+    const patch = (value: boolean) =>
+      setSchedules((rows) => rows.map((item) => (item.id === row.id ? { ...item, enabled: value } : item)));
+    patch(enabled);
     try {
       await api(`/api/v1/client/servers/${id}/schedules/${row.id}`, {
         method: "PATCH",
@@ -307,11 +321,11 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
           tasks: row.tasks,
         }),
       });
+      // Picks up server-computed fields like nextRunAt.
       await load();
     } catch (err) {
+      patch(row.enabled);
       setError(err instanceof Error ? err.message : "Could not update schedule");
-    } finally {
-      setPending(false);
     }
   }
 
@@ -328,6 +342,10 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
     }
   }
 
+  /**
+   * Confirm first, then delete with an Undo toast as a second safety net; the
+   * request is sent when the toast runs out.
+   */
   async function remove(row: Schedule) {
     if (
       !(await confirm({
@@ -339,15 +357,22 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
       return;
     }
     setError(null);
-    setPending(true);
-    try {
-      await api(`/api/v1/client/servers/${id}/schedules/${row.id}`, { method: "DELETE" });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete schedule");
-    } finally {
-      setPending(false);
-    }
+    undoable({
+      message: `Deleted “${row.name}”`,
+      apply: () => setHiddenIds((current) => new Set(current).add(row.id)),
+      revert: () =>
+        setHiddenIds((current) => {
+          const next = new Set(current);
+          next.delete(row.id);
+          return next;
+        }),
+      commit: (init) => api(`/api/v1/client/servers/${id}/schedules/${row.id}`, { method: "DELETE", ...init }),
+      errorMessage: `Could not delete “${row.name}”`,
+      onCommitted: () => {
+        setSchedules((rows) => rows.filter((item) => item.id !== row.id));
+        void load().catch(() => undefined);
+      },
+    });
   }
 
   if (server && !allowRead) {
@@ -591,14 +616,14 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
         </div>
       </Modal>
 
-      {schedules.length === 0 ? (
+      {visibleSchedules.length === 0 ? (
         <EmptyState
           title="No schedules yet"
           description="Create a schedule to start, stop, send commands, or back up this server on a timer."
         />
       ) : (
         <div className="space-y-3">
-          {schedules.map((row) => (
+          {visibleSchedules.map((row) => (
             <Card key={row.id} className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">

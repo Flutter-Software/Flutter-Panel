@@ -334,6 +334,25 @@ function AdminNavLink({
   );
 }
 
+/**
+ * The server sections this user may open, with absolute hrefs. Shared by the
+ * sidebar and the command menu so both always agree on what's reachable.
+ * With no record yet (still loading), every section is listed.
+ */
+export function serverNavItems(serverId: string, server: ServerRecord | null | undefined): NavItem[] {
+  return SERVER_NAV.filter((item) => {
+    if (!server) return true;
+    if (item.href === "settings") return canOpenSettings(server);
+    if (item.href === "databases" && !(server.databaseLimit && server.databaseLimit > 0)) return false;
+    if (item.href === "backups" && server.backupsEnabled === false) return false;
+    const perm = NAV_PERMISSION[item.href];
+    return perm ? can(server, perm) : true;
+  }).map((item) => ({
+    ...item,
+    href: `/server/${serverId}/${item.href}`,
+  }));
+}
+
 export function ServerSidebar({
   serverId,
   server,
@@ -352,17 +371,7 @@ export function ServerSidebar({
       icon: extensionIcon(page.icon),
     })),
   );
-  const items = SERVER_NAV.filter((item) => {
-    if (!server) return true;
-    if (item.href === "settings") return canOpenSettings(server);
-    if (item.href === "databases" && !(server.databaseLimit && server.databaseLimit > 0)) return false;
-    if (item.href === "backups" && server.backupsEnabled === false) return false;
-    const perm = NAV_PERMISSION[item.href];
-    return perm ? can(server, perm) : true;
-  }).map((item) => ({
-    ...item,
-    href: `/server/${serverId}/${item.href}`,
-  }));
+  const items = serverNavItems(serverId, server);
 
   return (
     <aside className="sticky top-16 hidden h-[calc(100dvh-4rem)] w-60 shrink-0 overflow-y-auto border-r border-sidebar-border bg-sidebar md:flex md:flex-col">

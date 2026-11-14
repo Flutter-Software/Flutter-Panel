@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Extensions
+
+Extension pages can render inline with `Flutter.ui.fit()`: no border or fixed-height box, the frame grows with the page and scrolls with the panel like a built-in page. The panel tells the page which part of it is on screen (`--flutter-viewport-top` / `--flutter-viewport-height`) so dialogs open where you are looking. Pages that don't call it keep the boxed frame.
+
 ## 0.2.73
 
 ### Admin

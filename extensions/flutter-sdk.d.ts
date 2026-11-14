@@ -94,6 +94,8 @@ declare namespace FlutterSDK {
     on(event: "init", fn: (context: Context) => void): () => void;
     on(event: "server", fn: (server: Server) => void): () => void;
     on(event: "theme", fn: (theme: Theme) => void): () => void;
+    /** Fit mode only: the visible slice of the frame changed (panel scrolled or resized). */
+    on(event: "viewport", fn: (viewport: { top: number; height: number }) => void): () => void;
     on(event: string, fn: (payload: unknown) => void): () => void;
     call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
 
@@ -118,6 +120,14 @@ declare namespace FlutterSDK {
     ui: {
       toast(message: string, variant?: ToastVariant): Promise<{ ok: true }>;
       navigate(section: string): Promise<{ ok: true }>;
+      /**
+       * Render inline instead of in a bordered box: the panel sizes the frame to
+       * the page's height, so it scrolls with the panel like a built-in page.
+       * Panels without fit mode don't have this method; call it as `Flutter.ui.fit?.()`.
+       */
+      fit?(): Promise<{ ok: true }>;
+      /** Visible slice of the frame in fit mode, also exposed as --flutter-viewport-top/-height. */
+      readonly viewport?: { top: number; height: number } | null;
     };
   }
 }

@@ -1,12 +1,10 @@
 "use client";
 
 /**
- * Settings → Branding.
+ * Settings → General (branding).
  *
- * Three cards, each with a live preview so admins see the result before
- * saving: the panel name (as it appears in the sidebar), the logo
- * (drag-and-drop or click to upload), and the console tag (rendered as a
- * sample console line).
+ * One card, three rows: panel name, logo, console tag. Each row shows a small
+ * live preview under the control so admins see the result before saving.
  */
 
 import { useRef, useState, type FormEvent } from "react";
@@ -14,7 +12,7 @@ import { ImageUp, RotateCcw } from "lucide-react";
 import { Button, TextInput } from "@mantine/core";
 import { CONSOLE_TAG_MAX_LENGTH, DEFAULT_CONSOLE_TAG } from "@flutter-software/shared";
 import { cn } from "@/lib/cn";
-import { SettingsCard } from "./workspace";
+import { SettingsCard, SettingsRow } from "./workspace";
 
 export const SITE_NAME_MAX_LENGTH = 48;
 const LOGO_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
@@ -47,54 +45,37 @@ export function IdentityStudio({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const shownName = siteName.trim() || "Panel name";
   const shownTag = consoleTag.trim() || DEFAULT_CONSOLE_TAG;
 
   return (
-    <form id={formId} className="space-y-5" onSubmit={onSubmit} noValidate>
-      <SettingsCard
-        title="Panel name"
-        description="Shown in the sidebar, on the login page, in the browser tab, and in invite emails."
-        footer={
-          <span className="flex items-center gap-2">
-            Preview
-            <span className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1 text-foreground">
-              <img src={previewSrc} alt="" className="size-4 object-contain" />
-              <span className="max-w-48 truncate text-xs font-semibold">{shownName}</span>
-            </span>
-          </span>
-        }
-      >
-        <TextInput
-          aria-label="Panel name"
+    <form id={formId} onSubmit={onSubmit} noValidate>
+      <SettingsCard title="Branding" description="How this panel presents itself to your users.">
+        <SettingsRow
+          label="Panel name"
+          htmlFor="settings-site-name"
           required
-          value={siteName}
-          onChange={(event) => onSiteName(event.currentTarget.value)}
-          maxLength={SITE_NAME_MAX_LENGTH}
-          placeholder="Panel name"
-          error={siteName.trim() ? undefined : "A panel name is required."}
-          rightSection={
-            <span className="pr-2 text-[11px] tabular-nums text-muted-foreground">
-              {siteName.length}/{SITE_NAME_MAX_LENGTH}
-            </span>
-          }
-          rightSectionWidth={56}
-        />
-      </SettingsCard>
-
-      <SettingsCard
-        title="Logo"
-        description="Square images look best. PNG, JPEG, WebP, or GIF, up to 2 MB."
-      >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-          <img
-            src={previewSrc}
-            alt="Current logo"
-            className="size-20 shrink-0 rounded-xl border border-border bg-background object-contain p-2"
+          description="Shown in the sidebar, login page, browser tab and emails."
+        >
+          <TextInput
+            id="settings-site-name"
+            required
+            value={siteName}
+            onChange={(event) => onSiteName(event.currentTarget.value)}
+            maxLength={SITE_NAME_MAX_LENGTH}
+            placeholder="Panel name"
+            error={siteName.trim() ? undefined : "A panel name is required."}
+            rightSection={
+              <span className="pr-2 text-[11px] tabular-nums text-muted-foreground">
+                {siteName.length}/{SITE_NAME_MAX_LENGTH}
+              </span>
+            }
+            rightSectionWidth={56}
           />
-          <button
-            type="button"
-            onClick={() => input.current?.click()}
+        </SettingsRow>
+
+        <SettingsRow label="Logo" description="Square images look best. PNG, JPEG, WebP or GIF, up to 2 MB.">
+          {/* The whole tile is a drop target; the buttons cover keyboard and click users. */}
+          <div
             onDragOver={(event) => {
               event.preventDefault();
               setDragging(true);
@@ -107,21 +88,50 @@ export function IdentityStudio({
               if (file) onFile(file);
             }}
             className={cn(
-              "flex min-h-20 flex-1 flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-4 py-4 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/40",
-              dragging ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-muted/30",
+              "flex items-center gap-4 rounded-lg border border-dashed p-3 transition-colors",
+              dragging ? "border-primary bg-primary/10" : "border-border",
             )}
           >
-            <ImageUp className={cn("size-5", dragging ? "text-primary" : "text-muted-foreground")} />
-            <span className="text-sm">
-              <span className="font-medium text-primary">Click to upload</span>{" "}
-              <span className="text-muted-foreground">or drag and drop</span>
-            </span>
-            {pendingFileName ? (
-              <span className="max-w-full truncate text-xs text-muted-foreground">
-                Selected: <span className="text-foreground">{pendingFileName}</span>
-              </span>
-            ) : null}
-          </button>
+            <img
+              src={previewSrc}
+              alt="Current logo"
+              className="size-14 shrink-0 rounded-lg border border-border bg-background object-contain p-1.5"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="xs"
+                  leftSection={<ImageUp className="size-3.5" />}
+                  onClick={() => input.current?.click()}
+                >
+                  Upload image
+                </Button>
+                {canReset ? (
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    color="gray"
+                    size="xs"
+                    leftSection={<RotateCcw className="size-3.5" />}
+                    onClick={onReset}
+                  >
+                    Use default
+                  </Button>
+                ) : null}
+              </div>
+              <p className="mt-1.5 truncate text-xs text-muted-foreground">
+                {pendingFileName ? (
+                  <>
+                    Selected <span className="text-foreground">{pendingFileName}</span>
+                  </>
+                ) : (
+                  "or drop an image here"
+                )}
+              </p>
+            </div>
+          </div>
           <input
             ref={input}
             type="file"
@@ -134,42 +144,30 @@ export function IdentityStudio({
               event.currentTarget.value = "";
             }}
           />
-        </div>
-        {canReset ? (
-          <Button
-            type="button"
-            variant="subtle"
-            color="gray"
-            leftSection={<RotateCcw className="size-3.5" />}
-            onClick={onReset}
-          >
-            Use default logo
-          </Button>
-        ) : null}
-      </SettingsCard>
+        </SettingsRow>
 
-      <SettingsCard
-        title="Console tag"
-        description="Prefix on messages the panel writes into server consoles."
-        footer={
-          <code className="block w-full truncate rounded-md bg-background px-3 py-2 font-mono text-xs">
+        <SettingsRow
+          label="Console tag"
+          htmlFor="settings-console-tag"
+          description="Prefix on messages the panel writes into server consoles."
+        >
+          <TextInput
+            id="settings-console-tag"
+            required
+            value={consoleTag}
+            onChange={(event) =>
+              onConsoleTag(event.currentTarget.value.replace(/[[\]]/g, "").slice(0, CONSOLE_TAG_MAX_LENGTH))
+            }
+            maxLength={CONSOLE_TAG_MAX_LENGTH}
+            placeholder={DEFAULT_CONSOLE_TAG}
+            leftSection={<span className="font-mono text-xs text-muted-foreground">[</span>}
+            rightSection={<span className="font-mono text-xs text-muted-foreground">]</span>}
+          />
+          <code className="block truncate rounded-md border border-border bg-background px-3 py-2 font-mono text-xs">
             <span className="text-status-warn">[{shownTag}]</span>{" "}
-            <span className="text-foreground">Server marked as running.</span>
+            <span className="text-muted-foreground">Server marked as running.</span>
           </code>
-        }
-      >
-        <TextInput
-          aria-label="Console tag"
-          required
-          value={consoleTag}
-          onChange={(event) =>
-            onConsoleTag(event.currentTarget.value.replace(/[[\]]/g, "").slice(0, CONSOLE_TAG_MAX_LENGTH))
-          }
-          maxLength={CONSOLE_TAG_MAX_LENGTH}
-          placeholder={DEFAULT_CONSOLE_TAG}
-          leftSection={<span className="font-mono text-xs text-muted-foreground">[</span>}
-          rightSection={<span className="font-mono text-xs text-muted-foreground">]</span>}
-        />
+        </SettingsRow>
       </SettingsCard>
 
       {/* Lets Enter inside a field submit the form; the visible Save lives in the unsaved-changes bar. */}

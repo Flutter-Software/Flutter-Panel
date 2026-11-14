@@ -254,6 +254,8 @@ Every method returns a Promise. A method rejects with an `Error` if the permissi
 | `Flutter.files.write(path, content)` | `{ path, size }`. Missing folders are created |
 | `Flutter.ui.toast(message, variant)` | shows a panel toast. Variants: `"info"`, `"success"`, `"warning"`, `"error"` |
 | `Flutter.ui.navigate(section)` | opens another page of the same server, e.g. `"console"` or `"files?path=/logs"` |
+| `Flutter.ui.fit()` | switches the page to fit mode (below). Resolves `{ ok: true }` |
+| `Flutter.ui.viewport` | in fit mode, the visible slice of the frame `{ top, height }`, or `null` |
 | `Flutter.call(method, params)` | low-level form of the calls above |
 
 ## Keeping the console attached
@@ -293,6 +295,22 @@ Rules of thumb:
 - Streams require the `console.read` permission. The viewer also needs `control.console` on the server.
 
 Every template uses both: a long-lived `subscribe()` that renders the console and the Live / Reconnecting badge, and `run()` for the command box. For a game-specific example, `run("list", { match: /There are (\d+) of a max of (\d+) players online:?\s*(.*)$/ })` gives you a Minecraft server's player count and names.
+
+## Fit mode: render inline
+
+By default a page sits in a bordered box with a fixed height and scrolls inside it. Call `Flutter.ui.fit()` once at start-up to render inline instead: the panel drops the border, sizes the frame to your page's height (reported automatically whenever it changes), and the page scrolls with the panel like a built-in page.
+
+```js
+Flutter.ui.fit?.(); // optional chaining keeps older panels working (they keep the box)
+```
+
+- Give `html`/`body` a transparent background and no outer padding; the panel's page already has padding.
+- Don't size content with `vh`. In fit mode the frame is as tall as your page, so `100vh` is the page, not the screen.
+- Overlays (dialogs, drawers) should use the visible slice the panel sends: `--flutter-viewport-top` and `--flutter-viewport-height` CSS variables, `Flutter.ui.viewport`, or `Flutter.on("viewport", fn)`. For example:
+  ```css
+  .backdrop { position: absolute; left: 0; right: 0; top: var(--flutter-viewport-top, 0); height: var(--flutter-viewport-height, 100vh); }
+  ```
+  Absolutely positioned overlays also don't count towards the reported height, so opening one never resizes the frame.
 
 ## Theming
 

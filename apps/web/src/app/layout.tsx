@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ColorSchemeScript, mantineHtmlProps } from "@mantine/core";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -31,6 +32,16 @@ export const metadata = {
     icon: "/flutter-logo.png",
     apple: "/flutter-logo.png",
   },
+};
+
+/**
+ * `viewport-fit=cover` lets the panel use the full screen on notched phones;
+ * globals.css and the sheets/toasts pad themselves with env(safe-area-inset-*).
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export const dynamic = "force-dynamic";

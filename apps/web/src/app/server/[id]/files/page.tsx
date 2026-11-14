@@ -60,6 +60,7 @@ import { useServerRecord } from "@/components/server-frame";
 import { can } from "@/lib/access";
 import { FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } from "@flutter-software/shared";
 import { formatBytes } from "@/lib/types";
+import { undoable, type CommitInit } from "@/lib/undoable";
 
 type Entry = {
   name: string;
@@ -726,6 +727,12 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const search = useSearchParams();
   const urlPath = normalizeDir(search.get("path"));
   const [path, setPath] = useState(urlPath);
+  // Latest folder for async callbacks (an Undo commit lands after the render
+  // that started it, possibly after the user has browsed away).
+  const pathRef = useRef(path);
+  useEffect(() => {
+    pathRef.current = path;
+  }, [path]);
   const server = useServerRecord();
   const uploadLimit = server?.uploadLimitBytes || FILE_UPLOAD_LIMIT_BYTES;
   const canWrite = can(server, "file.write");
@@ -740,6 +747,10 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const pendingOpen = useRef<string | null>(null);
   const openedUrlFile = useRef<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
+  // Full paths deleted optimistically but still inside their Undo window.
+  // Filtered out of every listing (so a reload can't resurrect them) until the
+  // delete commits or is undone.
+  const [hiddenPaths, setHiddenPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [listing, setListing] = useState(true);
   // `session` keys the editor modal: a new value remounts it with fresh content,
   // while renames keep it so unsaved edits survive.
@@ -774,12 +785,15 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     const now = Date.now();
     // This component also renders on the server, where navigator may not exist.
     const weekStart = localeWeekStart(typeof navigator === "undefined" ? "en-US" : navigator.language);
+    const shown = hiddenPaths.size
+      ? entries.filter((entry) => !hiddenPaths.has(joinPath(path, entry.name)))
+      : entries;
     return {
-      visibleEntries: applyDateView(entries, dateFilters, dateSort, now, weekStart),
-      createdCounts: countDateBuckets(entries, "createdAt", now, weekStart),
-      modifiedCounts: countDateBuckets(entries, "modifiedAt", now, weekStart),
+      visibleEntries: applyDateView(shown, dateFilters, dateSort, now, weekStart),
+      createdCounts: countDateBuckets(shown, "createdAt", now, weekStart),
+      modifiedCounts: countDateBuckets(shown, "modifiedAt", now, weekStart),
     };
-  }, [entries, dateFilters, dateSort]);
+  }, [entries, hiddenPaths, path, dateFilters, dateSort]);
 
   // A row the filter hides must leave the selection, otherwise bulk delete,
   // move, and archive would act on files the user can no longer see.
@@ -796,10 +810,11 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     setDateFilters((current) => ({ ...current, [field]: next }));
   }
 
-  async function files(body: Record<string, unknown>) {
+  async function files(body: Record<string, unknown>, init: CommitInit = {}) {
     return api<{ data: unknown }>(`/api/v1/client/servers/${id}/files`, {
       method: "POST",
       body: JSON.stringify(body),
+      ...init,
     });
   }
 
@@ -1013,33 +1028,85 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     selectAll(event.target.checked);
   }
 
+  /** Hides (or un-hides) full paths in the listing during an Undo window. */
+  function setHidden(paths: string[], hidden: boolean) {
+    setHiddenPaths((current) => {
+      const next = new Set(current);
+      for (const target of paths) {
+        if (hidden) next.add(target);
+        else next.delete(target);
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Runs after the confirm dialog, with an Undo toast as a second safety net
+   * for a mis-click. The rows vanish at once; the daemon is only asked to delete when the toast runs out (or
+   * is closed, or the tab is left). Undo just brings the rows back.
+   */
+  function deleteWithUndo(names: string[]) {
+    if (!names.length) return;
+    // Capture the folder now: the user may browse elsewhere before it commits.
+    const dir = path;
+    const targets = names.map((name) => joinPath(dir, name));
+    const label = names.length === 1 ? names[0] : `${names.length} items`;
+
+    undoable({
+      message: `Deleted ${label}`,
+      apply() {
+        setHidden(targets, true);
+        setSelected((current) => {
+          const next = new Set(current);
+          for (const name of names) next.delete(name);
+          return next;
+        });
+        if (editing && targets.some((target) => editing.path === target || editing.path.startsWith(`${target}/`))) {
+          setEditing(null);
+        }
+      },
+      revert: () => setHidden(targets, false),
+      async commit(init: CommitInit) {
+        const failed: string[] = [];
+        for (const target of targets) {
+          try {
+            await files({ action: "delete", path: target }, init);
+          } catch {
+            failed.push(target);
+          }
+        }
+        // Whatever did delete stays hidden until the reload drops it for real.
+        if (failed.length) {
+          setHidden(failed, false);
+          throw new Error(
+            failed.length === targets.length
+              ? `Could not delete ${label}`
+              : `Could not delete ${failed.length} of ${targets.length} items`,
+          );
+        }
+      },
+      onCommitted() {
+        // Reload first, then un-hide, so the deleted rows never flash back.
+        if (dir === pathRef.current) {
+          void load(dir, { keepEntries: true }).finally(() => setHidden(targets, false));
+        } else {
+          setHidden(targets, false);
+        }
+      },
+    });
+  }
+
   async function remove(entry: Entry) {
     if (
       !(await confirm({
         title: "Delete file",
-        description: `Delete ${entry.name}? This cannot be undone.`,
+        description: `Delete ${entry.name}?`,
         confirmLabel: "Delete",
       }))
     ) {
       return;
     }
-    const timer = startFakeProgress(`Deleting ${entry.name}`);
-    try {
-      await files({ action: "delete", path: joinPath(path, entry.name) });
-      window.clearInterval(timer);
-      if (isEditing(entry)) setEditing(null);
-      setSelected((current) => {
-        const next = new Set(current);
-        next.delete(entry.name);
-        return next;
-      });
-      await load(path, { keepEntries: true });
-      finishProgress(true);
-    } catch (err) {
-      window.clearInterval(timer);
-      showError(err, "Delete failed");
-      finishProgress(false);
-    }
+    deleteWithUndo([entry.name]);
   }
 
   async function removeSelected() {
@@ -1049,34 +1116,13 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     if (
       !(await confirm({
         title: "Delete files",
-        description: `Delete ${label}? This cannot be undone.`,
+        description: `Delete ${label}?`,
         confirmLabel: "Delete",
       }))
     ) {
       return;
     }
-    setPending(true);
-    setProgressLabel(names.length === 1 ? `Deleting ${names[0]}` : `Deleting ${names.length} items`);
-    setPercent(4);
-    try {
-      for (let index = 0; index < names.length; index++) {
-        const name = names[index];
-        if (!name) continue;
-        setProgressLabel(names.length === 1 ? `Deleting ${name}` : `Deleting ${index + 1} of ${names.length}`);
-        setPercent(Math.max(4, (index / names.length) * 100));
-        await files({ action: "delete", path: joinPath(path, name) });
-        if (editing && (editing.path === joinPath(path, name) || editing.path.endsWith(`/${name}`))) {
-          setEditing(null);
-        }
-        setPercent(((index + 1) / names.length) * 100);
-      }
-      setSelected(new Set());
-      await load(path, { keepEntries: true });
-      finishProgress(true);
-    } catch (err) {
-      showError(err, "Delete failed");
-      finishProgress(false);
-    }
+    deleteWithUndo(names);
   }
 
   async function extract(entry: Entry) {

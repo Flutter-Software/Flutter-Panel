@@ -35,10 +35,74 @@
   --color-status-info: var(--status-info);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/*
+ * Radius tokens live in a plain (non-inline) @theme block so `rounded-*` utilities
+ * compile to `var(--radius-*)`. That lets the continuous-corner block below
+ * re-size them at runtime instead of having the pixel values baked in.
+ */
+@theme {
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 10px;
   --radius-xl: 12px;
+  --radius-2xl: 16px;
+}
+
+/*
+ * Continuous ("squircle") corners, like iOS/macOS, instead of circular arcs.
+ *
+ * `corner-shape: squircle` reshapes whatever border-radius an element already has,
+ * so one rule covers Tailwind utilities, Mantine components and module CSS alike.
+ * A squircle hugs the box more tightly than a circle at the same radius, so the
+ * radii are scaled up ~1.5x to keep corners looking as soft as before.
+ *
+ * Browsers without `corner-shape` (Firefox, Safari as of writing) skip this whole
+ * block and keep the original circular corners and radii, so nothing breaks.
+ */
+@supports (corner-shape: squircle) {
+  :root {
+    /* Tailwind `rounded-*` */
+    --radius-sm: 6px;
+    --radius-md: 12px;
+    --radius-lg: 15px;
+    --radius-xl: 18px;
+    --radius-2xl: 24px;
+    /* Mantine `radius` (xl is left alone: Mantine uses it for pills). */
+    --mantine-radius-xs: calc(0.1875rem * var(--mantine-scale));
+    --mantine-radius-sm: calc(0.375rem * var(--mantine-scale));
+    --mantine-radius-md: calc(0.75rem * var(--mantine-scale));
+    --mantine-radius-lg: calc(1.5rem * var(--mantine-scale));
+  }
+
+  @layer base {
+    * {
+      corner-shape: squircle;
+    }
+
+    /*
+     * Circles and pills stay round: a squircle turns a dot or avatar into a
+     * rounded square, which reads as a different shape rather than a softer one.
+     */
+    [class*="rounded-full"],
+    .mantine-Avatar-root,
+    .mantine-Badge-root,
+    .mantine-Chip-label,
+    .mantine-ColorSwatch-root,
+    .mantine-Indicator-indicator,
+    .mantine-Loader-root,
+    .mantine-Progress-root,
+    .mantine-Progress-section,
+    .mantine-Radio-radio,
+    .mantine-Slider-bar,
+    .mantine-Slider-thumb,
+    .mantine-Slider-track,
+    .mantine-Switch-thumb,
+    .mantine-Switch-track {
+      corner-shape: round;
+    }
+  }
 }
 
 :root {
@@ -122,6 +186,40 @@ html.light {
     @apply antialiased;
     font-size: 13px;
     margin: 0;
+    /*
+     * Safe-area insets: with `viewport-fit=cover` (layout.tsx) the page runs
+     * under notches and rounded screen corners, so keep content clear of them.
+     * Top is handled by sticky headers; bottom by sheets and the toast stack.
+     */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Balanced headlines: no lonely last word on a two-line heading. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  /* Body copy avoids single-word orphans without rebalancing whole paragraphs. */
+  p,
+  li,
+  figcaption {
+    text-wrap: pretty;
+  }
+
+  /*
+   * Tabular numbers wherever figures are compared or update live, so columns
+   * line up and counters don't jitter as digits change width.
+   */
+  table,
+  time,
+  progress,
+  meter,
+  output,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
   }
   button,
   a {
@@ -156,6 +254,30 @@ html.light {
 }
 
 @layer components {
+  /*
+   * Hit slop: grows a small control's tappable area without changing its look
+   * or layout. The invisible ::before extends 8px past every edge (more on
+   * touch screens). Use on icon buttons that are visually under ~40px.
+   */
+  .hit-slop {
+    position: relative;
+  }
+  .hit-slop::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+  @media (pointer: coarse) {
+    .hit-slop::before {
+      inset: -12px;
+    }
+    /* No physical keyboard to press shortcuts on, so hide the hints. */
+    .kbd-hint,
+    .kbd-hint-row {
+      display: none !important;
+    }
+  }
+
   .pressable,
   button:not(:disabled):not([data-disabled]):not(.no-press) {
     transition:
@@ -345,14 +467,18 @@ main:has([data-hide-page-scrollbar])::-webkit-scrollbar {
   }
 }
 
+/*
+ * Starts wherever a swipe let go (--swipe-x, set inline by toast.tsx) and keeps
+ * travelling the same way, so a swiped toast flies off instead of snapping back.
+ */
 @keyframes flutter-toast-out {
   from {
-    opacity: 1;
-    transform: translateX(0) scale(1);
+    opacity: var(--swipe-opacity, 1);
+    transform: translateX(var(--swipe-x, 0px)) scale(1);
   }
   to {
     opacity: 0;
-    transform: translateX(24px) scale(0.97);
+    transform: translateX(calc(var(--swipe-x, 0px) * 2 + 24px)) scale(0.97);
   }
 }
 
@@ -366,8 +492,13 @@ main:has([data-hide-page-scrollbar])::-webkit-scrollbar {
   }
 }
 
+/*
+ * Entry animations fill `backwards` only (not `both`): once finished they stop
+ * owning `transform`, so a swipe/drag can move the element with inline styles
+ * (interruptible), and the exit animation picks up from wherever it was left.
+ */
 .flutter-toast-in {
-  animation: flutter-toast-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: flutter-toast-in 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .flutter-toast-out {
@@ -424,14 +555,34 @@ main:has([data-hide-page-scrollbar])::-webkit-scrollbar {
   }
 }
 
+/* Starts from a drag-to-dismiss offset (--sheet-y, set inline by Modal) if any. */
 @keyframes flutter-modal-out {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(var(--sheet-y, 0px)) scale(1);
   }
   to {
     opacity: 0;
-    transform: translateY(10px) scale(0.98);
+    transform: translateY(calc(var(--sheet-y, 0px) + 10px)) scale(0.98);
+  }
+}
+
+/* Small screens: modals are bottom sheets that slide up from the edge. */
+@keyframes flutter-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes flutter-sheet-out {
+  from {
+    transform: translateY(var(--sheet-y, 0px));
+  }
+  to {
+    transform: translateY(100%);
   }
 }
 
@@ -444,11 +595,20 @@ main:has([data-hide-page-scrollbar])::-webkit-scrollbar {
 }
 
 .flutter-modal-in {
-  animation: flutter-modal-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: flutter-modal-in 240ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .flutter-modal-out {
   animation: flutter-modal-out 180ms ease-in both;
+}
+
+@media (max-width: 639px) {
+  .flutter-sheet.flutter-modal-in {
+    animation: flutter-sheet-in 300ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  .flutter-sheet.flutter-modal-out {
+    animation: flutter-sheet-out 200ms ease-in both;
+  }
 }
 
 .flutter-save-circle {

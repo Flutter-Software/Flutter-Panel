@@ -11,7 +11,8 @@
  *   panel -> frame  { type: "init", context }
  *   frame -> panel  { type: "request", id, method, params }
  *   panel -> frame  { type: "response", id, ok, result | error }
- *   panel -> frame  { type: "event", event, payload }   ("theme", "server", "console")
+ *   panel -> frame  { type: "event", event, payload }   ("theme", "server", "console", "viewport")
+ *   frame -> panel  { type: "resize", height }          (only after Flutter.ui.fit())
  *
  * Console streaming: the panel owns the websocket and keeps it attached
  * (reconnects, server restarts, sleeping tabs). The SDK only reference-counts
@@ -88,6 +89,7 @@ export const EXTENSION_SDK_SOURCE = String.raw`/* Flutter Panel extension SDK v1
       }
       if (msg.event === "server" && context) context.server = msg.payload;
       if (msg.event === "console") dispatchConsole(msg.payload);
+      if (msg.event === "viewport") applyViewport(msg.payload);
       emit(msg.event, msg.payload);
     }
   });
@@ -107,6 +109,61 @@ export const EXTENSION_SDK_SOURCE = String.raw`/* Flutter Panel extension SDK v1
 
   function stripAnsi(line) {
     return String(line).replace(ANSI, "");
+  }
+
+  /*
+   * Fit-to-content layout (opt-in with Flutter.ui.fit()). The panel drops the
+   * frame's border and fixed height and sizes it to the page, so the page
+   * scrolls with the panel like a built-in page. Heights are reported at most
+   * once per animation frame, and only when they change.
+   */
+  var fitting = false;
+  var fitQueued = false;
+  var lastHeight = -1;
+  var viewport = null;
+
+  function reportHeight() {
+    fitQueued = false;
+    // offsetHeight ignores absolutely positioned overlays (dialogs), so an
+    // open dialog can't make the frame grow and feed back into itself.
+    var height = Math.ceil(document.documentElement.offsetHeight);
+    if (height === lastHeight) return;
+    lastHeight = height;
+    post({ type: "resize", height: height });
+  }
+
+  function queueHeight() {
+    if (fitQueued) return;
+    fitQueued = true;
+    requestAnimationFrame(reportHeight);
+  }
+
+  function fit() {
+    if (!fitting) {
+      fitting = true;
+      document.documentElement.setAttribute("data-flutter-fit", "");
+      if (window.ResizeObserver) {
+        var observer = new ResizeObserver(queueHeight);
+        observer.observe(document.documentElement);
+        if (document.body) observer.observe(document.body);
+      }
+      window.addEventListener("load", queueHeight);
+      queueHeight();
+    }
+    return Promise.resolve({ ok: true });
+  }
+
+  /**
+   * In fit mode the frame is as tall as the page, so 100vh no longer means
+   * "what the user can see". The panel sends the visible slice instead, exposed
+   * as --flutter-viewport-top / --flutter-viewport-height for overlays.
+   */
+  function applyViewport(payload) {
+    if (!payload || typeof payload.top !== "number" || typeof payload.height !== "number") return;
+    viewport = { top: payload.top, height: payload.height };
+    var root = document.documentElement;
+    root.style.setProperty("--flutter-viewport-top", payload.top + "px");
+    root.style.setProperty("--flutter-viewport-height", payload.height + "px");
   }
 
   function dispatchConsole(event) {
@@ -253,6 +310,10 @@ export const EXTENSION_SDK_SOURCE = String.raw`/* Flutter Panel extension SDK v1
       toast: function (message, variant) { return call("ui.toast", { message: message, variant: variant || "info" }); },
       /** Open another page of the same server, e.g. "console" or "files". */
       navigate: function (section) { return call("ui.navigate", { section: section }); },
+      /** Render inline: no frame border, height follows the page, scrolls with the panel. */
+      fit: fit,
+      /** Visible part of the frame in fit mode ({ top, height } in px), or null. */
+      get viewport() { return viewport; },
     },
   };
 

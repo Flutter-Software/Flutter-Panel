@@ -67,6 +67,8 @@ const THEME_VARS = [
 ];
 
 const TOAST_VARIANTS: ToastVariant[] = ["error", "success", "info", "warning"];
+/** Tallest a fit-mode frame may grow (px). */
+const MAX_FIT_HEIGHT = 50_000;
 const POWER_ACTIONS = ["start", "stop", "restart", "kill"];
 /** Sections `ui.navigate` may open; mirrors the server sidebar. */
 const NAV_SECTIONS = /^(console|files|databases|schedules|users|backups|network|startup|settings|activity)([/?#].*)?$/;
@@ -132,6 +134,8 @@ export function ExtensionFrame({
   const { resolvedTheme } = useTheme();
   const mode: "light" | "dark" = resolvedTheme === "light" ? "light" : "dark";
   const [loaded, setLoaded] = useState(false);
+  /** Set once the page opts into fit mode (Flutter.ui.fit()); null = classic boxed frame. */
+  const [fitHeight, setFitHeight] = useState<number | null>(null);
 
   // Handlers read the latest values through refs so the message listener is bound once per frame.
   const serverRef = useRef(server);
@@ -265,7 +269,17 @@ export function ExtensionFrame({
       if (msg.type === "hello") {
         // A (re)loaded document starts clean: drop any stream the previous one held.
         stopConsole();
+        setFitHeight(null);
         sendInit();
+        return;
+      }
+      if (msg.type === "resize") {
+        // Fit mode (Flutter.ui.fit()): the frame takes the page's height. Capped so a
+        // runaway layout can't create an absurdly tall element.
+        const height = (msg as { height?: unknown }).height;
+        if (typeof height === "number" && Number.isFinite(height)) {
+          setFitHeight(Math.min(Math.max(Math.ceil(height), 0), MAX_FIT_HEIGHT));
+        }
         return;
       }
       if (msg.type !== "request" || typeof msg.id !== "number" || typeof msg.method !== "string") return;
@@ -309,8 +323,44 @@ export function ExtensionFrame({
     post({ type: "event", event: "server", payload: publicServer(server) });
   }, [server, loaded, extension.permissions, post]);
 
+  // Fit mode: tell the frame which slice of it is on screen, so its dialogs
+  // open where the user is looking rather than at the top of a tall page.
+  const fitting = fitHeight !== null;
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!fitting || !frame) return;
+    const scroller = frame.closest<HTMLElement>("[data-page-scroller]");
+    let queued = 0;
+    const send = () => {
+      queued = 0;
+      const rect = frame.getBoundingClientRect();
+      const bounds = scroller?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight };
+      const top = Math.max(0, bounds.top - rect.top);
+      const height = Math.max(0, Math.min(rect.bottom, bounds.bottom) - Math.max(rect.top, bounds.top));
+      post({ type: "event", event: "viewport", payload: { top: Math.round(top), height: Math.round(height) } });
+    };
+    const queue = () => {
+      if (!queued) queued = requestAnimationFrame(send);
+    };
+    send();
+    (scroller ?? window).addEventListener("scroll", queue, { passive: true });
+    window.addEventListener("resize", queue);
+    return () => {
+      cancelAnimationFrame(queued);
+      (scroller ?? window).removeEventListener("scroll", queue);
+      window.removeEventListener("resize", queue);
+    };
+  }, [fitting, fitHeight, post]);
+
+  // One tree for both modes: swapping elements would remount the iframe and reload the page.
   return (
-    <div className="relative flex h-full min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card">
+    <div
+      className={
+        fitting
+          ? "relative" // inline: no card, no fixed height; the page scrolls with the panel
+          : "relative flex h-full min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card"
+      }
+    >
       {!loaded ? (
         <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
@@ -325,7 +375,9 @@ export function ExtensionFrame({
         // No allow-same-origin: the frame gets an opaque origin and can't touch the panel session.
         sandbox="allow-scripts allow-forms allow-popups allow-downloads"
         referrerPolicy="no-referrer"
-        className="min-h-0 w-full flex-1 border-0 bg-transparent"
+        scrolling={fitting ? "no" : undefined}
+        style={fitting ? { height: fitHeight } : undefined}
+        className={fitting ? "block w-full border-0 bg-transparent" : "min-h-0 w-full flex-1 border-0 bg-transparent"}
         onLoad={() => {
           setLoaded(true);
           // Fallback for frames that loaded the SDK before our listener attached.

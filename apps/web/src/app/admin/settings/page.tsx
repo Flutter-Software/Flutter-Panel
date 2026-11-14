@@ -18,8 +18,6 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
-  Check,
-  Copy,
   Globe,
   Image as ImageIcon,
   KeyRound,
@@ -35,18 +33,20 @@ import { SettingsWorkspaceSkeleton } from "@/components/skeletons";
 import { useAuth } from "@/components/auth-provider";
 import { DEFAULT_CONSOLE_TAG, DEFAULT_LOGO_SRC, DEFAULT_SITE_NAME, useBranding } from "@/components/branding-provider";
 import { confirm } from "@/components/confirm-dialog";
-import { UpdatesSection } from "./updates-section";
+import { UpdatesSection, type UpdateStatus } from "./updates-section";
 import { IdentityStudio } from "./identity-studio";
 import { TelemetrySection, type TelemetryPublic } from "./telemetry-section";
 import {
+  CopyField,
   parseSettingsSection,
   SettingsCard,
+  SettingsRow,
   SettingsSegmented,
   SettingsToggleRow,
   SettingsWorkspace,
   UnsavedChangesBar,
-  type SettingsNavGroup,
   type SettingsSection,
+  type SettingsTab,
   type SettingsTone,
 } from "./workspace";
 import { toast } from "@/components/toast";
@@ -88,13 +88,6 @@ type OidcPublic = {
   configured: boolean;
   source: "database" | "env" | "none";
   envFallback: boolean;
-};
-
-type UpdateStatus = {
-  version: string;
-  updateAvailable: boolean;
-  checkError: string | null;
-  job: { state: string };
 };
 
 /** Form ids: the unsaved-changes bar submits these by id. */
@@ -157,7 +150,8 @@ export default function AdminSettingsPage() {
   const { data, error: loadError, reload } = useQuery<{
     data: { smtp: SmtpPublic; oidc: OidcPublic; branding: BrandingPublic; telemetry: TelemetryPublic };
   }>("/api/v1/admin/settings");
-  const updates = useQuery<{ data: UpdateStatus }>("/api/v1/admin/settings/update");
+  // Reported by <UpdatesSection>, which owns the update polling; drives the tab badge.
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const smtp = data?.data.smtp;
   const oidc = data?.data.oidc;
   const branding = data?.data.branding;
@@ -548,7 +542,6 @@ export default function AdminSettingsPage() {
 
   /* ---- Derived status (from *saved* values, not the draft) ------------------- */
 
-  const update = updates.data?.data;
   const updateState: { tone: SettingsTone; status: string } =
     update?.job.state === "running"
       ? { tone: "info", status: "Updating" }
@@ -557,7 +550,7 @@ export default function AdminSettingsPage() {
         : update?.checkError
           ? { tone: "warn", status: "Check failed" }
           : update
-            ? { tone: "ok", status: `Up to date · v${update.version}` }
+            ? { tone: "ok", status: `v${update.version}` }
             : { tone: "off", status: "Checking…" };
 
   const mailState: { tone: SettingsTone; status: string } =
@@ -584,32 +577,19 @@ export default function AdminSettingsPage() {
         ? { tone: "warn", status: "On · not sending" }
         : { tone: "off", status: "Off" };
 
-  const groups: SettingsNavGroup[] = [
-    {
-      label: "General",
-      items: [{ id: "branding", label: "Branding", icon: <ImageIcon /> }],
-    },
-    {
-      label: "Authentication",
-      items: [
-        { id: "sso", label: "Sign-in", icon: <KeyRound />, ...ssoState },
-        { id: "mail", label: "Email", icon: <Mail />, ...mailState },
-      ],
-    },
-    {
-      label: "System",
-      items: [
-        { id: "updates", label: "Updates", icon: <RefreshCw />, ...updateState },
-        { id: "telemetry", label: "Telemetry", icon: <Radio />, ...telemetryState },
-      ],
-    },
+  const tabs: SettingsTab[] = [
+    { id: "branding", label: "General", icon: <ImageIcon /> },
+    { id: "sso", label: "Authentication", icon: <KeyRound />, ...ssoState },
+    { id: "mail", label: "Email", icon: <Mail />, ...mailState },
+    { id: "updates", label: "Updates", icon: <RefreshCw />, ...updateState },
+    { id: "telemetry", label: "Telemetry", icon: <Radio />, ...telemetryState },
   ];
 
   const pane: Record<SettingsSection, { title: string; description: string }> = {
-    branding: { title: "Branding", description: "How this panel presents itself to users and in server consoles." },
-    updates: { title: "Updates", description: "Compare this install with the latest build and apply updates in place." },
-    mail: { title: "Email", description: "How the panel sends invites, verification links, and password resets." },
-    sso: { title: "Sign-in", description: "Let users sign in through your OpenID Connect identity provider." },
+    branding: { title: "General", description: "Your panel's name, logo and console prefix." },
+    sso: { title: "Authentication", description: "How people sign in: passwords, single sign-on, or both." },
+    mail: { title: "Email", description: "The mail server used for invites, verification links and password resets." },
+    updates: { title: "Updates", description: "Keep this panel on the latest release." },
     telemetry: { title: "Telemetry", description: "Anonymous crash and usage reports that help improve Flutter." },
   };
 
@@ -620,11 +600,7 @@ export default function AdminSettingsPage() {
   const saving = section === "branding" ? brandingPending : section === "mail" ? pending : oidcPending;
 
   return (
-    <AdminPage
-      className="max-w-6xl"
-      title="Settings"
-      description="Manage your panel's identity, sign-in, email delivery, and updates."
-    >
+    <AdminPage className="max-w-5xl" title="Settings" description="Configure how your panel looks, signs people in, sends email and updates.">
       <AdminError message={loadError} />
       {!data && !loadError ? (
         <SettingsWorkspaceSkeleton />
@@ -632,7 +608,7 @@ export default function AdminSettingsPage() {
         <SettingsWorkspace
           section={section}
           onSection={(id) => void selectSection(id)}
-          groups={groups}
+          tabs={tabs}
           title={pane[section].title}
           description={pane[section].description}
           error={error}
@@ -657,14 +633,16 @@ export default function AdminSettingsPage() {
             />
           ) : null}
 
-          {/* Kept mounted so a running update keeps streaming while you browse other sections. */}
+          {/* Kept mounted so a running update keeps streaming (and the tab badge stays live) on other tabs. */}
           <div className={section === "updates" ? "block" : "hidden"}>
-            <UpdatesSection framed={false} />
+            <UpdatesSection onStatus={setUpdate} />
           </div>
 
           {section === "mail" ? (
             <form id={FORM_ID.mail} className="space-y-5" onSubmit={(event) => void onSave(event)} noValidate>
               <SettingsCard
+                title="Mail server"
+                description="Your provider's outgoing SMTP server."
                 footer={
                   smtp?.source === "env" ? (
                     <EnvNote>SMTP variables in the server environment are in use. Saving here takes over.</EnvNote>
@@ -676,70 +654,65 @@ export default function AdminSettingsPage() {
                 }
               >
                 <SettingsToggleRow
-                  title="Send email through SMTP"
-                  description="Deliver invites, verification links, and password resets from this panel."
+                  title="Send email"
+                  description="Deliver invites, verification links and password resets from this panel."
                   control={
                     <Switch
                       checked={enabled}
                       onChange={(event) => setEnabled(event.currentTarget.checked)}
-                      aria-label="Send email through SMTP"
+                      aria-label="Send email"
                     />
                   }
                 />
-              </SettingsCard>
-
-              <SettingsCard title="SMTP server" description="Your mail provider's outgoing server.">
-                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_8rem]">
-                  <TextInput
-                    label="Host"
-                    withAsterisk={enabled}
-                    value={host}
-                    onChange={(event) => setHost(event.currentTarget.value)}
-                    placeholder="smtp.example.com"
-                    autoComplete="off"
-                    leftSection={<Globe className="size-3.5" />}
-                  />
-                  <NumberInput
-                    label="Port"
-                    withAsterisk={enabled}
-                    min={1}
-                    max={65535}
-                    hideControls
-                    value={port}
-                    onChange={(value) => setPort(typeof value === "number" ? value : 587)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <p className="text-sm font-medium">Encryption</p>
+                <SettingsRow label="Host and port" htmlFor="smtp-host" required={enabled}>
+                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem]">
+                    <TextInput
+                      id="smtp-host"
+                      value={host}
+                      onChange={(event) => setHost(event.currentTarget.value)}
+                      placeholder="smtp.example.com"
+                      autoComplete="off"
+                      leftSection={<Globe className="size-3.5" />}
+                    />
+                    <NumberInput
+                      aria-label="Port"
+                      min={1}
+                      max={65535}
+                      hideControls
+                      value={port}
+                      onChange={(value) => setPort(typeof value === "number" ? value : 587)}
+                    />
+                  </div>
+                </SettingsRow>
+                <SettingsRow label="Encryption" description="The port follows your choice: 587 for STARTTLS, 465 for TLS.">
                   <SettingsSegmented
                     label="Encryption"
                     value={encryption}
                     options={ENCRYPTION_OPTIONS}
                     onChange={changeEncryption}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    STARTTLS usually uses port 587, TLS/SSL uses 465. The port follows your choice.
-                  </p>
-                </div>
-              </SettingsCard>
-
-              <SettingsCard title="Authentication" description="Credentials for the SMTP server, if it requires them.">
-                <div className="grid gap-4 sm:grid-cols-2">
+                </SettingsRow>
+                <SettingsRow label="Username" htmlFor="smtp-username" description="Leave blank if the server doesn't require sign-in.">
                   <TextInput
-                    label="Username"
+                    id="smtp-username"
                     value={username}
                     onChange={(event) => setUsername(event.currentTarget.value)}
                     autoComplete="off"
                   />
+                </SettingsRow>
+                <SettingsRow
+                  label="Password"
+                  htmlFor="smtp-password"
+                  description={smtp?.passwordSet ? "Leave blank to keep the saved password." : undefined}
+                >
                   <PasswordInput
-                    label="Password"
-                    description={smtp?.passwordSet ? "Leave blank to keep the saved password." : undefined}
+                    id="smtp-password"
                     value={password}
                     onChange={(event) => setPassword(event.currentTarget.value)}
                     autoComplete="new-password"
                     placeholder={smtp?.passwordSet ? "••••••••" : ""}
                   />
-                </div>
+                </SettingsRow>
               </SettingsCard>
 
               <SettingsCard
@@ -748,54 +721,53 @@ export default function AdminSettingsPage() {
                 footer={
                   <span className="min-w-0 truncate">
                     Recipients see{" "}
-                    <span className="font-medium text-foreground">
-                      {fromName.trim() || DEFAULT_SITE_NAME}
-                    </span>{" "}
+                    <span className="font-medium text-foreground">{fromName.trim() || DEFAULT_SITE_NAME}</span>{" "}
                     <span className="font-mono text-xs">&lt;{fromEmail.trim() || "noreply@example.com"}&gt;</span>
                   </span>
                 }
               >
-                <div className="grid gap-4 sm:grid-cols-2">
+                <SettingsRow label="From name" htmlFor="smtp-from-name">
                   <TextInput
-                    label="From name"
+                    id="smtp-from-name"
                     value={fromName}
                     onChange={(event) => setFromName(event.currentTarget.value)}
                   />
+                </SettingsRow>
+                <SettingsRow label="From address" htmlFor="smtp-from-email" required={enabled}>
                   <TextInput
+                    id="smtp-from-email"
                     type="email"
-                    label="From address"
-                    withAsterisk={enabled}
                     value={fromEmail}
                     onChange={(event) => setFromEmail(event.currentTarget.value)}
                     placeholder="noreply@example.com"
                   />
-                </div>
-              </SettingsCard>
-
-              <SettingsCard
-                title="Send a test email"
-                description="Uses the values above, including unsaved edits, so you can verify before saving."
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-                  <TextInput
-                    className="flex-1"
-                    type="email"
-                    aria-label="Test recipient"
-                    value={testTo}
-                    onChange={(event) => setTestTo(event.currentTarget.value)}
-                    placeholder="you@example.com"
-                  />
-                  <Button
-                    type="button"
-                    variant="default"
-                    loading={testing}
-                    disabled={!testTo.trim() || !host.trim()}
-                    leftSection={<Send className="size-3.5" />}
-                    onClick={() => void onTest()}
-                  >
-                    Send test
-                  </Button>
-                </div>
+                </SettingsRow>
+                <SettingsRow
+                  label="Send a test"
+                  htmlFor="smtp-test-to"
+                  description="Uses the values above, including unsaved edits."
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <TextInput
+                      id="smtp-test-to"
+                      className="flex-1"
+                      type="email"
+                      value={testTo}
+                      onChange={(event) => setTestTo(event.currentTarget.value)}
+                      placeholder="you@example.com"
+                    />
+                    <Button
+                      type="button"
+                      variant="default"
+                      loading={testing}
+                      disabled={!testTo.trim() || !host.trim()}
+                      leftSection={<Send className="size-3.5" />}
+                      onClick={() => void onTest()}
+                    >
+                      Send test
+                    </Button>
+                  </div>
+                </SettingsRow>
               </SettingsCard>
 
               <button type="submit" hidden aria-hidden tabIndex={-1} />
@@ -805,6 +777,7 @@ export default function AdminSettingsPage() {
           {section === "sso" ? (
             <form id={FORM_ID.sso} className="space-y-5" onSubmit={(event) => void onSaveOidc(event)} noValidate>
               <SettingsCard
+                title="Sign-in methods"
                 footer={
                   oidc?.source === "env" ? (
                     <EnvNote>OIDC variables in the server environment are in use. Saving here takes over.</EnvNote>
@@ -814,8 +787,19 @@ export default function AdminSettingsPage() {
                 }
               >
                 <SettingsToggleRow
-                  title="Enable single sign-on"
-                  description="Adds a sign-in button to the login page once the provider below is configured."
+                  title="Email and password"
+                  description="Turn off to require SSO for everyone after the first admin account exists."
+                  control={
+                    <Switch
+                      checked={oidcPasswordLogin}
+                      onChange={(event) => setOidcPasswordLogin(event.currentTarget.checked)}
+                      aria-label="Allow email and password sign-in"
+                    />
+                  }
+                />
+                <SettingsToggleRow
+                  title="Single sign-on (OpenID Connect)"
+                  description="Adds a sign-in button for your identity provider: Authentik, Keycloak, Entra ID, Google and others."
                   control={
                     <Switch
                       checked={oidcEnabled}
@@ -824,124 +808,104 @@ export default function AdminSettingsPage() {
                     />
                   }
                 />
-                <div className="border-t border-border" />
-                <SettingsToggleRow
-                  title="Allow password sign-in"
-                  description="Turn off to require SSO for everyone after the first admin account exists."
-                  control={
-                    <Switch
-                      checked={oidcPasswordLogin}
-                      onChange={(event) => setOidcPasswordLogin(event.currentTarget.checked)}
-                      aria-label="Allow password sign-in"
-                    />
-                  }
-                />
                 {signInLocked ? (
-                  <p className="flex items-start gap-2 rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
+                  <div className="flex items-start gap-2 bg-status-error/10 px-5 py-3 text-sm text-status-error sm:px-6">
                     <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-                    With both SSO and passwords off, nobody will be able to sign in.
-                  </p>
+                    With both methods off, nobody will be able to sign in.
+                  </div>
                 ) : null}
               </SettingsCard>
 
-              <SettingsCard
-                title="Redirect URI"
-                description="Register this exact URL as an allowed callback on your identity provider."
-              >
-                <div className="flex items-center gap-2">
-                  <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs">
-                    {oidc?.redirectUri || "—"}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="default"
-                    disabled={!oidc?.redirectUri}
-                    onClick={() => void copyRedirect()}
-                    leftSection={copiedUri ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              {/* Provider details only matter once SSO is on (or already configured). */}
+              {oidcEnabled || oidc?.configured ? (
+                <SettingsCard
+                  title="Identity provider"
+                  description="Copy these values from the OAuth / OIDC application in your provider."
+                >
+                  <SettingsRow
+                    label="Redirect URI"
+                    description="Register this exact URL as an allowed callback on your provider."
                   >
-                    {copiedUri ? "Copied" : "Copy"}
-                  </Button>
-                </div>
-              </SettingsCard>
-
-              <SettingsCard
-                title="Identity provider"
-                description="From your provider's OAuth / OIDC application (Authentik, Keycloak, Entra ID, Google…)."
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <TextInput
-                    className="flex-1"
-                    label="Issuer URL"
-                    withAsterisk={oidcEnabled}
-                    value={oidcIssuer}
-                    onChange={(event) => setOidcIssuer(event.currentTarget.value)}
-                    placeholder="https://auth.example.com/application/o/flutter/"
-                    autoComplete="off"
-                  />
-                  <Button
-                    type="button"
-                    variant="default"
-                    loading={oidcTesting}
-                    disabled={!oidcIssuer.trim()}
-                    onClick={() => void onTestOidc()}
-                  >
-                    Test discovery
-                  </Button>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <TextInput
-                    label="Client ID"
-                    withAsterisk={oidcEnabled}
-                    value={oidcClientId}
-                    onChange={(event) => setOidcClientId(event.currentTarget.value)}
-                    autoComplete="off"
-                  />
-                  <PasswordInput
+                    <CopyField
+                      value={oidc?.redirectUri ?? ""}
+                      copied={copiedUri}
+                      onCopy={() => void copyRedirect()}
+                      label="Copy redirect URI"
+                    />
+                  </SettingsRow>
+                  <SettingsRow label="Issuer URL" htmlFor="oidc-issuer" required={oidcEnabled}>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <TextInput
+                        id="oidc-issuer"
+                        className="flex-1"
+                        value={oidcIssuer}
+                        onChange={(event) => setOidcIssuer(event.currentTarget.value)}
+                        placeholder="https://auth.example.com/application/o/flutter/"
+                        autoComplete="off"
+                      />
+                      <Button
+                        type="button"
+                        variant="default"
+                        loading={oidcTesting}
+                        disabled={!oidcIssuer.trim()}
+                        onClick={() => void onTestOidc()}
+                      >
+                        Test
+                      </Button>
+                    </div>
+                  </SettingsRow>
+                  <SettingsRow label="Client ID" htmlFor="oidc-client-id" required={oidcEnabled}>
+                    <TextInput
+                      id="oidc-client-id"
+                      value={oidcClientId}
+                      onChange={(event) => setOidcClientId(event.currentTarget.value)}
+                      autoComplete="off"
+                    />
+                  </SettingsRow>
+                  <SettingsRow
                     label="Client secret"
+                    htmlFor="oidc-client-secret"
                     description={oidc?.clientSecretSet ? "Leave blank to keep the saved secret." : undefined}
-                    value={oidcClientSecret}
-                    onChange={(event) => setOidcClientSecret(event.currentTarget.value)}
-                    autoComplete="new-password"
-                    placeholder={oidc?.clientSecretSet ? "••••••••" : ""}
-                  />
-                </div>
-                <TextInput
-                  label="Scopes"
-                  description="Space-separated. The defaults work for most providers."
-                  value={oidcScopes}
-                  onChange={(event) => setOidcScopes(event.currentTarget.value)}
-                  placeholder={DEFAULT_SSO_SCOPES}
-                />
-              </SettingsCard>
-
-              <SettingsCard
-                title="Login page"
-                footer={
-                  <span className="flex flex-wrap items-center gap-2">
-                    Preview
-                    <span className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground">
-                      <KeyRound className="size-3.5" />
-                      {oidcButtonLabel.trim() || DEFAULT_SSO_LABEL}
-                    </span>
-                  </span>
-                }
-              >
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <TextInput
-                    label="Button label"
-                    value={oidcButtonLabel}
-                    onChange={(event) => setOidcButtonLabel(event.currentTarget.value)}
-                    placeholder={DEFAULT_SSO_LABEL}
-                  />
-                  <TextInput
+                  >
+                    <PasswordInput
+                      id="oidc-client-secret"
+                      value={oidcClientSecret}
+                      onChange={(event) => setOidcClientSecret(event.currentTarget.value)}
+                      autoComplete="new-password"
+                      placeholder={oidc?.clientSecretSet ? "••••••••" : ""}
+                    />
+                  </SettingsRow>
+                  <SettingsRow label="Scopes" htmlFor="oidc-scopes" description="Space-separated. The default works for most providers.">
+                    <TextInput
+                      id="oidc-scopes"
+                      value={oidcScopes}
+                      onChange={(event) => setOidcScopes(event.currentTarget.value)}
+                      placeholder={DEFAULT_SSO_SCOPES}
+                    />
+                  </SettingsRow>
+                  <SettingsRow label="Button label" htmlFor="oidc-button-label" description="Text on the login page button.">
+                    <TextInput
+                      id="oidc-button-label"
+                      value={oidcButtonLabel}
+                      onChange={(event) => setOidcButtonLabel(event.currentTarget.value)}
+                      placeholder={DEFAULT_SSO_LABEL}
+                      leftSection={<KeyRound className="size-3.5" />}
+                    />
+                  </SettingsRow>
+                  <SettingsRow
                     label="Allowed email domains"
+                    htmlFor="oidc-domains"
                     description="Comma-separated. Leave blank to allow any domain."
-                    value={oidcDomains}
-                    onChange={(event) => setOidcDomains(event.currentTarget.value)}
-                    placeholder="company.com"
-                  />
-                </div>
-              </SettingsCard>
+                  >
+                    <TextInput
+                      id="oidc-domains"
+                      value={oidcDomains}
+                      onChange={(event) => setOidcDomains(event.currentTarget.value)}
+                      placeholder="company.com"
+                    />
+                  </SettingsRow>
+                </SettingsCard>
+              ) : null}
 
               <button type="submit" hidden aria-hidden tabIndex={-1} />
             </form>

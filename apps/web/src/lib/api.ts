@@ -30,6 +30,20 @@ function httpErrorFrom(json: unknown, status: number) {
   return new HttpError(message, status, code);
 }
 
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const IDEMPOTENCY_HEADER = "Idempotency-Key";
+const RETRY_DELAY_MS = 400;
+
+/** Random per-request key. `crypto.randomUUID` needs a secure context, so fall back. */
+function newIdempotencyKey() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function csrfToken() {
   if (typeof document === "undefined") return "";
   const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]*)`));
@@ -70,17 +84,32 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const csrf = csrfToken();
   if (csrf) headers.set(CSRF_HEADER, csrf);
   const method = (init.method ?? "GET").toUpperCase();
-
-  let response: Response;
-  try {
-    response = await fetch(path, {
-      ...init,
-      headers,
-      credentials: "include",
-    });
-  } catch {
-    throw new HttpError("We cannot reach the panel API right now.", 503, "UNAVAILABLE");
+  const mutating = !SAFE_METHODS.has(method);
+  // Every write carries an Idempotency-Key. If the network drops after the API
+  // has acted but before we see the reply, the retry below reuses the key and
+  // the API replays its first answer instead of doing the work twice.
+  if (mutating && !headers.has(IDEMPOTENCY_HEADER)) {
+    headers.set(IDEMPOTENCY_HEADER, newIdempotencyKey());
   }
+
+  let response: Response | null = null;
+  // Writes get one retry on a network error; that is only safe because of the key.
+  const attempts = mutating ? 2 : 1;
+  for (let attempt = 1; attempt <= attempts && !response; attempt++) {
+    try {
+      response = await fetch(path, {
+        ...init,
+        headers,
+        credentials: "include",
+      });
+    } catch {
+      if (attempt === attempts || init.signal?.aborted) {
+        throw new HttpError("We cannot reach the panel API right now.", 503, "UNAVAILABLE");
+      }
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    }
+  }
+  if (!response) throw new HttpError("We cannot reach the panel API right now.", 503, "UNAVAILABLE");
 
   const json = (await response.json().catch(() => null)) as T | ApiError | null;
   if (!response.ok) throw httpErrorFrom(json, response.status);
@@ -152,6 +181,7 @@ export function apiUpload<T>(
     xhr.setRequestHeader("content-type", "application/json");
     const csrf = csrfToken();
     if (csrf) xhr.setRequestHeader(CSRF_HEADER, csrf);
+    xhr.setRequestHeader(IDEMPOTENCY_HEADER, newIdempotencyKey());
     xhr.upload.onprogress = (event) => {
       if (!onProgress || !event.lengthComputable || event.total <= 0) return;
       onProgress(Math.min(1, event.loaded / event.total));

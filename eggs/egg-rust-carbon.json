@@ -1,0 +1,222 @@
+{
+  "_comment": "Flutter Panel egg. Import via Admin → Nests → Import egg.",
+  "meta": {
+    "version": "PTDL_v2",
+    "update_url": null
+  },
+  "exported_at": "2026-11-14T21:00:00-05:00",
+  "name": "Rust (Carbon)",
+  "author": "flutter.software",
+  "description": "Rust dedicated server with the Carbon modding framework. Runtime and installer are both Debian 12 (bookworm, glibc 2.36). Carbon updates on every start. Primary allocation is the game port (UDP 28015); add the query port (27017) as an extra allocation so the server shows in the browser. Give it 10-16 GB RAM.",
+  "features": ["steam_disk_space"],
+  "docker_images": {
+    "Rust (bookworm)": "ghcr.io/pterodactyl/games:rust"
+  },
+  "file_denylist": [],
+  "startup": "./RustDedicated -batchmode +server.port {{SERVER_PORT}} +server.queryport {{QUERY_PORT}} +server.identity \"rust\" +rcon.port {{RCON_PORT}} +rcon.web true +server.hostname \\\"{{HOSTNAME}}\\\" +server.level \\\"{{LEVEL}}\\\" +server.description \\\"{{DESCRIPTION}}\\\" +server.url \\\"{{SERVER_URL}}\\\" +server.headerimage \\\"{{SERVER_IMG}}\\\" +server.logoimage \\\"{{SERVER_LOGO}}\\\" +server.maxplayers {{MAX_PLAYERS}} +rcon.password \\\"{{RCON_PASS}}\\\" +server.saveinterval {{SAVEINTERVAL}} +app.port {{APP_PORT}} $( [ -z ${MAP_URL} ] && printf %s \"+server.worldsize \\\"{{WORLD_SIZE}}\\\" +server.seed \\\"{{WORLD_SEED}}\\\"\" || printf %s \"+server.levelurl {{MAP_URL}}\" ) {{ADDITIONAL_ARGS}}",
+  "config": {
+    "files": "{}",
+    "startup": "{\"done\":\"Server startup complete\"}",
+    "logs": "{}",
+    "stop": "quit"
+  },
+  "scripts": {
+    "installation": {
+      "script": "#!/bin/bash\nset -euo pipefail\n\n# Installs Rust (app 258550) with SteamCMD. Carbon itself is downloaded by the\n# runtime image's entrypoint on every start when FRAMEWORK=carbon.\nSRCDS_APPID=258550\n\ncd /tmp\nmkdir -p /mnt/server/steamcmd\ncurl -fsSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\ntar -xzf steamcmd.tar.gz -C /mnt/server/steamcmd\nrm -f steamcmd.tar.gz\n\nexport HOME=/mnt/server\ncd /mnt/server/steamcmd\n\nBETA_ARGS=()\nif [[ -n \"${SRCDS_BETAID:-}\" ]]; then\n  BETA_ARGS+=(-beta \"${SRCDS_BETAID}\")\nfi\n\nset +u\n./steamcmd.sh +@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 \\\n  +force_install_dir /mnt/server \\\n  +login anonymous \\\n  +app_update \"${SRCDS_APPID}\" \"${BETA_ARGS[@]}\" validate +quit\nset -u\n\nmkdir -p /mnt/server/.steam/sdk32 /mnt/server/.steam/sdk64\n[[ -f linux32/steamclient.so ]] && cp -f linux32/steamclient.so /mnt/server/.steam/sdk32/steamclient.so\n[[ -f linux64/steamclient.so ]] && cp -f linux64/steamclient.so /mnt/server/.steam/sdk64/steamclient.so\n\nchmod +x /mnt/server/RustDedicated 2>/dev/null || true\necho \"[flutter] Rust install finished. Carbon will be fetched on first start.\"\n",
+      "container": "ghcr.io/parkervcp/installers:debian",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Modding Framework",
+      "description": "carbon, oxide, or vanilla. Carbon and Oxide are re-downloaded on every start.",
+      "env_variable": "FRAMEWORK",
+      "default_value": "carbon",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|in:carbon,oxide,vanilla",
+      "field_type": "text"
+    },
+    {
+      "name": "Server Name",
+      "description": "Name shown in the server browser",
+      "env_variable": "HOSTNAME",
+      "default_value": "A Rust Server",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:60",
+      "field_type": "text"
+    },
+    {
+      "name": "Description",
+      "description": "Server browser description. Use \\n for new lines.",
+      "env_variable": "DESCRIPTION",
+      "default_value": "Powered by Carbon",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Level",
+      "description": "Procedural Map, Barren, HapisIsland, SavasIsland, CraggyIsland",
+      "env_variable": "LEVEL",
+      "default_value": "Procedural Map",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:30",
+      "field_type": "text"
+    },
+    {
+      "name": "World Size",
+      "description": "Procedural map size (1000-6000). Ignored when Custom Map URL is set.",
+      "env_variable": "WORLD_SIZE",
+      "default_value": "3500",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer",
+      "field_type": "text"
+    },
+    {
+      "name": "World Seed",
+      "description": "Procedural map seed. Blank = random. Ignored when Custom Map URL is set.",
+      "env_variable": "WORLD_SEED",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Custom Map URL",
+      "description": "Direct download URL to a .map file. Leave blank for procedural.",
+      "env_variable": "MAP_URL",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|url",
+      "field_type": "text"
+    },
+    {
+      "name": "Max Players",
+      "description": "Maximum players",
+      "env_variable": "MAX_PLAYERS",
+      "default_value": "50",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer",
+      "field_type": "text"
+    },
+    {
+      "name": "Query Port",
+      "description": "Server browser query port. Add it as an extra allocation.",
+      "env_variable": "QUERY_PORT",
+      "default_value": "27017",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer",
+      "field_type": "text"
+    },
+    {
+      "name": "RCON Port",
+      "description": "WebRCON port. The panel console talks to it inside the container; only allocate it if you use an external RCON tool.",
+      "env_variable": "RCON_PORT",
+      "default_value": "28016",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer",
+      "field_type": "text"
+    },
+    {
+      "name": "RCON Password",
+      "description": "WebRCON password. Change this. The panel console needs it.",
+      "env_variable": "RCON_PASS",
+      "default_value": "CHANGEME",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|regex:/^[\\w.-]*$/|max:64",
+      "field_type": "text"
+    },
+    {
+      "name": "Rust+ App Port",
+      "description": "Rust+ companion app port. -1 disables it.",
+      "env_variable": "APP_PORT",
+      "default_value": "28082",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer",
+      "field_type": "text"
+    },
+    {
+      "name": "Save Interval",
+      "description": "Seconds between world saves",
+      "env_variable": "SAVEINTERVAL",
+      "default_value": "300",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|integer",
+      "field_type": "text"
+    },
+    {
+      "name": "Server URL",
+      "description": "Website shown in the server browser",
+      "env_variable": "SERVER_URL",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|url",
+      "field_type": "text"
+    },
+    {
+      "name": "Header Image",
+      "description": "Header image URL (512x256 PNG/JPG)",
+      "env_variable": "SERVER_IMG",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|url",
+      "field_type": "text"
+    },
+    {
+      "name": "Logo Image",
+      "description": "Logo URL (256x256 PNG/JPG)",
+      "env_variable": "SERVER_LOGO",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|url",
+      "field_type": "text"
+    },
+    {
+      "name": "Additional Arguments",
+      "description": "Extra launch arguments, e.g. +server.pve true",
+      "env_variable": "ADDITIONAL_ARGS",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string",
+      "field_type": "text"
+    },
+    {
+      "name": "Auto Update",
+      "description": "1 = update Rust with SteamCMD on every start, 0 = skip",
+      "env_variable": "AUTO_UPDATE",
+      "default_value": "1",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|in:0,1",
+      "field_type": "text"
+    },
+    {
+      "name": "Steam Beta Branch",
+      "description": "Steam beta branch (blank = public). Reinstall after changing.",
+      "env_variable": "SRCDS_BETAID",
+      "default_value": "",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "nullable|string|max:64",
+      "field_type": "text"
+    }
+  ]
+}

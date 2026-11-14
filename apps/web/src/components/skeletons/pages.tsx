@@ -198,38 +198,33 @@ export function AdminDatabaseHostsPageSkeleton({ count }: { count?: number }) {
   );
 }
 
-/** Matches app/admin/settings/workspace.tsx: grouped nav on the left, header + cards on the right. */
+/** Matches app/admin/settings/workspace.tsx: tab bar, section header, then cards of label/field rows. */
 export function SettingsWorkspaceSkeleton() {
   return (
-    <SkeletonRoot className="grid items-start gap-6 lg:grid-cols-[13.5rem_minmax(0,1fr)] lg:gap-10">
-      <div className="flex gap-1 overflow-hidden lg:flex-col lg:gap-5">
-        {[1, 2, 2].map((count, group) => (
-          <div key={group} className="flex shrink-0 gap-1 lg:flex-col lg:gap-1">
-            <Skeleton className="mx-3 mb-1 hidden h-3 w-20 lg:block" />
-            {skeletonKeys(count).map((index) => (
-              <div key={index} className="flex items-center gap-2.5 px-3 py-2">
-                <Skeleton className="size-4" />
-                <Skeleton className="h-4 w-20" />
-              </div>
-            ))}
+    <SkeletonRoot className="space-y-6">
+      <div className="flex gap-4 overflow-hidden border-b border-border pb-3">
+        {skeletonKeys(5).map((index) => (
+          <div key={index} className="flex shrink-0 items-center gap-2 px-3">
+            <Skeleton className="size-4" />
+            <Skeleton className="h-4 w-20" />
           </div>
         ))}
       </div>
-      <div className="min-w-0 space-y-5">
-        <div className="space-y-1.5">
-          <Skeleton className="h-6 w-32" />
-          <Skeleton className="h-4 w-72 max-w-full" />
-        </div>
+      <div className="space-y-1.5">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-4 w-72 max-w-full" />
+      </div>
+      <SkeletonCard className="divide-y divide-border">
         {skeletonKeys(3).map((index) => (
-          <SkeletonCard key={index} className="space-y-4 px-5 py-5 sm:px-6">
+          <div key={index} className="grid gap-3 px-5 py-5 sm:px-6 md:grid-cols-[15rem_minmax(0,1fr)] md:gap-8">
             <div className="space-y-1.5">
               <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-4 w-64 max-w-full" />
+              <Skeleton className="h-4 w-44 max-w-full" />
             </div>
             <Skeleton className="h-9 w-full" />
-          </SkeletonCard>
+          </div>
         ))}
-      </div>
+      </SkeletonCard>
     </SkeletonRoot>
   );
 }
@@ -237,9 +232,9 @@ export function SettingsWorkspaceSkeleton() {
 export function SettingsSkeleton() {
   return (
     <AdminPage
-      className="max-w-6xl"
+      className="max-w-5xl"
       title="Settings"
-      description="Manage your panel's identity, sign-in, email delivery, and updates."
+      description="Configure how your panel looks, signs people in, sends email and updates."
     >
       <SettingsWorkspaceSkeleton />
     </AdminPage>
