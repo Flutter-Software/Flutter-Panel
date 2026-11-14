@@ -741,7 +741,9 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
   const openedUrlFile = useRef<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [listing, setListing] = useState(true);
-  const [editing, setEditing] = useState<{ path: string; content: string } | null>(null);
+  // `session` keys the editor modal: a new value remounts it with fresh content,
+  // while renames keep it so unsaved edits survive.
+  const [editing, setEditing] = useState<{ path: string; content: string; session: number } | null>(null);
   const [pending, setPending] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [percent, setPercent] = useState<number | null>(null);
@@ -941,17 +943,18 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
     try {
       const result = await files({ action: "read", path: full });
       const data = result.data as { path: string; content: string };
-      setEditing({ path: data.path, content: data.content });
+      setEditing({ path: data.path, content: data.content, session: Date.now() });
     } catch (err) {
       showError(err, "Cannot open file");
     }
   }
 
-  async function saveFile() {
+  /** Called by the editor with its current text; the editor owns the buffer while open. */
+  async function saveFile(content: string) {
     if (!editing) return false;
     setPending(true);
     try {
-      await files({ action: "write", path: editing.path, content: editing.content });
+      await files({ action: "write", path: editing.path, content });
       return true;
     } catch (err) {
       showError(err, "Save failed");
@@ -1970,11 +1973,11 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
 
       {editing ? (
         <FileIdeModal
+          key={editing.session}
           path={editing.path}
           content={editing.content}
           pending={pending}
           readOnly={!canWrite}
-          onChange={(content) => setEditing({ ...editing, content })}
           onSave={saveFile}
           onClose={() => setEditing(null)}
         />

@@ -347,6 +347,38 @@ export function NodeDetailSkeleton() {
   );
 }
 
+/** Admin → Extensions: header actions, folder hint, then a few extension rows. */
+export function AdminExtensionsPageSkeleton() {
+  return (
+    <AdminPage
+      title="Extensions"
+      description="Add pages and tools to servers. Extensions run sandboxed and only get the permissions you approve."
+      actions={<ActionSkeleton className="h-10 w-28" />}
+    >
+      <SkeletonRoot className="space-y-6">
+        <SkeletonCard className="p-4">
+          <Skeleton className="h-4 w-full max-w-lg" />
+        </SkeletonCard>
+        <SkeletonCard className="divide-y divide-border overflow-hidden">
+          {skeletonKeys(3).map((index) => (
+            <div key={index} className="flex items-start justify-between gap-3 px-5 py-4">
+              <div className="flex min-w-0 flex-1 gap-3">
+                <Skeleton className="size-10 shrink-0 rounded-lg" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-72" />
+                  <Skeleton className="h-4 w-40" />
+                </div>
+              </div>
+              <Skeleton className="h-8 w-20" />
+            </div>
+          ))}
+        </SkeletonCard>
+      </SkeletonRoot>
+    </AdminPage>
+  );
+}
+
 /** Admin → API Keys: header action, usage hint, then a few key rows. */
 export function AdminApiKeysPageSkeleton() {
   return (

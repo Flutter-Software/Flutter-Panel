@@ -13,6 +13,7 @@ import {
   LifeBuoy,
   Mail,
   MapPin,
+  Puzzle,
   ScrollText,
   Server,
   Settings,
@@ -114,6 +115,7 @@ export default function AdminDashboardPage() {
   // Database hosts only feed one tile's count, so they never hold up the page.
   const dbHosts = useQuery<{ data: { hosts: unknown[] } }>("/api/v1/admin/database-hosts");
   const apiKeys = useQuery<{ data: { keys: unknown[] } }>("/api/v1/admin/api-keys");
+  const extensions = useQuery<{ data: { extensions: { status: string }[] } }>("/api/v1/admin/extensions");
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
@@ -124,6 +126,9 @@ export default function AdminDashboardPage() {
   const userRows = users.data?.data.users ?? [];
   const hostRows = dbHosts.data?.data.hosts;
   const apiKeyRows = apiKeys.data?.data.keys;
+  const extensionRows = extensions.data?.data.extensions;
+  const enabledExtensions = extensionRows?.filter((row) => row.status === "enabled").length ?? 0;
+  const extensionsNeedingReview = extensionRows?.filter((row) => row.status === "needs-approval").length ?? 0;
 
   useLiveReload(servers.reload, 8000);
   useLiveReload(nodes.reload, 8000);
@@ -251,6 +256,21 @@ export default function AdminDashboardPage() {
       count: nestRows.length,
       hint: nestRows.length ? `${eggCount} egg${eggCount === 1 ? "" : "s"}` : "Import or create eggs",
       prefetch: "/api/v1/admin/nests",
+    },
+    {
+      title: "Extensions",
+      description: "Install add-ons that add pages and tools to servers.",
+      href: "/admin/extensions",
+      icon: Puzzle,
+      count: extensionRows?.length,
+      hint: !extensionRows
+        ? undefined
+        : extensionsNeedingReview
+          ? `${extensionsNeedingReview} need${extensionsNeedingReview === 1 ? "s" : ""} approval`
+          : extensionRows.length
+            ? `${enabledExtensions} enabled`
+            : "Add your first extension",
+      prefetch: "/api/v1/admin/extensions",
     },
     {
       title: "API Keys",
