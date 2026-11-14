@@ -311,6 +311,25 @@ const ssoLoginTokenSchema = new Schema(
 
 ssoLoginTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+/**
+ * Admin decisions about an extension. The extension's code and manifest live
+ * on disk (`extensions/<id>/`); this row only records whether it's switched on
+ * and which permissions the admin approved, so a later manifest update that
+ * asks for more can be held back until re-approved.
+ */
+const extensionSchema = new Schema(
+  {
+    extensionId: { type: String, required: true, unique: true },
+    enabled: { type: Boolean, default: false },
+    grantedPermissions: { type: [String], default: [] },
+    /** Manifest version at the time of approval, for the audit trail. */
+    approvedVersion: { type: String, default: null },
+    enabledAt: { type: Date, default: null },
+    updatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  },
+  { timestamps: true },
+);
+
 function modelOf(name: string, schema: Schema): Model<any> {
   // tsx/node --watch re-imports this file. mongoose throws on a second
   // model(name) for the same connection, so drop the cached one first.
@@ -334,3 +353,4 @@ export const ServerDatabase = modelOf("ServerDatabase", serverDatabaseSchema);
 export const Activity = modelOf("Activity", activitySchema);
 export const ApiKey = modelOf("ApiKey", apiKeySchema);
 export const SsoLoginToken = modelOf("SsoLoginToken", ssoLoginTokenSchema);
+export const ExtensionState = modelOf("ExtensionState", extensionSchema);

@@ -9,6 +9,7 @@ export {
 
 export {
   AdminApiKeysPageSkeleton,
+  AdminExtensionsPageSkeleton,
   AdminDatabaseHostsPageSkeleton,
   AdminEditFormSkeleton,
   AdminLocationsPageSkeleton,

@@ -1,0 +1,18 @@
+[package]
+name = "flutter-extension"
+version = "0.1.0"
+edition = "2021"
+description = "Rust bindings for the Flutter Panel extension SDK (window.Flutter), for extensions compiled to WebAssembly."
+license = "MIT"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Keep in step with the wasm-bindgen CLI you build with (`wasm-bindgen --version`).
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"

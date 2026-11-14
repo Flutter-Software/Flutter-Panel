@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { requestId } from "hono/request-id";
@@ -32,6 +33,7 @@ import { attachPanelSession, detachPanelSession, mintPanelSocket } from "./panel
 import { startPanelLive } from "./panel-live";
 import { log } from "./log";
 import * as telemetry from "./telemetry";
+import * as extensions from "./extensions";
 
 type Variables = {
   requestId: string;
@@ -727,6 +729,70 @@ export function createApp() {
   app.delete("/admin/api-keys/:id", async (c) => {
     await requireAdminSession(c);
     return c.json({ data: await apiKeys.revokeApplicationKey(c.req.param("id")) });
+  });
+
+  // Extensions. Enabling one grants its code access to users' servers through
+  // the bridge, so like API keys these need a signed-in admin session.
+  app.get("/admin/extensions", async (c) => {
+    await requireAdminSession(c);
+    return c.json({ data: await extensions.listAdminExtensions() });
+  });
+  app.post("/admin/extensions/rescan", async (c) => {
+    await requireAdminSession(c);
+    return c.json({ data: await extensions.listAdminExtensions({ fresh: true }) });
+  });
+  app.post("/admin/extensions/:id/enable", async (c) => {
+    const session = await requireAdminSession(c);
+    return c.json({ data: await extensions.enableExtension(c.req.param("id"), session.user.id) });
+  });
+  app.post("/admin/extensions/:id/disable", async (c) => {
+    const session = await requireAdminSession(c);
+    return c.json({ data: await extensions.disableExtension(c.req.param("id"), session.user.id) });
+  });
+  app.post("/admin/extensions/upload", async (c) => {
+    const session = await requireAdminSession(c);
+    return c.json({ data: await extensions.installExtensionFromZip(await c.req.json(), session.user.id) }, 201);
+  });
+  app.delete("/admin/extensions/:id", async (c) => {
+    const session = await requireAdminSession(c);
+    return c.json({ data: await extensions.uninstallExtension(c.req.param("id"), session.user.id) });
+  });
+  app.get("/admin/extensions/:id/download", async (c) => {
+    await requireAdminSession(c);
+    const zip = await extensions.exportExtension(c.req.param("id"));
+    return c.body(new Uint8Array(zip.body), 200, {
+      "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="${zip.fileName}"`,
+    });
+  });
+  app.get("/client/servers/:id/extensions", async (c) => {
+    const session = await requireUser(c);
+    return c.json({
+      data: await extensions.extensionsForServer(c.req.param("id"), session.user.id, session.user.role === "admin"),
+    });
+  });
+  // Public on purpose: sandboxed frames can't send cookies. Only enabled
+  // extensions are served, always with a CSP sandbox (see extensions.ts).
+  app.get("/extensions/sdk.js", (c) => {
+    return c.body(extensions.extensionSdk(), 200, {
+      ...extensions.EXTENSION_ASSET_HEADERS,
+      "Content-Type": "text/javascript; charset=utf-8",
+    });
+  });
+  app.get("/extensions/:id/pages/:pageId", async (c) => {
+    const html = await extensions.renderExtensionPage(c.req.param("id"), c.req.param("pageId"));
+    return c.body(html, 200, { ...extensions.EXTENSION_ASSET_HEADERS, "Content-Type": "text/html; charset=utf-8" });
+  });
+  app.get("/extensions/:id/assets/*", async (c) => {
+    const prefix = `/api/v1/extensions/${c.req.param("id")}/assets/`;
+    const rel = c.req.path.startsWith(prefix) ? c.req.path.slice(prefix.length) : "";
+    const asset = await extensions.readExtensionAsset(c.req.param("id"), rel, { build: c.req.query("build") === "1" });
+    // Assets are revalidated on every load (Cache-Control: no-cache); an ETag
+    // turns repeat loads of big bundles into a 304.
+    const etag = `"${createHash("sha1").update(asset.body).digest("base64url")}"`;
+    const headers = { ...extensions.EXTENSION_ASSET_HEADERS, ETag: etag };
+    if (c.req.header("if-none-match") === etag) return c.body(null, 304, headers);
+    return c.body(new Uint8Array(asset.body), 200, { ...headers, "Content-Type": asset.contentType });
   });
   app.get("/admin/users", async (c) => {
     await requireAdmin(c);

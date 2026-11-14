@@ -1,0 +1,13 @@
+# Extensions you install yourself stay out of git (and survive panel updates).
+# Only the guide and SDKs are tracked. The starter templates are NOT shipped
+# with the panel: they're downloads on https://docs.flutter.software/extensions/templates
+# (source lives in the Flutter-Docs repo under templates/extensions/).
+/*
+!/.gitignore
+!/README.md
+!/flutter-sdk.d.ts
+!/_sdk/
+
+# Build caches.
+target/
+node_modules/

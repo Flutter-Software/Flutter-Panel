@@ -17,6 +17,7 @@ import {
   LogOut,
   MapPin,
   Network,
+  Puzzle,
   Server,
   Settings,
   Shield,
@@ -32,6 +33,8 @@ import { useAuth } from "@/components/auth-provider";
 import { can, canOpenSettings } from "@/lib/access";
 import { NAV_PERMISSION } from "@flutter-software/shared";
 import type { ServerRecord } from "@/lib/types";
+import { extensionIcon } from "@/lib/extension-icons";
+import { serverExtensionsPath, useServerExtensions } from "@/lib/use-server-extensions";
 import classes from "./navbar-minimal.module.css";
 
 export type NavItem = {
@@ -75,6 +78,7 @@ export const ADMIN_NAV = [
   {
     group: "Management",
     items: [
+      { href: "/admin/extensions", label: "Extensions", icon: Puzzle },
       { href: "/admin/api-keys", label: "API Keys", icon: KeyRound },
       { href: "/admin/settings", label: "Settings", icon: Settings },
     ],
@@ -97,6 +101,7 @@ const ADMIN_PREFETCH: Record<string, string[]> = {
   "/admin/users": ["/api/v1/admin/users"],
   "/admin/settings": ["/api/v1/admin/settings"],
   "/admin/database-hosts": ["/api/v1/admin/database-hosts"],
+  "/admin/extensions": ["/api/v1/admin/extensions"],
   "/admin/api-keys": ["/api/v1/admin/api-keys"],
 };
 
@@ -106,6 +111,9 @@ function prefetchAdmin(href: string) {
 
 function prefetchServer(href: string, serverId: string) {
   prefetchQuery(`/api/v1/client/servers/${serverId}`);
+  if (href.includes("/ext/")) {
+    prefetchQuery(serverExtensionsPath(serverId));
+  }
   if (href.endsWith("/network")) {
     prefetchQuery(`/api/v1/client/servers/${serverId}/network`);
   }
@@ -335,6 +343,15 @@ export function ServerSidebar({
 }) {
   const pathname = usePathname();
   const { user } = useAuth();
+  const { extensions } = useServerExtensions(serverId);
+  // One sidebar entry per extension page, after the built-in sections.
+  const extensionItems: NavItem[] = extensions.flatMap((extension) =>
+    extension.pages.map((page) => ({
+      href: `/server/${serverId}/ext/${extension.id}/${page.id}`,
+      label: page.label,
+      icon: extensionIcon(page.icon),
+    })),
+  );
   const items = SERVER_NAV.filter((item) => {
     if (!server) return true;
     if (item.href === "settings") return canOpenSettings(server);
@@ -354,6 +371,16 @@ export function ServerSidebar({
         match={(href) => pathname === href}
         onPrefetch={(href) => prefetchServer(href, serverId)}
       />
+      {extensionItems.length ? (
+        <div className="border-t border-sidebar-border">
+          <p className="px-6 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Extensions</p>
+          <SidebarNav
+            items={extensionItems}
+            match={(href) => pathname === href}
+            onPrefetch={(href) => prefetchServer(href, serverId)}
+          />
+        </div>
+      ) : null}
       {user?.role === "admin" ? (
         <div className="mt-auto space-y-0.5 border-t border-sidebar-border p-3">
           <Link
