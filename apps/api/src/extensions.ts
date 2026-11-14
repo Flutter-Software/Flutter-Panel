@@ -348,6 +348,10 @@ const CONTENT_TYPES: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
   // Required for WebAssembly.instantiateStreaming, which wasm-bindgen glue uses.
   ".wasm": "application/wasm",
+  // 3D models (e.g. three.js GLTFLoader).
+  ".glb": "model/gltf-binary",
+  ".gltf": "model/gltf+json",
+  ".bin": "application/octet-stream",
 };
 
 /** Largest single asset served; extensions are UI bundles, not file hosts. Rust/wasm debug builds can be large. */

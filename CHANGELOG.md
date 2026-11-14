@@ -6,6 +6,8 @@
 
 Extension pages can render inline with `Flutter.ui.fit()`: no border or fixed-height box, the frame grows with the page and scrolls with the panel like a built-in page. The panel tells the page which part of it is on screen (`--flutter-viewport-top` / `--flutter-viewport-height`) so dialogs open where you are looking. Pages that don't call it keep the boxed frame.
 
+Extension assets ending in `.glb`, `.gltf` and `.bin` are served with 3D model content types, so extensions can ship models for viewers such as three.js.
+
 ## 0.2.73
 
 ### Admin
