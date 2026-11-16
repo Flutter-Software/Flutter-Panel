@@ -182,6 +182,7 @@ export function ExtensionFrame({
           id: extension.id,
           name: extension.name,
           version: extension.version,
+          author: extension.author,
           permissions: extension.permissions,
           page: page.id,
         },
@@ -357,8 +358,8 @@ export function ExtensionFrame({
     <div
       className={
         fitting
-          ? "relative" // inline: no card, no fixed height; the page scrolls with the panel
-          : "relative flex h-full min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card"
+          ? "relative" // inline: no frame, no fixed height; the page scrolls with the panel
+          : "relative flex h-full min-h-[28rem] flex-col overflow-hidden rounded-lg border border-border bg-card"
       }
     >
       {!loaded ? (

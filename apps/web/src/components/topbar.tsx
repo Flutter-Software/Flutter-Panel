@@ -18,7 +18,7 @@ function topbarKicker(pathname: string) {
   if (pathname.startsWith("/account")) return "Account settings";
   if (pathname.startsWith("/admin")) return "Admin";
   if (pathname.startsWith("/server/")) return "Server";
-  return "Server list";
+  return "Servers";
 }
 
 export function Topbar() {
@@ -102,7 +102,7 @@ export function Topbar() {
           {menuOpen ? (
             <div
               role="menu"
-              className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-border bg-card shadow-lg"
+              className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-float)]"
             >
               <div className="flex items-center gap-3 border-b border-border px-3 py-3">
                 <UserAvatar user={user} size="md" />
@@ -112,7 +112,7 @@ export function Topbar() {
                 </div>
               </div>
               {user?.role ? (
-                <p className="px-3 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <p className="px-3 pt-2.5 pb-1 text-[12px] text-muted-foreground">
                   {user.role}
                 </p>
               ) : null}

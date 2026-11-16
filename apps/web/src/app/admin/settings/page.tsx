@@ -559,12 +559,12 @@ export default function AdminSettingsPage() {
       : smtp?.source === "env"
         ? { tone: "warn", status: "Using environment" }
         : smtp?.envFallback
-          ? { tone: "warn", status: "Off · env fallback" }
+          ? { tone: "warn", status: "Off, environment fallback" }
           : { tone: "off", status: "Not configured" };
 
   const ssoState: { tone: SettingsTone; status: string } =
     oidc?.source === "database"
-      ? { tone: "ok", status: oidc.passwordLogin ? "SSO + passwords" : "SSO only" }
+      ? { tone: "ok", status: oidc.passwordLogin ? "SSO and passwords" : "SSO only" }
       : oidc?.source === "env"
         ? { tone: "warn", status: "Using environment" }
         : { tone: "off", status: "Passwords only" };
@@ -574,7 +574,7 @@ export default function AdminSettingsPage() {
     : telemetry?.sending
       ? { tone: "ok", status: "Sharing" }
       : telemetry?.enabled
-        ? { tone: "warn", status: "On · not sending" }
+        ? { tone: "warn", status: "On, not sending" }
         : { tone: "off", status: "Off" };
 
   const tabs: SettingsTab[] = [
@@ -722,7 +722,7 @@ export default function AdminSettingsPage() {
                   <span className="min-w-0 truncate">
                     Recipients see{" "}
                     <span className="font-medium text-foreground">{fromName.trim() || DEFAULT_SITE_NAME}</span>{" "}
-                    <span className="font-mono text-xs">&lt;{fromEmail.trim() || "noreply@example.com"}&gt;</span>
+                    <span className="font-mono text-[12.5px]">&lt;{fromEmail.trim() || "noreply@example.com"}&gt;</span>
                   </span>
                 }
               >
@@ -809,7 +809,7 @@ export default function AdminSettingsPage() {
                   }
                 />
                 {signInLocked ? (
-                  <div className="flex items-start gap-2 bg-status-error/10 px-5 py-3 text-sm text-status-error sm:px-6">
+                  <div className="flex items-start gap-2 border-l-2 border-status-error bg-status-error/10 px-5 py-3 text-sm text-status-error sm:px-6">
                     <TriangleAlert className="mt-0.5 size-4 shrink-0" />
                     With both methods off, nobody will be able to sign in.
                   </div>

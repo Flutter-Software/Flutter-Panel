@@ -5,13 +5,8 @@ import { useRouter } from "next/navigation";
 import { Globe, HardDrive, Layers, MemoryStick, Network, Plug } from "lucide-react";
 import { parsePortSpec } from "@flutter-software/shared";
 import { AdminError } from "@/components/admin-table";
-import {
-  AdminCreateHeader,
-  AdminSection,
-  SaveIsland,
-  isDirty,
-} from "@/components/admin-create";
-import { Card, Field, Input, Textarea } from "@/components/ui";
+import { AdminSection, SaveIsland, isDirty } from "@/components/admin-create";
+import { Field, Input, Textarea } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
@@ -78,26 +73,20 @@ export default function CreateAllocationsPage({ params }: { params: Promise<{ id
       router.push(backHref);
       router.refresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Allocation create failed");
+      setActionError(err instanceof Error ? err.message : "Couldn't add the allocations. Check the IP and port list, then try again.");
       setPending(false);
     }
   }
 
   return (
     <form onSubmit={onCreate} className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-6">
-      <AdminCreateHeader
-        backHref="/admin/nodes"
-        backLabel="Back to nodes"
-        crumbs={[
-          { href: "/admin", label: "Admin" },
-          { href: "/admin/nodes", label: "Nodes" },
-          { href: backHref, label: node?.name ?? "Node" },
-          { label: "Allocations" },
-        ]}
-        icon={<Network className="size-4" />}
-        title="New allocation"
-        description="Expose IP and port bindings on this node so servers have somewhere to listen."
-      />
+      {/* This page sits inside the node frame, which already shows the node name, back link and tabs. */}
+      <div>
+        <h2 className="text-[20px] font-semibold">Add allocations</h2>
+        <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
+          Open IP and port bindings on {node?.name ?? "this node"} so servers have somewhere to listen.
+        </p>
+      </div>
       <AdminError message={actionError ?? error} />
 
       <div className="grid items-start gap-4 xl:grid-cols-[1.4fr_1fr]">
@@ -116,7 +105,7 @@ export default function CreateAllocationsPage({ params }: { params: Promise<{ id
                 className="font-mono"
               />
             </Field>
-            <Field label="IP alias" hint="Optional: friendly hostname shown to users.">
+            <Field label="IP alias" hint="Optional. A friendly hostname shown to users instead of the IP.">
               <Input
                 value={alias}
                 onChange={(event) => setAlias(event.target.value)}
@@ -128,7 +117,7 @@ export default function CreateAllocationsPage({ params }: { params: Promise<{ id
           <Field
             label="Ports"
             required
-            hint="Single ports and ranges, comma-separated — e.g. 25565, 25570-25575."
+            hint="Single ports and ranges separated by commas, for example 25565, 25570-25575."
           >
             <Textarea
               value={ports}
@@ -139,32 +128,37 @@ export default function CreateAllocationsPage({ params }: { params: Promise<{ id
             />
           </Field>
           {preview.ports.length ? (
-            <div className="rounded-lg border border-border bg-muted/30 px-3 py-3">
-              <p className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{newCount} new ports</span>
-                {existingCount ? ` · ${existingCount} already exist` : null}
+            <div className="border-t border-border pt-3">
+              <p className="text-[13px] text-muted-foreground">
+                <span className="font-medium tabular-nums text-foreground">
+                  {newCount} new {newCount === 1 ? "port" : "ports"}
+                </span>
+                {existingCount ? (
+                  <>
+                    , <span className="tabular-nums">{existingCount}</span> already{" "}
+                    {existingCount === 1 ? "exists" : "exist"} and will be skipped
+                  </>
+                ) : null}
               </p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <ul className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
                 {preview.ports.map((port) => {
                   const exists = preview.existing.has(port);
                   return (
-                    <span
+                    <li
                       key={port}
                       className={cn(
-                        "rounded-md border px-2 py-0.5 font-mono text-xs",
-                        exists
-                          ? "border-border text-muted-foreground"
-                          : "border-primary/40 text-primary",
+                        "font-mono text-[12.5px] tabular-nums",
+                        exists ? "text-muted-foreground line-through" : "text-foreground",
                       )}
                     >
                       {port}
-                    </span>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             </div>
           ) : ports.trim() && preview.error ? (
-            <p className="text-xs text-status-error">{preview.error}</p>
+            <p className="text-[13px] text-status-error">{preview.error}</p>
           ) : null}
           <Field label="Notes" hint="Optional. Applied to every port in this batch.">
             <Input
@@ -183,8 +177,8 @@ export default function CreateAllocationsPage({ params }: { params: Promise<{ id
           {node ? (
             <>
               <div>
-                <p className="text-xl font-semibold">{node.name}</p>
-                <p className="mt-1 font-mono text-xs text-muted-foreground">{node.fqdn}</p>
+                <p className="font-display text-[18px] font-semibold leading-tight">{node.name}</p>
+                <p className="mt-0.5 font-mono text-[12.5px] text-muted-foreground">{node.fqdn}</p>
               </div>
               <div className="space-y-3 border-t border-border pt-4 text-sm">
                 <MetaRow icon={<MemoryStick className="size-4" />} label="Memory" value={formatGiB(node.memoryMb)} />
@@ -197,7 +191,7 @@ export default function CreateAllocationsPage({ params }: { params: Promise<{ id
               </div>
             </>
           ) : (
-            <div className="h-24 animate-pulse rounded-lg bg-muted/40" />
+            <div className="h-24 animate-pulse rounded-md bg-muted/40" />
           )}
         </AdminSection>
       </div>
@@ -211,10 +205,13 @@ export default function CreateAllocationsPage({ params }: { params: Promise<{ id
         disabled={!ip.trim() || newCount === 0}
         summary={
           <span className="inline-flex items-center gap-2">
-            <Plug className="size-4 text-primary" />
+            <Plug className="size-4 text-primary" aria-hidden />
             <span>
               Adding{" "}
-              <span className="font-medium text-foreground">{newCount || 0} ports</span> on{" "}
+              <span className="font-medium tabular-nums text-foreground">
+                {newCount || 0} {newCount === 1 ? "port" : "ports"}
+              </span>{" "}
+              on{" "}
               <span className="font-mono text-foreground">{ip || "IP"}</span> to{" "}
               <span className="font-medium text-foreground">{node?.name ?? "node"}</span>.
             </span>

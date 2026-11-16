@@ -2,11 +2,11 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Box, FileJson, Plus, Terminal, Trash2, Upload, Variable } from "lucide-react";
+import { Box, Download, FileJson, Plus, Terminal, Trash2, Upload, Variable } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { AdminCreateHeader, AdminSection, SaveIsland, Segmented, Switch, isDirty } from "@/components/admin-create";
 import { confirm } from "@/components/confirm-dialog";
-import { Button, Field, Input, Select, Textarea } from "@/components/ui";
+import { Button, Field, Input, Select, Textarea, buttonClass } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
 import { parseEggJson } from "./egg-json";
@@ -248,6 +248,20 @@ export function EggForm({
         ]}
         icon={<Box className="size-4" />}
         title={creating ? (importing ? "Import egg" : "New egg") : `Edit ${initial?.name ?? "egg"}`}
+        actions={
+          !creating && initial ? (
+            // Downloads the saved egg. Unsaved edits on this page aren't included.
+            <a
+              href={`/api/v1/admin/eggs/${initial.id}/export`}
+              download
+              className={buttonClass({ variant: "secondary", size: "sm" })}
+              title="Download the saved egg as JSON. Re-import it here, or into Pterodactyl or Pelican."
+            >
+              <Download className="size-3.5" />
+              Download JSON
+            </a>
+          ) : null
+        }
         description={
           creating && importing
             ? "Paste or upload a Pterodactyl (PTDL) or Pelican egg JSON. Docker image, startup, install script, and variables are mapped automatically."
@@ -295,12 +309,13 @@ export function EggForm({
             </Field>
             {fileName ? <p className="text-xs text-muted-foreground">Loaded {fileName}</p> : null}
             {parsed.preview ? (
-              <div className="rounded-lg border border-border bg-muted/30 px-3 py-3 text-sm">
-                <p className="font-medium">{parsed.preview.name}</p>
-                <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                  {parsed.preview.image || "No docker image detected"}
+              // What the import will create, as an inset note rather than a box inside the panel.
+              <div className="border-l-2 border-primary pl-3 text-sm">
+                <p className="font-display text-[17px] font-semibold leading-tight">{parsed.preview.name}</p>
+                <p className="mt-0.5 truncate font-mono text-[12.5px] text-muted-foreground">
+                  {parsed.preview.image || "No Docker image found in this file"}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-[13px] tabular-nums text-muted-foreground">
                   {parsed.preview.variables} variable{parsed.preview.variables === 1 ? "" : "s"}
                 </p>
               </div>
@@ -387,7 +402,7 @@ export function EggForm({
 
         <AdminSection
           icon={<Terminal className="size-4" />}
-          title="Process & install"
+          title="Process and install"
           description="How the container starts, stops, and is first installed."
         >
           <Field label="Startup" hint="Optional. Command run as the game process. Leave blank if the image has an entrypoint. Use {{KEY}} for variables.">
@@ -399,7 +414,7 @@ export function EggForm({
               maxLength={2000}
             />
             {startup.includes("{{") ? (
-              <p className="mt-2 whitespace-pre-wrap break-all rounded-md border border-border bg-background px-3 py-2 font-mono text-xs">
+              <p className="mt-2 whitespace-pre-wrap break-all rounded-md border border-border bg-well px-3 py-2 font-mono text-xs">
                 {startupPreviewParts(
                   startup,
                   Object.fromEntries(variables.map((row) => [row.key, row.default])),
@@ -459,11 +474,12 @@ export function EggForm({
         {variables.length === 0 ? (
           <p className="text-sm text-muted-foreground">No variables yet. Add keys like EULA or VERSION.</p>
         ) : (
-          <div className="space-y-3">
+          // One seam-separated row per variable, edge to edge in the panel (no box per variable).
+          <ul aria-label="Environment variables" className="-mx-5 divide-y divide-border border-y border-border sm:-mx-6">
             {variables.map((row, index) => (
-              <div
+              <li
                 key={index}
-                className="grid gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:px-6"
               >
                 <Field label="Key" required>
                   <Input
@@ -489,7 +505,7 @@ export function EggForm({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="size-10 px-0 text-muted-foreground hover:text-destructive"
+                    className="size-9 px-0 text-muted-foreground hover:text-destructive"
                     aria-label={`Remove ${row.key || "variable"}`}
                     onClick={() => setVariables((current) => current.filter((_, i) => i !== index))}
                   >
@@ -506,9 +522,9 @@ export function EggForm({
                     />
                   </Field>
                 </div>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
         <Button type="button" variant="secondary" size="sm" onClick={() => setVariables((current) => [...current, emptyVariable()])}>
           <Plus className="size-3.5" />
@@ -545,8 +561,7 @@ export function EggForm({
         pending={pending}
         disabled={importing ? pending : !ready}
         summary={
-          <span className="inline-flex items-center gap-2">
-            {importing ? <Upload className="size-4 text-primary" /> : <Box className="size-4 text-primary" />}
+          <span>
             <span>
               {importing ? "Importing" : creating ? "Creating" : "Saving"}{" "}
               <span className="font-medium text-foreground">

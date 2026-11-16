@@ -39,7 +39,7 @@ function fileToBase64(file: File) {
       const comma = result.indexOf(",");
       resolve(comma >= 0 ? result.slice(comma + 1) : result);
     };
-    reader.onerror = () => reject(new Error("Could not read that image"));
+    reader.onerror = () => reject(new Error("That image couldn't be read. Try a different file."));
     reader.readAsDataURL(file);
   });
 }
@@ -79,12 +79,12 @@ export function UserAvatar({
   async function onFile(file: File | undefined) {
     if (!file || !editable) return;
     if (file.size > MAX_BYTES) {
-      onError?.("Image must be 2 MB or smaller");
+      onError?.("That image is over 2 MB. Choose a smaller one.");
       return;
     }
     const mime = imageMime(file);
     if (!mime) {
-      onError?.("Could not use that image");
+      onError?.("That file isn't a PNG, JPEG, WebP or GIF image.");
       return;
     }
     const objectUrl = URL.createObjectURL(file);
@@ -98,7 +98,7 @@ export function UserAvatar({
       onChanged?.(result.data.user);
       setPreview(null);
     } catch (error) {
-      onError?.(error instanceof Error ? error.message : "Could not use that image");
+      onError?.(error instanceof Error ? error.message : "The picture didn't upload. Try again.");
       setPreview(null);
     } finally {
       URL.revokeObjectURL(objectUrl);
@@ -119,7 +119,8 @@ export function UserAvatar({
   );
 
   const shellClass = cn(
-    "relative flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary font-semibold text-primary-foreground",
+    // Neutral chassis disc: cyan is reserved for actions and focus (DESIGN.md → Colour).
+    "relative flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted font-semibold text-foreground",
     SIZE_CLASS[size],
     className,
   );
@@ -132,29 +133,23 @@ export function UserAvatar({
     <>
       <button
         type="button"
-        className={cn("group no-press cursor-pointer", shellClass)}
+        className={cn(
+          "group no-press cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+          shellClass,
+        )}
         aria-label="Change profile photo"
         disabled={pending}
         onClick={() => inputRef.current?.click()}
       >
+        <span className="flex size-full items-center justify-center">{face}</span>
         <span
           className={cn(
-            "flex size-full items-center justify-center transition duration-200",
-            pending
-              ? "scale-105 blur-[2px]"
-              : "group-hover:scale-105 group-hover:blur-[2px] group-focus-visible:scale-105 group-focus-visible:blur-[2px]",
-          )}
-        >
-          {face}
-        </span>
-        <span
-          className={cn(
-            "absolute inset-0 flex items-center justify-center bg-black/45 transition-opacity",
+            "absolute inset-0 flex items-center justify-center bg-black/55",
             pending ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
           )}
         >
           {pending ? (
-            <Loader2 className={cn("animate-spin text-white", ICON_CLASS[size])} />
+            <Loader2 className={cn("animate-spin text-white motion-reduce:animate-none", ICON_CLASS[size])} />
           ) : (
             <Camera className={cn("text-white", ICON_CLASS[size])} />
           )}

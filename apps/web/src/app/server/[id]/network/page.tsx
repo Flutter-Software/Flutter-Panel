@@ -3,13 +3,12 @@
 import { use, useEffect, useState } from "react";
 import { Check, Copy, ExternalLink, Star } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
-import { Badge, Button, Card, EmptyState, Field, Input, buttonClass } from "@/components/ui";
+import { Button, EmptyState, Field, Input, Rack, buttonClass } from "@/components/ui";
 import { toast } from "@/components/toast";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { can } from "@/lib/access";
 import { invalidateQuery, useQuery } from "@/lib/query";
-import { cn } from "@/lib/cn";
 
 type Allocation = {
   id: string;
@@ -72,7 +71,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   );
 }
 
-function AllocationCard({
+function AllocationRow({
   row,
   canUpdate,
   pending,
@@ -101,86 +100,84 @@ function AllocationCard({
   }
 
   return (
-    <Card className={cn("p-4", row.primary && "border-primary/40")}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-mono text-sm font-semibold">{row.display}</p>
-            {row.primary ? (
-              <Badge className="rounded-full px-2">Primary</Badge>
-            ) : (
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Additional
-              </span>
-            )}
-          </div>
+    <div
+      role="listitem"
+      className="relative grid gap-3 px-4 py-3.5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto] lg:items-end lg:gap-5"
+    >
+      {/* The primary address gets the cyan rule: it's the one the process binds to. */}
+      {row.primary ? <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-primary" /> : null}
+      <div className="min-w-0 self-center pl-1">
+        <p className="truncate font-mono text-[15px] font-medium tabular-nums">{row.display}</p>
+        <p className="truncate text-[13px] text-muted-foreground">
+          {row.primary ? <span className="font-medium text-primary">Primary</span> : "Additional"}
           {row.alias && row.display !== raw ? (
-            <p className="mt-1 font-mono text-xs text-muted-foreground">{raw}</p>
+            <>
+              {", "}
+              <span className="font-mono text-[12px]">{raw}</span>
+            </>
           ) : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <CopyAction value={row.display} />
-          {row.http && row.url ? (
-            <a
-              href={row.url}
-              target="_blank"
-              rel="noreferrer"
-              className={buttonClass({ variant: "ghost", size: "sm" })}
-            >
-              <ExternalLink className="size-3.5" />
-              Open
-            </a>
-          ) : null}
-          {canUpdate && !row.primary ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={pending}
-              onClick={() => void onPrimary(row)}
-            >
-              <Star className="size-3.5" />
-              Set primary
-            </Button>
-          ) : null}
-        </div>
+        </p>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Field label="Alias" hint="Shown instead of the IP. Does not change the bind address." extra={<CopyButton value={alias.trim() || row.ip} label="host" />}>
-          <Input
-            value={alias}
-            onChange={(event) => setAlias(event.target.value)}
-            onBlur={() => void saveIfDirty()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                (event.currentTarget as HTMLInputElement).blur();
-              }
-            }}
-            maxLength={255}
-            placeholder={row.ip}
-            className="font-mono"
-            disabled={!canUpdate || pending}
-          />
-        </Field>
-        <Field label="Notes">
-          <Input
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            onBlur={() => void saveIfDirty()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                (event.currentTarget as HTMLInputElement).blur();
-              }
-            }}
-            maxLength={240}
-            placeholder="What this port is for"
-            disabled={!canUpdate || pending}
-          />
-        </Field>
+      <Field label="Alias" extra={<CopyButton value={alias.trim() || row.ip} label="host" />}>
+        <Input
+          value={alias}
+          onChange={(event) => setAlias(event.target.value)}
+          onBlur={() => void saveIfDirty()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              (event.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+          maxLength={255}
+          placeholder={row.ip}
+          className="font-mono"
+          disabled={!canUpdate || pending}
+        />
+      </Field>
+      <Field label="Notes">
+        <Input
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          onBlur={() => void saveIfDirty()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              (event.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+          maxLength={240}
+          placeholder="What this port is for"
+          disabled={!canUpdate || pending}
+        />
+      </Field>
+      <div className="flex flex-wrap items-center gap-1.5 pl-1 lg:justify-end lg:pl-0">
+        <CopyAction value={row.display} />
+        {row.http && row.url ? (
+          <a
+            href={row.url}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonClass({ variant: "ghost", size: "sm" })}
+          >
+            <ExternalLink className="size-3.5" />
+            Open
+          </a>
+        ) : null}
+        {canUpdate && !row.primary ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={pending}
+            onClick={() => void onPrimary(row)}
+          >
+            <Star className="size-3.5" />
+            Make primary
+          </Button>
+        ) : null}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -242,7 +239,7 @@ export default function NetworkPage({ params }: { params: Promise<{ id: string }
     return (
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">Network</h2>
+          <h2 className="text-[20px] font-semibold">Network</h2>
           <p className="text-sm text-muted-foreground">Loading this server…</p>
         </div>
       </div>
@@ -253,7 +250,7 @@ export default function NetworkPage({ params }: { params: Promise<{ id: string }
     return (
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">Network</h2>
+          <h2 className="text-[20px] font-semibold">Network</h2>
           <p className="text-sm text-muted-foreground">You do not have permission to view allocations on this server.</p>
         </div>
       </div>
@@ -263,10 +260,10 @@ export default function NetworkPage({ params }: { params: Promise<{ id: string }
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Network</h2>
+        <h2 className="text-[20px] font-semibold">Network</h2>
         <p className="text-sm text-muted-foreground">
-          Allocations assigned to this server. Notes and aliases are labels; the primary address is what the process
-          binds to.
+          Addresses assigned to this server. The primary address is the one the process binds to. An alias is shown
+          instead of the IP and doesn&apos;t change the bind address.
         </p>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -280,9 +277,9 @@ export default function NetworkPage({ params }: { params: Promise<{ id: string }
           }
         />
       ) : (
-        <div className="space-y-3">
+        <Rack label="Allocations">
           {rows.map((row) => (
-            <AllocationCard
+            <AllocationRow
               key={row.id}
               row={row}
               canUpdate={canUpdate}
@@ -291,7 +288,7 @@ export default function NetworkPage({ params }: { params: Promise<{ id: string }
               onPrimary={onPrimary}
             />
           ))}
-        </div>
+        </Rack>
       )}
     </div>
   );

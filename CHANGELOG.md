@@ -8,6 +8,20 @@ Extension pages can render inline with `Flutter.ui.fit()`: no border or fixed-he
 
 Extension assets ending in `.glb`, `.gltf` and `.bin` are served with 3D model content types, so extensions can ship models for viewers such as three.js.
 
+Extensions can be written in Svelte 5 with no build step. Point a page `entry` at a `.svelte` file and the panel compiles it (including `<script lang="ts">`, scoped styles and child components), bundles the Svelte runtime, and mounts it into the page. `.svelte.ts` / `.svelte.js` files can use runes for shared state. Compile errors show inside the page with file, line and column. The code scan reads `.svelte` files too.
+
+Admins can see who made an extension: the `author` field in `extension.json` is shown next to the version on each row and in the enable/approve dialog, linked to `homepage` when set. Extensions that don't name one are marked "Unknown author". Extension pages receive it as `Flutter.context.extension.author` (and `ExtensionInfo::author` in the Rust crate).
+
+### Eggs
+
+Admins can download any egg as JSON: the download button on each egg in Admin → Nests, or **Download JSON** on the egg's edit page. The file uses the same PTDL_v2 format as **Import egg**, so it imports back into any Flutter panel unchanged (including whether the egg needs a port) and also into Pterodactyl or Pelican. The API route is `GET /api/v1/admin/eggs/:id/export`; application API keys need read access to Nests & eggs.
+
+### Install
+
+Running `install/ubuntu-24.04.sh` again from a separate checkout no longer deletes installed extensions. The installer copies the source tree with `rsync --delete`, which removed every folder in `/opt/flutter/extensions` that wasn't in the checkout. Installed extensions are now left alone, and `extensions/_sdk/` is still updated.
+
+`install/connect-home-node.sh --listen-url` works for public IPs and Tailscale addresses. The daemon used to listen on 127.0.0.1 even without the Cloudflare tunnel, so a panel on another machine could never reach it. It now listens on 127.0.0.1 only behind the tunnel and on all interfaces otherwise, and `--host` (or `FLUTTER_DAEMON_HOST`) sets it explicitly. Switching an existing home node to `--listen-url` stops the old tunnel service, opens the daemon port in ufw when the firewall is on, and refuses a loopback listen URL.
+
 ## 0.2.73
 
 ### Admin
@@ -20,7 +34,7 @@ Admin → API Keys lists every application key on the panel with its owner, acce
 
 ### Settings
 
-Settings has a grouped sidebar (General, Authentication, System) and splits each section into focused cards. Changes are saved from a floating bar that appears once something is edited, with Discard and Save (or Ctrl/⌘+S). Leaving a section or the page with unsaved edits asks first. Branding previews the panel name, logo, and console tag as you type, and the logo accepts drag and drop. Email moves the port to match the chosen encryption and shows how the sender will appear. Sign-in warns when both SSO and passwords are off. Telemetry saves as soon as the switch is flipped.
+Settings is a single row of tabs (General, Authentication, Email, Updates, Telemetry), each split into focused cards. A tab with unsaved edits shows a dot. Changes are saved from a floating "You have unsaved changes" bar that appears once something is edited, with Discard and Save changes (or Ctrl/⌘+S). Leaving a tab or the page with unsaved edits asks first. Branding previews the panel name, logo, and console tag as you type, and the logo accepts drag and drop. Email moves the port to match the chosen encryption and shows how the sender will appear. Sign-in warns when both SSO and passwords are off. Telemetry saves as soon as the switch is flipped.
 
 ### Notifications
 

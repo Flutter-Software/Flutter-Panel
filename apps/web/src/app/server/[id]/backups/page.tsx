@@ -1,9 +1,9 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { use, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Plus, RotateCcw, Trash2 } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
-import { Button, Card } from "@/components/ui";
+import { Button, EmptyState, Rack, RowField } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { formatBytes } from "@/lib/types";
@@ -53,7 +53,9 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
     return (
       <ServerSection
         title="Backups"
-        description="Backups are disabled for this server. An administrator can turn them on from the server edit page."
+        description="Archives stored on the node next to this server."
+        emptyTitle="Backups are turned off"
+        emptyDescription="An administrator can turn them on when editing this server in Admin."
       />
     );
   }
@@ -62,7 +64,7 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Backups</h2>
+          <h2 className="text-[20px] font-semibold">Backups</h2>
           <p className="text-sm text-muted-foreground">Archives stored on the node next to this server.</p>
         </div>
         <Button type="button" disabled={pending} onClick={() => void run("create")}>
@@ -71,82 +73,88 @@ export default function BackupsPage({ params }: { params: Promise<{ id: string }
         </Button>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      <Card className="overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-4 py-2.5 font-medium">Backup</th>
-              <th className="px-4 py-2.5 font-medium">Size</th>
-              <th className="px-4 py-2.5 font-medium">Created</th>
-              <th className="px-4 py-2.5 font-medium" />
-            </tr>
-          </thead>
-          <tbody>
-            {backups.length === 0 ? (
-              <tr>
-                <td className="px-4 py-6 text-muted-foreground" colSpan={4}>
-                  No backups yet.
-                </td>
-              </tr>
-            ) : (
-              backups.map((backup) => (
-                <tr key={backup.id} className="border-t border-border">
-                  <td className="px-4 py-3 font-mono text-xs">{backup.name}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{formatBytes(backup.size)}</td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(backup.createdAt).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={pending}
-                        onClick={async () => {
-                          if (
-                            !(await confirm({
-                              title: "Restore backup",
-                              description: "The server will be stopped first.",
-                              confirmLabel: "Restore",
-                            }))
-                          ) {
-                            return;
-                          }
-                          void run("restore", backup.id);
-                        }}
-                      >
-                        Restore
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={pending}
-                        className="text-destructive"
-                        onClick={async () => {
-                          if (
-                            !(await confirm({
-                              title: "Delete backup",
-                              description: "Delete this backup? This cannot be undone.",
-                              confirmLabel: "Delete",
-                            }))
-                          ) {
-                            return;
-                          }
-                          void run("delete", backup.id);
-                        }}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </Card>
+      {backups.length === 0 ? (
+        <EmptyState
+          title="No backups yet"
+          description="Create one to save a copy of this server's files."
+        />
+      ) : (
+        <div>
+          {/* Column legend for wide screens; below md each row labels its own fields. */}
+          <div
+            aria-hidden
+            className="hidden px-4 py-2 text-[12px] text-muted-foreground md:grid md:grid-cols-[minmax(0,2fr)_minmax(0,0.7fr)_minmax(0,1.2fr)_auto] md:gap-5"
+          >
+            <span>Backup</span>
+            <span>Size</span>
+            <span>Created</span>
+            <span className="w-[10rem]" />
+          </div>
+          <Rack label="Backups">
+            {backups.map((backup) => (
+              <div
+                key={backup.id}
+                role="listitem"
+                className="relative grid gap-2 px-4 py-3 md:grid-cols-[minmax(0,2fr)_minmax(0,0.7fr)_minmax(0,1.2fr)_auto] md:items-center md:gap-5"
+              >
+                <p className="min-w-0 truncate font-display text-[16px] font-semibold leading-tight">{backup.name}</p>
+                <RowField breakpoint="md" label="Size">
+                  <span className="tabular-nums">{formatBytes(backup.size)}</span>
+                </RowField>
+                <RowField breakpoint="md" label="Created">
+                  <span className="tabular-nums">{new Date(backup.createdAt).toLocaleString()}</span>
+                </RowField>
+                <div className="flex items-center gap-1.5 md:w-[10rem] md:justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={pending}
+                    onClick={async () => {
+                      if (
+                        !(await confirm({
+                          title: "Restore backup",
+                          description: "The server will be stopped first.",
+                          confirmLabel: "Restore",
+                        }))
+                      ) {
+                        return;
+                      }
+                      void run("restore", backup.id);
+                    }}
+                  >
+                    <RotateCcw className="size-3.5" />
+                    Restore
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={pending}
+                    className="size-8 px-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`Delete ${backup.name}`}
+                    onClick={async () => {
+                      if (
+                        !(await confirm({
+                          title: "Delete backup",
+                          description: "Delete this backup? This cannot be undone.",
+                          confirmLabel: "Delete",
+                        }))
+                      ) {
+                        return;
+                      }
+                      void run("delete", backup.id);
+                    }}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </Rack>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -60,20 +60,20 @@ export function FileDateHeader({
 
   return (
     <th
-      className={cn("whitespace-nowrap px-4 py-2.5 font-medium", className)}
+      className={cn("whitespace-nowrap px-4 py-2 font-normal", className)}
       aria-sort={direction === "desc" ? "descending" : direction === "asc" ? "ascending" : "none"}
     >
       <div className="inline-flex items-center gap-1">
         <button
           type="button"
-          className="no-press inline-flex items-center gap-1 uppercase tracking-wide hover:text-foreground"
+          className="no-press inline-flex items-center gap-1 hover:text-foreground"
           onClick={onSort}
         >
           {label}
           {/* Always rendered so the filter chevron doesn't jump when sorting starts. */}
           <SortIcon className={cn("size-3", !direction && "invisible")} aria-hidden />
         </button>
-        <Popover opened={open} onChange={setOpen} position="bottom-start" width={248} shadow="md" trapFocus>
+        <Popover opened={open} onChange={setOpen} position="bottom-start" width={248} trapFocus>
           <Popover.Target>
             <button
               type="button"
@@ -107,7 +107,7 @@ export function FileDateHeader({
                       onChange={(event) => toggleBucket(id, event.target.checked)}
                     />
                     <span className="flex-1">{groupLabel}</span>
-                    <span className="text-xs text-muted-foreground">{counts.get(id) ?? 0}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">{counts.get(id) ?? 0}</span>
                   </label>
                 ))}
               </div>

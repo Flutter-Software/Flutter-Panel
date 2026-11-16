@@ -216,9 +216,10 @@ export function SearchSelect({
       ) : null}
       <div
         className={cn(
-          "flex w-full items-center gap-1.5 rounded-lg border border-input bg-input/60 outline-none ring-offset-background",
-          compact ? "min-h-8 px-2 py-0.5 text-xs" : "min-h-10 px-2.5 py-1 text-sm",
-          open && "border-primary ring-2 ring-primary/30",
+          // Matches <Input>: 3px corners, recessed well, cyan focus (DESIGN.md → Shape and depth).
+          "flex w-full items-center gap-1.5 rounded-md border border-input bg-well outline-none ring-offset-background",
+          compact ? "min-h-8 px-2 py-0.5 text-[13px]" : "min-h-9 px-2.5 py-0.5 text-sm",
+          open && "border-primary ring-2 ring-primary/25",
           disabled && "pointer-events-none opacity-50",
         )}
         onClick={() => {
@@ -232,12 +233,16 @@ export function SearchSelect({
             ? selectedRows.map((option) => (
                 <span
                   key={option.value}
-                  className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 font-mono text-xs text-primary"
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[12px] text-foreground",
+                    // Machine values (addresses, ports) keep the data face when the caller asks for it.
+                    className?.includes("font-mono") && "font-mono",
+                  )}
                 >
                   {option.label}
                   <button
                     type="button"
-                    className="no-press rounded p-0.5 hover:bg-primary/20"
+                    className="no-press rounded-sm p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
                     aria-label={`Remove ${option.label}`}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -262,7 +267,7 @@ export function SearchSelect({
             aria-autocomplete="list"
             className={cn(
               "min-w-0 flex-1 truncate bg-transparent outline-none placeholder:text-muted-foreground",
-              compact ? "h-6 text-xs" : "h-8 text-sm",
+              compact ? "h-6 text-[13px]" : "h-7 text-sm",
               multiple && "min-w-16",
               className?.includes("font-mono") && "font-mono",
             )}
@@ -294,10 +299,10 @@ export function SearchSelect({
               id={listId}
               role="listbox"
               style={menuStyle}
-              className="fixed overflow-y-auto rounded-xl border border-border/70 bg-card/90 py-1 shadow-lg ring-1 ring-white/10 backdrop-blur-xl"
+              className="fixed overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-[var(--shadow-float)]"
             >
               {filtered.length === 0 ? (
-                <li className="px-3 py-2 text-sm text-muted-foreground">No matches</li>
+                <li className="px-2.5 py-2 text-sm text-muted-foreground">Nothing matches that. Check the spelling.</li>
               ) : (
                 filtered.map((option, index) => {
                   const isSelected = multiple
@@ -309,8 +314,8 @@ export function SearchSelect({
                         type="button"
                         disabled={option.disabled}
                         className={cn(
-                          "no-press flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm",
-                          index === active && "bg-accent text-accent-foreground",
+                          "no-press flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm",
+                          index === active && "bg-muted text-foreground",
                           isSelected && "text-primary",
                           option.disabled && "opacity-50",
                         )}

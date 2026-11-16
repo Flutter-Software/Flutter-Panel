@@ -141,6 +141,8 @@ pub struct ExtensionInfo {
     pub id: String,
     pub name: String,
     pub version: String,
+    /// `author` from extension.json; empty when it doesn't name one (or on older panels).
+    pub author: String,
     pub permissions: Vec<String>,
     /// Id of the server page being shown.
     pub page: String,

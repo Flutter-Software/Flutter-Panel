@@ -40,7 +40,15 @@ declare namespace FlutterSDK {
 
   interface Context {
     apiVersion: number;
-    extension: { id: string; name: string; version: string; permissions: Permission[]; page: string };
+    extension: {
+      id: string;
+      name: string;
+      version: string;
+      /** `author` from extension.json; empty string when it doesn't name one. */
+      author: string;
+      permissions: Permission[];
+      page: string;
+    };
     /** Full record with `server.read`, otherwise only `{ id }`. */
     server: Server;
     user: { id: string; username: string; admin: boolean } | null;

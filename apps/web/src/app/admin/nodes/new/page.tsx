@@ -13,7 +13,6 @@ import {
   Lock,
   MemoryStick,
   Rocket,
-  Server,
 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { SaveIsland, Segmented, Switch, isDirty } from "@/components/admin-create";
@@ -168,7 +167,7 @@ export default function CreateNodePage() {
         start: result.data.start || "npm run dev:daemon",
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Create failed");
+      setError(err instanceof Error ? err.message : "Couldn't create the node. Check the values below, then try again.");
     } finally {
       setPending(false);
     }
@@ -178,14 +177,15 @@ export default function CreateNodePage() {
     return (
       <div className="mx-auto w-full max-w-6xl space-y-6">
         <PageIntro title="Node created" />
-        <Card className="space-y-4 border-primary/30 bg-primary/5 p-5 sm:p-6">
-          <p className="text-sm text-muted-foreground">
-            Save the daemon token now. It will not be shown again. On a remote host, run the
-            configure command (daemon-only installer). The node stays offline until the daemon
-            heartbeats.
-          </p>
+        <Card className="space-y-4 p-5 sm:p-6">
+          <Card variant="inset">
+            <p className="text-sm">
+              Save the daemon token now: it won&apos;t be shown again. On the node&apos;s machine, run the install
+              command, then start the daemon. The node shows as offline until the daemon checks in.
+            </p>
+          </Card>
           <CopyRow
-            label="Token"
+            label="Daemon token"
             value={created.token}
             copied={copied === "token"}
             onCopy={() => copy(created.token, "token")}
@@ -203,7 +203,7 @@ export default function CreateNodePage() {
             onCopy={() => copy(created.start, "start")}
           />
           <div className="flex flex-wrap gap-2 pt-2">
-            <ButtonLink href={`/admin/nodes/${created.id}`}>View node</ButtonLink>
+            <ButtonLink href={`/admin/nodes/${created.id}`}>Open node</ButtonLink>
             <ButtonLink href={`/admin/nodes/${created.id}/allocations/new`} variant="secondary">
               Add allocations
             </ButtonLink>
@@ -224,7 +224,7 @@ export default function CreateNodePage() {
           title="Basic details"
           description="Identity and how the panel reaches the daemon."
         >
-          <Field label="Name" required hint="1–100 chars: a–z, 0–9, dashes.">
+          <Field label="Name" required hint="Up to 100 characters: lowercase letters, numbers and dashes.">
             <Input
               name="name"
               value={name}
@@ -245,7 +245,7 @@ export default function CreateNodePage() {
               {locations.map((location) => (
                 <option key={location.id} value={location.id}>
                   {location.shortCode.toUpperCase()}
-                  {location.description ? ` — ${location.description}` : ""}
+                  {location.description ? ` (${location.description})` : ""}
                 </option>
               ))}
             </Select>
@@ -255,7 +255,7 @@ export default function CreateNodePage() {
               name="description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="London metal — Ryzen 9, NVMe."
+              placeholder="London bare metal, Ryzen 9, NVMe"
             />
           </Field>
           <Field label="Visibility" hint="Private nodes are skipped by auto-deploy.">
@@ -271,7 +271,7 @@ export default function CreateNodePage() {
           <Field
             label="FQDN"
             required
-            hint="Domain used to connect to the daemon. An IP may be used only if not using SSL."
+            hint="The domain the panel uses to reach the daemon. Use an IP only with HTTP."
           >
             <Input
               name="fqdn"
@@ -281,12 +281,12 @@ export default function CreateNodePage() {
               required
             />
           </Field>
-          <Field label="Connection" hint="The panel uses HTTPS, so the daemon must serve SSL.">
+          <Field label="Connection" hint="The panel uses HTTPS, so the daemon must serve HTTPS too.">
             <Segmented
               value={scheme}
               onChange={setScheme}
               options={[
-                { value: "https", label: "SSL" },
+                { value: "https", label: "HTTPS" },
                 { value: "http", label: "HTTP" },
               ]}
             />
@@ -294,8 +294,8 @@ export default function CreateNodePage() {
           <div className="flex items-start justify-between gap-4 pt-1">
             <div>
               <p className="text-sm">Behind proxy</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Enable when running behind Cloudflare or a reverse proxy.
+              <p className="mt-0.5 text-[13px] text-muted-foreground">
+                Turn on when the daemon sits behind Cloudflare or another reverse proxy.
               </p>
             </div>
             <Switch checked={behindProxy} onChange={setBehindProxy} />
@@ -402,7 +402,7 @@ export default function CreateNodePage() {
             </Field>
           </div>
           <Field
-            label="Maximum web upload filesize"
+            label="Largest file upload from the browser"
             hint="Applies to the Files tab for every server on this node."
           >
             <UnitInput
@@ -415,10 +415,10 @@ export default function CreateNodePage() {
               onChange={(event) => setUploadLimitMb(event.target.value)}
             />
           </Field>
-          <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
+          <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
             <div>
               <p className="text-sm font-medium">Maintenance mode</p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-0.5 text-[13px] text-muted-foreground">
                 Users can see servers on this node but cannot open them.
               </p>
             </div>
@@ -436,15 +436,15 @@ export default function CreateNodePage() {
         disabled={locations.length === 0}
         summary={
           <span className="inline-flex items-center gap-2">
-            <Rocket className="size-4 text-primary" />
+            <Rocket className="size-4 text-primary" aria-hidden />
             <span>
-              Deploying <span className="font-medium text-foreground">{name || "node"}</span> in{" "}
+              Creating <span className="font-medium text-foreground">{name || "node"}</span> in{" "}
               <span className="font-medium text-foreground">
-                {selectedLocation?.shortCode.toUpperCase() || "—"}
+                {selectedLocation?.shortCode.toUpperCase() || "no location"}
               </span>{" "}
               over{" "}
               <span className="font-medium text-foreground">
-                {scheme === "https" ? "SSL" : "HTTP"}
+                {scheme === "https" ? "HTTPS" : "HTTP"}
               </span>
               .
             </span>
@@ -465,7 +465,7 @@ function PageIntro({ title = "New node" }: { title?: string }) {
         <ArrowLeft className="size-4" />
         Back to nodes
       </Link>
-      <p className="mt-3 text-xs text-muted-foreground">
+      <p className="mt-3 text-[13px] text-muted-foreground">
         <Link href="/admin" className="hover:text-foreground">
           Admin
         </Link>
@@ -476,15 +476,10 @@ function PageIntro({ title = "New node" }: { title?: string }) {
         {" / "}
         <span className="text-foreground">New</span>
       </p>
-      <div className="mt-3 flex items-center gap-2">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
-          <Server className="size-4" />
-        </span>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-      </div>
+      <h1 className="mt-2 text-[31px] font-semibold">{title}</h1>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        Register a daemon host. Allocations and servers are assigned once the node reports its first
-        heartbeat.
+        Register a machine that runs the daemon. You can add allocations and servers once it checks in for the
+        first time.
       </p>
     </div>
   );
@@ -503,13 +498,13 @@ function Section({
 }) {
   return (
     <Card className="p-5 sm:p-6">
-      <div className="mb-5 flex items-start gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+      <div className="mb-5 flex items-start gap-2.5">
+        <span className="mt-[3px] shrink-0 text-muted-foreground [&_svg]:size-4" aria-hidden>
           {icon}
-        </div>
+        </span>
         <div>
-          <h2 className="text-sm font-semibold">{title}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+          <h2 className="text-[20px] font-semibold">{title}</h2>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">{description}</p>
         </div>
       </div>
       <div className="space-y-4">{children}</div>
@@ -527,13 +522,15 @@ function ResourceBlock({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-3 rounded-lg border border-border p-4">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <span className="text-muted-foreground">{icon}</span>
+    <fieldset className="space-y-3 border-t border-border pt-4">
+      <legend className="float-left mb-3 flex w-full items-center gap-2 text-sm font-medium">
+        <span className="text-muted-foreground" aria-hidden>
+          {icon}
+        </span>
         {title}
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
-    </div>
+      </legend>
+      <div className="clear-left grid gap-4 sm:grid-cols-2">{children}</div>
+    </fieldset>
   );
 }
 
@@ -566,13 +563,13 @@ function CopyRow({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <Button type="button" size="sm" variant="ghost" onClick={onCopy}>
+        <p className="text-[13px] text-muted-foreground">{label}</p>
+        <Button type="button" size="sm" variant="ghost" onClick={onCopy} aria-label={copied ? `${label} copied` : `Copy ${label.toLowerCase()}`}>
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <pre className="overflow-x-auto rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs leading-relaxed">
+      <pre className="overflow-x-auto rounded-md border border-border bg-well px-3 py-2 font-mono text-[12.5px] leading-relaxed">
         {value}
       </pre>
     </div>

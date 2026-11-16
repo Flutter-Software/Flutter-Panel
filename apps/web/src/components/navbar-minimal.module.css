@@ -4,7 +4,8 @@
   padding: var(--mantine-spacing-md);
   display: flex;
   flex-direction: column;
-  border-right: 1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+  border-right: 1px solid var(--sidebar-border);
+  background-color: var(--sidebar);
   overflow: visible;
   transition: width 200ms ease;
 
@@ -27,29 +28,46 @@
 .link {
   width: 50px;
   height: 50px;
-  border-radius: var(--mantine-radius-md);
+  position: relative;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.625rem;
-  color: light-dark(var(--mantine-color-gray-7), var(--mantine-color-dark-0));
+  color: var(--muted-foreground);
   font-size: 0.875rem;
   white-space: nowrap;
   transition: background-color 160ms ease, color 160ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 
   &:hover {
-    background-color: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-5));
+    background-color: color-mix(in srgb, var(--muted) 60%, transparent);
+    color: var(--foreground);
   }
 
   &:active {
-    transform: scale(0.94);
+    transform: translateY(1px);
   }
 
+  /* Active: a cyan rule on the rail's edge, brighter icon. No filled tile (DESIGN.md). */
   &[data-active] {
     &,
     &:hover {
-      background-color: var(--mantine-color-cyan-light);
-      color: var(--mantine-color-cyan-light-color);
+      background-color: transparent;
+      color: var(--foreground);
+    }
+
+    & svg {
+      color: var(--primary);
+    }
+
+    &::before {
+      content: "";
+      position: absolute;
+      top: 6px;
+      bottom: 6px;
+      left: calc(-1 * var(--mantine-spacing-md));
+      width: 3px;
+      background: var(--primary);
     }
   }
 }

@@ -33,124 +33,94 @@
   --color-status-offline: var(--status-offline);
   --color-status-error: var(--status-error);
   --color-status-info: var(--status-info);
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-barlow), var(--font-plex-sans), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-well: var(--well);
 }
 
 /*
- * Radius tokens live in a plain (non-inline) @theme block so `rounded-*` utilities
- * compile to `var(--radius-*)`. That lets the continuous-corner block below
- * re-size them at runtime instead of having the pixel values baked in.
+ * Radius tokens live in a plain (non-inline) @theme block so `rounded-*`
+ * utilities compile to `var(--radius-*)`.
+ *
+ * "Rack" design system (see apps/web/DESIGN.md): corners are small and vary by
+ * role so hierarchy shows. Controls 3px (rounded-md), panels 4px (rounded-lg),
+ * floating layers 6px (rounded-xl). Larger radii are banned by eslint.
  */
 @theme {
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-2xl: 6px;
+  /* The one shadow: only for layers that float above the page. */
+  --shadow-float: 0 12px 32px -8px rgb(0 0 0 / 0.55), 0 0 0 1px var(--border);
 }
 
 /*
- * Continuous ("squircle") corners, like iOS/macOS, instead of circular arcs.
- *
- * `corner-shape: squircle` reshapes whatever border-radius an element already has,
- * so one rule covers Tailwind utilities, Mantine components and module CSS alike.
- * A squircle hugs the box more tightly than a circle at the same radius, so the
- * radii are scaled up ~1.5x to keep corners looking as soft as before.
- *
- * Browsers without `corner-shape` (Firefox, Safari as of writing) skip this whole
- * block and keep the original circular corners and radii, so nothing breaks.
+ * Colour tokens. Neutral graphite with no hue (never near-black), three
+ * surface levels (rail < graphite < chassis), and the Flutter signal cyan kept
+ * for actions and focus only. Status colours are for LEDs and status text.
  */
-@supports (corner-shape: squircle) {
-  :root {
-    /* Tailwind `rounded-*` */
-    --radius-sm: 6px;
-    --radius-md: 12px;
-    --radius-lg: 15px;
-    --radius-xl: 18px;
-    --radius-2xl: 24px;
-    /* Mantine `radius` (xl is left alone: Mantine uses it for pills). */
-    --mantine-radius-xs: calc(0.1875rem * var(--mantine-scale));
-    --mantine-radius-sm: calc(0.375rem * var(--mantine-scale));
-    --mantine-radius-md: calc(0.75rem * var(--mantine-scale));
-    --mantine-radius-lg: calc(1.5rem * var(--mantine-scale));
-  }
-
-  @layer base {
-    * {
-      corner-shape: squircle;
-    }
-
-    /*
-     * Circles and pills stay round: a squircle turns a dot or avatar into a
-     * rounded square, which reads as a different shape rather than a softer one.
-     */
-    [class*="rounded-full"],
-    .mantine-Avatar-root,
-    .mantine-Badge-root,
-    .mantine-Chip-label,
-    .mantine-ColorSwatch-root,
-    .mantine-Indicator-indicator,
-    .mantine-Loader-root,
-    .mantine-Progress-root,
-    .mantine-Progress-section,
-    .mantine-Radio-radio,
-    .mantine-Slider-bar,
-    .mantine-Slider-thumb,
-    .mantine-Slider-track,
-    .mantine-Switch-thumb,
-    .mantine-Switch-track {
-      corner-shape: round;
-    }
-  }
-}
-
 :root {
   color-scheme: dark;
-  --background: oklch(var(--_bg, 0.145 0.005 285));
-  --foreground: oklch(var(--_fg, 0.955 0.005 285));
-  --card: oklch(var(--_card, 0.19 0.006 285));
-  --card-foreground: oklch(var(--_fg, 0.955 0.005 285));
-  --muted: oklch(var(--_muted, 0.23 0.006 285));
-  --muted-foreground: oklch(var(--_muted-fg, 0.62 0.01 285));
-  --border: oklch(var(--_line, 0.27 0.008 285));
-  --input: oklch(var(--_line, 0.27 0.008 285));
-  --primary: oklch(var(--_primary, 0.746 0.16 232.66));
-  --primary-foreground: oklch(var(--_on-primary, 0.21 0.012 285));
-  --secondary: oklch(var(--_muted, 0.23 0.006 285));
-  --secondary-foreground: oklch(var(--_fg, 0.955 0.005 285));
-  --accent: oklch(var(--_accent, 0.26 0.04 232.66));
-  --accent-foreground: oklch(var(--_accent-fg, 0.86 0.06 232.66));
-  --destructive: oklch(var(--_danger, 0.68 0.2 25));
-  --destructive-foreground: oklch(var(--_danger-fg, 0.985 0.004 285));
-  --ring: oklch(var(--_primary, 0.746 0.16 232.66));
-  --sidebar: oklch(var(--_sidebar, 0.165 0.005 285));
-  --sidebar-foreground: oklch(var(--_fg, 0.955 0.005 285));
-  --sidebar-border: oklch(var(--_line, 0.27 0.008 285));
-  --status-running: oklch(var(--_ok, 0.74 0.16 155));
-  --status-warn: oklch(var(--_warn, 0.8 0.14 75));
-  --status-offline: oklch(var(--_muted-fg, 0.62 0.01 285));
-  --status-error: oklch(var(--_danger, 0.68 0.2 25));
-  --status-info: oklch(var(--_primary, 0.746 0.16 232.66));
+  --background: #1b1b1c; /* graphite: page */
+  --foreground: #e8e8e9; /* legend: text */
+  --card: #222223; /* chassis: panels, menus, modals */
+  --card-foreground: #e8e8e9;
+  --well: #151516; /* rail: inset wells, console, readout strip */
+  --muted: #2a2a2c;
+  --muted-foreground: #9a9a9f; /* dim: secondary text */
+  --border: #323234; /* seam */
+  --input: #3c3c3f;
+  --primary: #2bb3ec; /* signal cyan */
+  --primary-foreground: #06212e;
+  --secondary: #2a2a2c;
+  --secondary-foreground: #e8e8e9;
+  --accent: #1c3240;
+  --accent-foreground: #9fdcf7;
+  --destructive: #ef5a52;
+  --destructive-foreground: #1d0907;
+  --ring: #2bb3ec;
+  --sidebar: #161617;
+  --sidebar-foreground: #e8e8e9;
+  --sidebar-border: #323234;
+  --status-running: #4cd38e;
+  --status-warn: #f0b43c;
+  --status-offline: #626267;
+  --status-error: #ef5a52;
+  --status-info: #2bb3ec;
 }
 
 html.light {
   color-scheme: light;
-  --_bg: 0.994 0.003 285;
-  --_fg: 0.21 0.012 285;
-  --_card: 1 0 0;
-  --_muted: 0.965 0.006 285;
-  --_muted-fg: 0.552 0.014 285;
-  --_line: 0.92 0.008 285;
-  --_primary: 0.685 0.145 232.66;
-  --_on-primary: 0.21 0.012 285;
-  --_accent: 0.94 0.03 232.66;
-  --_accent-fg: 0.32 0.08 232.66;
-  --_danger: 0.6 0.2 25;
-  --_danger-fg: 0.985 0.004 285;
-  --_sidebar: 0.988 0.004 285;
-  --_ok: 0.55 0.16 155;
-  --_warn: 0.7 0.15 75;
+  --background: #f1f1f1;
+  --foreground: #1c1c1e;
+  --card: #ffffff;
+  --card-foreground: #1c1c1e;
+  --well: #e7e7e8;
+  --muted: #eaeaeb;
+  --muted-foreground: #5f5f64;
+  --border: #d3d3d5;
+  --input: #c3c3c6;
+  --primary: #0b7fb8;
+  --primary-foreground: #ffffff;
+  --secondary: #e7e7e8;
+  --secondary-foreground: #1c1c1e;
+  --accent: #dcf0fa;
+  --accent-foreground: #075a83;
+  --destructive: #c9372f;
+  --destructive-foreground: #ffffff;
+  --ring: #0b7fb8;
+  --sidebar: #e7e7e8;
+  --sidebar-foreground: #1c1c1e;
+  --sidebar-border: #d3d3d5;
+  --status-running: #178a53;
+  --status-warn: #a86a12;
+  --status-offline: #909095;
+  --status-error: #c9372f;
+  --status-info: #0b7fb8;
+  --shadow-float: 0 12px 32px -10px rgb(0 0 0 / 0.2), 0 0 0 1px var(--border);
 }
 
 @layer base {
@@ -184,7 +154,9 @@ html.light {
   }
   body {
     @apply antialiased;
-    font-size: 13px;
+    /* IBM Plex Sans at 14px for all-day legibility; see DESIGN.md type scale. */
+    font-size: 14px;
+    line-height: 1.55;
     margin: 0;
     /*
      * Safe-area insets: with `viewport-fit=cover` (layout.tsx) the page runs
@@ -195,12 +167,18 @@ html.light {
     padding-right: env(safe-area-inset-right);
   }
 
-  /* Balanced headlines: no lonely last word on a two-line heading. */
+  /*
+   * Headings use the condensed display face (chassis legends). Sentence case,
+   * tight leading. Balanced so a two-line heading has no lonely last word.
+   */
   h1,
   h2,
   h3,
   h4 {
     text-wrap: balance;
+    font-family: var(--font-display);
+    letter-spacing: 0;
+    line-height: 1.15;
   }
   /* Body copy avoids single-word orphans without rebalancing whole paragraphs. */
   p,
@@ -290,17 +268,45 @@ html.light {
       opacity 160ms ease;
   }
 
-  @media (hover: hover) and (pointer: fine) {
-    .pressable:hover,
-    button:not(:disabled):not([data-disabled]):not(.no-press):hover {
-      transform: translateY(-1px);
-    }
-  }
-
+  /*
+   * No hover lift (see DESIGN.md: motion answers actions only). Pressing a
+   * control sinks it 1px, like a physical key on a front panel.
+   */
   .pressable:active,
   button:not(:disabled):not([data-disabled]):not(.no-press):active {
-    transform: translateY(0) scale(0.97);
-    filter: brightness(0.92);
+    transform: translateY(1px);
+    filter: brightness(0.94);
+  }
+
+  /*
+   * The one ambient animation: a status LED pulses while the state is really
+   * changing (starting / stopping). Reduced-motion users get a steady LED.
+   */
+  @keyframes led-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  .led-pulse {
+    animation: led-pulse 1.4s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .led-pulse {
+      animation: none;
+    }
+  }
+  /* data-reduce-motion="off" means the user turned motion off (lib/motion.ts). */
+  html[data-reduce-motion="off"] .led-pulse {
+    animation: none;
+  }
+
+  /* Rack: units of one kind as full-width rows separated by seams. */
+  .rack > * + * {
+    border-top: 1px solid var(--border);
   }
 
   .flutter-tooltip {

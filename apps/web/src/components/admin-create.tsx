@@ -8,16 +8,19 @@ export function AdminCreateHeader({
   backHref,
   backLabel,
   crumbs,
-  icon,
   title,
   description,
+  actions,
 }: {
   backHref: string;
   backLabel: string;
   crumbs: { href?: string; label: string }[];
-  icon: ReactNode;
+  /** Accepted for existing callers but not drawn: page headers are type only (DESIGN.md). */
+  icon?: ReactNode;
   title: string;
   description?: string;
+  /** Buttons shown to the right of the title, e.g. "Download". */
+  actions?: ReactNode;
 }) {
   return (
     <div>
@@ -28,7 +31,7 @@ export function AdminCreateHeader({
         <ArrowLeft className="size-4" />
         {backLabel}
       </Link>
-      <p className="mt-3 text-xs text-muted-foreground">
+      <p className="mt-3 text-[13px] text-muted-foreground">
         {crumbs.map((crumb, index) => (
           <span key={`${crumb.label}-${index}`}>
             {index > 0 ? " / " : null}
@@ -42,13 +45,13 @@ export function AdminCreateHeader({
           </span>
         ))}
       </p>
-      <div className="mt-3 flex items-center gap-2">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
-          {icon}
-        </span>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      <div className="mt-2 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0">
+          <h1 className="text-[31px] font-semibold">{title}</h1>
+          {description ? <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{description}</p> : null}
+        </div>
+        {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
       </div>
-      {description ? <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{description}</p> : null}
     </div>
   );
 }
@@ -65,14 +68,15 @@ export function AdminSection({
   children: ReactNode;
 }) {
   return (
+    // A form panel: the heading and its one-line purpose, then the fields. No icon tile.
     <Card className="p-5 sm:p-6">
-      <div className="mb-5 flex items-start gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+      <div className="mb-5 flex items-start gap-2.5">
+        <span className="mt-[3px] shrink-0 text-muted-foreground [&_svg]:size-4" aria-hidden>
           {icon}
-        </div>
+        </span>
         <div>
-          <h2 className="text-sm font-semibold">{title}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+          <h2 className="text-[20px] font-semibold">{title}</h2>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">{description}</p>
         </div>
       </div>
       <div className="space-y-4">{children}</div>
@@ -91,16 +95,18 @@ export function Segmented<T extends string>({
 }) {
   return (
     <div
-      className="grid rounded-lg border border-input bg-input/40 p-0.5"
+      role="group"
+      className="grid rounded-md border border-input bg-well p-0.5"
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
     >
       {options.map((option) => (
         <button
           key={option.value}
           type="button"
+          aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors",
+            "inline-flex h-8 items-center justify-center gap-2 rounded-sm text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
             value === option.value
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground",
@@ -131,7 +137,7 @@ export function Switch({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "no-press relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50",
+        "no-press relative h-6 w-11 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50",
         checked ? "bg-primary" : "bg-muted",
       )}
     >
@@ -173,7 +179,8 @@ export function SaveIsland({
     <>
       <div className="h-24 shrink-0" aria-hidden />
       <div className="pointer-events-none fixed inset-x-0 bottom-6 z-20 flex justify-center px-4 md:left-20">
-        <div className="pointer-events-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/40 px-4 py-2.5 shadow-lg ring-1 ring-white/10 backdrop-blur-xl transition duration-200 starting:translate-y-3 starting:opacity-0 sm:w-auto">
+        {/* A floating layer, so it gets the one float shadow and the 6px floating radius (DESIGN.md). */}
+        <div className="pointer-events-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5 shadow-[var(--shadow-float)] transition-opacity duration-200 starting:opacity-0 sm:w-auto">
           <div className="min-w-0 text-sm text-muted-foreground">{summary}</div>
           <div className="flex shrink-0 items-center gap-2">
             <Button type="button" variant="ghost" disabled={pending} onClick={onCancel}>

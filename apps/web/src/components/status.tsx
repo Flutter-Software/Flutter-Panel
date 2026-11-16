@@ -55,6 +55,75 @@ export function statusPillClass(status: ServerStatus) {
   return STATUS_PILL[status] ?? STATUS_PILL.offline;
 }
 
+/** States that are actively changing: their LED pulses (DESIGN.md → Motion). */
+function isChanging(status: ServerStatus) {
+  return status === "starting" || status === "stopping" || status === "installing";
+}
+
+/**
+ * A status LED: the small round light next to a status word. Pulses while the
+ * state is changing. Decorative; always pair it with the status in text.
+ */
+export function Led({ status, className }: { status: ServerStatus; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "inline-block size-2 shrink-0 rounded-full",
+        STATUS[status].bar,
+        status === "running" && "shadow-[0_0_0_3px_color-mix(in_srgb,var(--status-running)_22%,transparent)]",
+        isChanging(status) && "led-pulse",
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * The LED rail: a 3px status-coloured strip on the left edge of a unit (a rack
+ * row, the server header). The panel's one bold element; see DESIGN.md.
+ * The parent must be `position: relative` (RackRow already is).
+ */
+export function LedRail({ status, className }: { status: ServerStatus; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "absolute inset-y-0 left-0 w-[3px]",
+        status === "offline" ? "bg-status-offline/50" : STATUS[status].bar,
+        isChanging(status) && "led-pulse",
+        className,
+      )}
+    />
+  );
+}
+
+/** Status tones for things that aren't servers: nodes, extensions, backups, scan findings, updates. */
+export type RailTone = "ok" | "warn" | "error" | "info" | "off";
+
+const RAIL_TONE: Record<RailTone, string> = {
+  ok: "bg-status-running",
+  warn: "bg-status-warn",
+  error: "bg-status-error",
+  info: "bg-status-info",
+  off: "bg-status-offline/50",
+};
+
+/**
+ * The same 3px left-edge rail as `LedRail`, for units whose state isn't a
+ * ServerStatus. Set `pulse` while the state is changing (e.g. a backup running).
+ * The parent must be `position: relative`.
+ */
+export function Rail({ tone, pulse, className }: { tone: RailTone; pulse?: boolean; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("absolute inset-y-0 left-0 w-[3px]", RAIL_TONE[tone], pulse && "led-pulse", className)}
+    />
+  );
+}
+
+/** Status as an LED plus its word, in the status colour. No pill background. */
 export function StatusPill({
   status,
   className,
@@ -63,16 +132,9 @@ export function StatusPill({
   className?: string;
 }) {
   const meta = STATUS[status];
-  const live = status === "starting" || status === "stopping" || status === "installing";
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1 text-xs font-semibold tracking-wide",
-        STATUS_PILL[status],
-        className,
-      )}
-    >
-      <span className={cn("size-2 shrink-0 rounded-full", meta.bar, live && "animate-pulse")} />
+    <span className={cn("inline-flex shrink-0 items-center gap-2 text-[13px] font-medium", meta.className, className)}>
+      <Led status={status} />
       {meta.label}
     </span>
   );
@@ -136,10 +198,10 @@ export function StatGraph({
     <div className="space-y-2">
       <div className="flex items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+          <p className="text-[13px] text-muted-foreground">{label}</p>
           <p className="mt-0.5 text-sm font-medium tabular-nums">{display}</p>
         </div>
-        <p className="text-[11px] text-muted-foreground">1m</p>
+        <p className="text-[12px] text-muted-foreground">Last minute</p>
       </div>
       <svg
         viewBox={`0 0 120 ${height}`}

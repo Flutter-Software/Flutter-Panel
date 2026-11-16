@@ -111,12 +111,13 @@ function ImportEggInner() {
           </Field>
           {fileName ? <p className="text-xs text-muted-foreground">Loaded {fileName}</p> : null}
           {parsed.preview ? (
-            <div className="rounded-lg border border-border bg-muted/30 px-3 py-3 text-sm">
-              <p className="font-medium">{parsed.preview.name}</p>
-              <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                {parsed.preview.image || "No docker image detected"}
+            // What the import will create, as an inset note rather than a box inside the panel.
+            <div className="border-l-2 border-primary pl-3 text-sm">
+              <p className="font-display text-[17px] font-semibold leading-tight">{parsed.preview.name}</p>
+              <p className="mt-0.5 truncate font-mono text-[12.5px] text-muted-foreground">
+                {parsed.preview.image || "No Docker image found in this file"}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-0.5 text-[13px] tabular-nums text-muted-foreground">
                 {parsed.preview.variables} variable{parsed.preview.variables === 1 ? "" : "s"}
               </p>
             </div>

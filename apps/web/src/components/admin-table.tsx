@@ -20,7 +20,7 @@ export function AdminPage({
     <div className={cn("mx-auto w-full max-w-6xl space-y-6", className)}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="text-[31px] font-semibold">{title}</h1>
           {description ? (
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{description}</p>
           ) : null}
@@ -55,7 +55,7 @@ export function AdminFormPage({
           <ArrowLeft className="size-4" />
           {backLabel}
         </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-[31px] font-semibold">{title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </div>
       {children}
@@ -66,7 +66,7 @@ export function AdminFormPage({
 export function AdminError({ message }: { message: string | null }) {
   if (!message) return null;
   return (
-    <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+    <p className="border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {message}
     </p>
   );

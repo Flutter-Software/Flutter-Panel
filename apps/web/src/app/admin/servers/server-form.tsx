@@ -48,7 +48,11 @@ function envFromEgg(egg?: EggOption | null): Record<string, string> {
   );
 }
 
-function Panel({
+/**
+ * One section of the server form. The sections share a single panel and are
+ * separated by seams (DESIGN.md: one level of boxing, rows over many small cards).
+ */
+function FormSection({
   icon,
   title,
   aside,
@@ -60,16 +64,16 @@ function Panel({
   children: ReactNode;
 }) {
   return (
-    <Card className="flex h-full flex-col p-5 sm:p-6">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {icon}
+    <section className="px-5 py-5 sm:px-6">
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="inline-flex items-center gap-2 text-[16px] font-semibold">
+          <span className="text-muted-foreground [&>svg]:size-4">{icon}</span>
           {title}
         </h2>
-        {aside ? <p className="text-xs text-muted-foreground">{aside}</p> : null}
+        {aside ? <p className="text-[13px] text-muted-foreground">{aside}</p> : null}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-    </Card>
+      {children}
+    </section>
   );
 }
 
@@ -338,7 +342,7 @@ export function ServerForm({
     Number(databaseLimit) >= 0;
 
   return (
-    <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-6">
+    <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-6">
       <AdminCreateHeader
         backHref="/admin/servers"
         backLabel="Back to servers"
@@ -352,9 +356,8 @@ export function ServerForm({
       />
       <AdminError message={error ?? nestsQuery.error ?? nodesQuery.error ?? usersQuery.error} />
 
-      <div className="grid items-stretch gap-4 xl:grid-cols-3">
-        <div className="h-full xl:col-span-2">
-          <Panel icon={<Server className="size-3.5" />} title="Server">
+      <Card className="divide-y divide-border">
+          <FormSection icon={<Server />} title="Server">
             <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name" required>
               <Input
@@ -401,11 +404,10 @@ export function ServerForm({
               />
             </Field>
             </div>
-          </Panel>
-        </div>
+          </FormSection>
 
-        <Panel icon={<GitBranch className="size-3.5" />} title="Network">
-          <div className="space-y-4">
+        <FormSection icon={<GitBranch />} title="Network">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <Field label="Node" required hint={creating ? undefined : "Cannot be changed"}>
               {creating ? (
                 <Select
@@ -429,7 +431,7 @@ export function ServerForm({
               ) : (
                 <Input
                   value={
-                    initial?.nodeLocation ? `${initial.node} · ${initial.nodeLocation}` : (initial?.node ?? "")
+                    initial?.nodeLocation ? `${initial.node} (${initial.nodeLocation})` : (initial?.node ?? "")
                   }
                   disabled
                 />
@@ -498,7 +500,7 @@ export function ServerForm({
                   type="button"
                   disabled={!nodeId}
                   onClick={() => setAddingPorts(true)}
-                  className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                  className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-input text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Plus className="size-3.5" />
                   Add another
@@ -507,10 +509,9 @@ export function ServerForm({
             </Field>
             ) : null}
           </div>
-        </Panel>
-      </div>
+        </FormSection>
 
-      <Panel icon={<Gauge className="size-3.5" />} title="Limits" aside="Hard caps · 0 = unlimited · 100% CPU = 1 core">
+      <FormSection icon={<Gauge />} title="Limits" aside="Hard caps. 0 means unlimited; 100% CPU is one core.">
         <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
           <Field label="Memory (MB)" required>
             <Input
@@ -549,7 +550,7 @@ export function ServerForm({
               onChange={(event) => setCpuPinning(event.target.value)}
             />
           </Field>
-          <Field label="Databases" hint="How many MySQL databases this server can create. Add a host under Admin → Databases first.">
+          <Field label="Databases" hint="How many MySQL databases this server can create. Add a database host first.">
             <Input
               type="number"
               min={0}
@@ -560,28 +561,26 @@ export function ServerForm({
           </Field>
           <div className="space-y-1.5">
             <span className="block text-sm">Backups</span>
-            <div className="flex h-10 items-center gap-2.5">
+            <div className="flex h-9 items-center gap-2.5">
               <Switch checked={backupsEnabled} onChange={setBackupsEnabled} />
               <span className="text-sm text-muted-foreground">{backupsEnabled ? "Enabled" : "Disabled"}</span>
             </div>
           </div>
         </div>
-      </Panel>
+      </FormSection>
 
       {creating && selectedEgg ? (
-        <Card>
+        <div>
           <button
             type="button"
             onClick={() => setAdvancedOpen((open) => !open)}
-            className="flex w-full items-center gap-3 px-5 py-4 text-left sm:px-6"
+            className="flex w-full items-center gap-2 px-5 py-4 text-left outline-none hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 sm:px-6"
             aria-expanded={advancedOpen}
           >
-            <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Advanced setup
-            </span>
-            <span className="hidden text-xs text-muted-foreground sm:inline">
-              {selectedEgg.nest} · {selectedEgg.name}
+            <SlidersHorizontal className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 text-[16px] font-semibold">Advanced setup</span>
+            <span className="hidden text-[13px] text-muted-foreground sm:inline">
+              From {selectedEgg.nest} / {selectedEgg.name}
             </span>
             <ChevronDown
               className={cn(
@@ -593,10 +592,10 @@ export function ServerForm({
           {advancedOpen ? (
             <div className="grid gap-6 border-t border-border px-5 py-5 sm:px-6 xl:grid-cols-2">
               <div className="space-y-4">
-                <p className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  <Terminal className="size-3.5" />
+                <h3 className="inline-flex items-center gap-2 text-[13px] font-medium">
+                  <Terminal className="size-3.5 text-muted-foreground" />
                   Startup
-                </p>
+                </h3>
                 <Field label="Docker image">
                   <Input
                     value={dockerImage}
@@ -626,10 +625,10 @@ export function ServerForm({
                 </Field>
               </div>
               <div className="space-y-4">
-                <p className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  <SlidersHorizontal className="size-3.5" />
+                <h3 className="inline-flex items-center gap-2 text-[13px] font-medium">
+                  <SlidersHorizontal className="size-3.5 text-muted-foreground" />
                   Variables
-                </p>
+                </h3>
                 {(selectedEgg.variables ?? []).filter((variable) => variable.key).length === 0 ? (
                   <p className="text-sm text-muted-foreground">This egg has no variables.</p>
                 ) : (
@@ -654,8 +653,9 @@ export function ServerForm({
               </div>
             </div>
           ) : null}
-        </Card>
+        </div>
       ) : null}
+      </Card>
 
       {creating ? null : (
         <AdminSection icon={<Trash2 className="size-4" />} title="Danger zone" description="Deletes the container and files.">
@@ -677,11 +677,8 @@ export function ServerForm({
         disabled={!ready}
         summary={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="inline-flex items-center gap-1.5">
-              <Server className="size-4 text-primary" />
-              <span className="font-medium text-foreground">{name || "server"}</span>
-            </span>
-            <span className="inline-flex items-center gap-2 text-xs">
+            <span className="font-medium text-foreground">{name || "server"}</span>
+            <span className="inline-flex items-center gap-2 text-[13px] tabular-nums">
               <span className="inline-flex items-center gap-1">
                 <MemoryStick className="size-3.5" />
                 {Number(memoryMb) === 0 ? <UnlimitedIcon className="size-3.5" /> : `${memoryMb} MB`}

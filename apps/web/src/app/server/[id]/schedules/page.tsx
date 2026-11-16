@@ -5,7 +5,7 @@ import {
   Archive,
   ChevronDown,
   ChevronUp,
-  Clock,
+  Pencil,
   Play,
   Plus,
   Power,
@@ -15,7 +15,8 @@ import {
 import { describeCron, nextCronDate, type CronFields } from "@flutter-software/shared";
 import { confirm } from "@/components/confirm-dialog";
 import { Switch } from "@/components/admin-create";
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, Select, Textarea } from "@/components/ui";
+import { Button, EmptyState, Field, Input, Modal, Rack, Select, Textarea } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { useServerRecord } from "@/components/server-frame";
 import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
 import { api } from "@/lib/api";
@@ -150,23 +151,24 @@ function TaskIcon({ action }: { action: TaskAction }) {
   return <Icon className="size-3.5 text-muted-foreground" />;
 }
 
+/** A schedule's state as a word plus the colour of its LED and left rail (DESIGN.md → LED rail). */
+function scheduleState(schedule: Schedule): { label: string; text: string; bar: string; pulse?: boolean } {
+  if (schedule.running) return { label: "Running", text: "text-status-warn", bar: "bg-status-warn", pulse: true };
+  if (!schedule.enabled) return { label: "Disabled", text: "text-status-offline", bar: "bg-status-offline/50" };
+  if (schedule.lastStatus === "failed") return { label: "Last run failed", text: "text-status-error", bar: "bg-status-error" };
+  if (schedule.lastStatus === "skipped") return { label: "Last run skipped", text: "text-status-warn", bar: "bg-status-warn" };
+  if (schedule.lastStatus === "success") return { label: "Last run ok", text: "text-status-running", bar: "bg-status-running" };
+  return { label: "Enabled", text: "text-status-running", bar: "bg-status-running" };
+}
+
 function ScheduleStatus({ schedule }: { schedule: Schedule }) {
-  if (schedule.running) {
-    return <Badge className="bg-primary/15 text-primary">Running</Badge>;
-  }
-  if (!schedule.enabled) {
-    return <Badge className="bg-muted text-muted-foreground">Disabled</Badge>;
-  }
-  if (schedule.lastStatus === "failed") {
-    return <Badge className="bg-status-error/15 text-status-error">Failed</Badge>;
-  }
-  if (schedule.lastStatus === "skipped") {
-    return <Badge className="bg-muted text-muted-foreground">Skipped</Badge>;
-  }
-  if (schedule.lastStatus === "success") {
-    return <Badge className="bg-status-running/15 text-status-running">Last run ok</Badge>;
-  }
-  return <Badge>Enabled</Badge>;
+  const state = scheduleState(schedule);
+  return (
+    <span className={cn("inline-flex shrink-0 items-center gap-2 text-[13px] font-medium", state.text)}>
+      <span aria-hidden className={cn("inline-block size-2 rounded-full", state.bar, state.pulse && "led-pulse")} />
+      {state.label}
+    </span>
+  );
 }
 
 export default function SchedulesPage({ params }: { params: Promise<{ id: string }> }) {
@@ -383,7 +385,7 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Schedules</h2>
+          <h2 className="text-[20px] font-semibold">Schedules</h2>
           <p className="text-sm text-muted-foreground">
             Run power actions, console commands, or backups on a UTC cron.
           </p>
@@ -424,7 +426,7 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
             />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5">
               <span>
                 <span className="block text-sm font-medium">Enabled</span>
                 <span className="text-xs text-muted-foreground">Run automatically when due</span>
@@ -434,7 +436,7 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
                 onChange={(enabled) => setDraft((current) => ({ ...current, enabled }))}
               />
             </label>
-            <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5">
               <span>
                 <span className="block text-sm font-medium">Only when online</span>
                 <span className="text-xs text-muted-foreground">Skip if the server is offline</span>
@@ -503,7 +505,7 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
             </div>
             <div className="space-y-2">
               {draft.tasks.map((task, index) => (
-                <div key={task.key} className="space-y-3 rounded-lg border border-border p-3">
+                <div key={task.key} className="space-y-3 rounded-md border border-border p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Select
                       value={task.action}
@@ -622,37 +624,61 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
           description="Create a schedule to start, stop, send commands, or back up this server on a timer."
         />
       ) : (
-        <div className="space-y-3">
-          {visibleSchedules.map((row) => (
-            <Card key={row.id} className="p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Clock className="size-4 text-primary" />
-                    <p className="font-medium">{row.name}</p>
+        <Rack label="Schedules">
+          {visibleSchedules.map((row) => {
+            const state = scheduleState(row);
+            return (
+              <div
+                key={row.id}
+                role="listitem"
+                className="relative grid gap-3 px-4 py-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:gap-6"
+              >
+                <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", state.bar, state.pulse && "led-pulse")} />
+                <div className="min-w-0 pl-1">
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <p className="truncate font-display text-[18px] font-semibold leading-tight">{row.name}</p>
                     <ScheduleStatus schedule={row} />
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{row.cronLabel}</p>
-                  <p className="mt-1 font-mono text-[11px] text-muted-foreground">{row.cronExpression}</p>
-                  <div className="mt-3 space-y-1">
-                    {row.tasks.map((task) => (
-                      <p key={task.id} className="flex items-center gap-2 text-sm">
-                        <TaskIcon action={task.action} />
-                        {taskSummary(task)}
-                        {task.timeOffset > 0 ? (
-                          <span className="text-xs text-muted-foreground">+{task.timeOffset}s</span>
-                        ) : null}
-                      </p>
-                    ))}
-                  </div>
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Last run {formatWhen(row.lastRunAt)}
-                    {row.lastError ? ` · ${row.lastError}` : ""}
-                    {" · "}
-                    Next {row.enabled ? formatWhen(row.nextRunAt) : "—"}
-                  </p>
+                  {row.cronLabel !== row.cronExpression ? (
+                    <>
+                      <p className="mt-1 text-sm">{row.cronLabel}</p>
+                      <p className="mt-0.5 font-mono text-[12px] text-muted-foreground">{row.cronExpression}</p>
+                    </>
+                  ) : (
+                    // No plain-words description for this cron: show the expression itself as machine text.
+                    <p className="mt-1 font-mono text-[13px]">{row.cronExpression}</p>
+                  )}
                 </div>
-                <div className="flex flex-col items-end gap-3">
+                <div className="min-w-0 pl-1 lg:pl-0">
+                  <p className="text-[12px] text-muted-foreground">
+                    {row.tasks.length === 1 ? "Task" : "Tasks, in order"}
+                  </p>
+                  <ol className="mt-0.5 space-y-1">
+                    {row.tasks.map((task) => (
+                      <li key={task.id} className="flex min-w-0 items-center gap-2 text-sm">
+                        <TaskIcon action={task.action} />
+                        <span className="min-w-0 truncate">{taskSummary(task)}</span>
+                        {task.timeOffset > 0 ? (
+                          <span className="shrink-0 text-[13px] tabular-nums text-muted-foreground">
+                            after {task.timeOffset}s
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+                <dl className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 pl-1 text-sm lg:grid-cols-1 lg:pl-0">
+                  <div className="min-w-0">
+                    <dt className="text-[12px] text-muted-foreground">Last run</dt>
+                    <dd className="tabular-nums">{formatWhen(row.lastRunAt)}</dd>
+                    {row.lastError ? <dd className="text-[13px] text-status-error">{row.lastError}</dd> : null}
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-[12px] text-muted-foreground">Next run</dt>
+                    <dd className="tabular-nums">{row.enabled ? formatWhen(row.nextRunAt) : "Not scheduled"}</dd>
+                  </div>
+                </dl>
+                <div className="flex flex-wrap items-center gap-2 pl-1 lg:flex-col lg:items-end lg:pl-0">
                   {canUpdate ? (
                     <label className="flex items-center gap-2 text-sm">
                       <span className="text-muted-foreground">Enabled</span>
@@ -663,7 +689,7 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
                       />
                     </label>
                   ) : null}
-                  <div className="flex flex-wrap justify-end gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
                     {canUpdate ? (
                       <Button
                         type="button"
@@ -678,6 +704,7 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
                     ) : null}
                     {canUpdate ? (
                       <Button type="button" size="sm" variant="secondary" onClick={() => openEdit(row)}>
+                        <Pencil className="size-3.5" />
                         Edit
                       </Button>
                     ) : null}
@@ -685,20 +712,21 @@ export default function SchedulesPage({ params }: { params: Promise<{ id: string
                       <Button
                         type="button"
                         size="sm"
-                        variant="danger"
+                        variant="ghost"
                         disabled={pending}
+                        className="size-8 px-0 text-muted-foreground hover:text-destructive"
+                        aria-label={`Delete ${row.name}`}
                         onClick={() => void remove(row)}
                       >
-                        <Trash2 className="size-3.5" />
-                        Delete
+                        <Trash2 className="size-4" />
                       </Button>
                     ) : null}
                   </div>
                 </div>
               </div>
-            </Card>
-          ))}
-        </div>
+            );
+          })}
+        </Rack>
       )}
     </div>
   );

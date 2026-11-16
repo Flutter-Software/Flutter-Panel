@@ -1,13 +1,14 @@
 "use client";
 
-import { use, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type UIEvent } from "react";
+import { use, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject, type UIEvent } from "react";
 import { Check, ChevronDown, ChevronUp, Copy, Loader2, Search, X } from "lucide-react";
 import { Tooltip } from "@mantine/core";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Readout, ReadoutCell } from "@/components/ui";
 import { StatGraph } from "@/components/status";
 import { PowerButtons } from "@/components/power-buttons";
 import { useLiveServerStatus, usePolledServerRecord } from "@/components/server-frame";
 import { usePowerLayout } from "@/components/use-power-layout";
+import { useMotion } from "@/components/motion-provider";
 import { api } from "@/lib/api";
 import { browserConsoleSocketUrl } from "@/lib/console-socket";
 import { formatLimitMb, formatMb, type ServerRecord, type ServerStatus } from "@/lib/types";
@@ -193,28 +194,13 @@ function SideStat({
   barValue?: number;
   barMax?: number;
 }) {
-  const pct = barMax && barMax > 0 && barValue !== undefined ? Math.min(100, (barValue / barMax) * 100) : null;
+  const pct = barMax && barMax > 0 && barValue !== undefined ? Math.min(100, (barValue / barMax) * 100) : undefined;
+  // The meter warns as usage climbs; the rest of the cell stays quiet.
   const tone =
-    pct === null
-      ? "bg-status-running"
-      : pct >= 90
-        ? "bg-status-error"
-        : pct >= 70
-          ? "bg-status-warn"
-          : "bg-status-running";
+    pct === undefined || pct < 70 ? "bg-status-running" : pct < 90 ? "bg-status-warn" : "bg-status-error";
 
-  return (
-    <Card className="p-3.5">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
-      {detail ? <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p> : null}
-      {pct !== null ? (
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-          <div className={cn("h-full rounded-full", tone)} style={{ width: `${pct}%` }} />
-        </div>
-      ) : null}
-    </Card>
-  );
+  // One cell of the readout strip above the console (DESIGN.md → Readout strip).
+  return <ReadoutCell label={label} value={value} detail={detail} meter={pct} meterClassName={tone} />;
 }
 
 function asProcessStatus(value?: string): ServerStatus | null {
@@ -284,6 +270,123 @@ function lastExitBanner(exit: NonNullable<ServerRecord["lastExit"]>) {
   }
 }
 
+/**
+ * What sits around the console on wide screens: the live readout strip above
+ * it ("stats"), or the history graphs below it ("graphs"). One scroll swaps
+ * them; narrow screens show both and scroll normally.
+ */
+type ConsoleView = "stats" | "graphs";
+
+/** Wheel travel (px) that counts as one deliberate scroll, so a trackpad's tiny deltas don't flip it. */
+const SWAP_SCROLL_PX = 40;
+/** After a swap, ignore the rest of that scroll gesture (trackpad momentum). */
+const SWAP_LOCK_MS = 650;
+
+/**
+ * Scroll down to show the graphs, scroll up to bring the stats back.
+ *
+ * Scrolling over the console log still scrolls the log: a downward scroll only
+ * swaps when the log is already at its newest line (where it usually sits), and
+ * an upward scroll only when the log is at its oldest line. Other scrollable
+ * popups (the command suggestions) are left alone. Only active on wide screens
+ * (`snap`); the button in the console header does the same for keyboard and touch.
+ */
+function useConsoleViewSwap(
+  pageRef: RefObject<HTMLDivElement | null>,
+  logRef: RefObject<HTMLDivElement | null>,
+) {
+  const [view, setView] = useState<ConsoleView>("stats");
+  const viewRef = useRef<ConsoleView>("stats");
+  const [snap, setSnap] = useState(false);
+
+  const show = (next: ConsoleView) => {
+    viewRef.current = next;
+    setView(next);
+  };
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setSnap(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!snap || !page) return;
+    // Listen on the whole page area (the padded scroller), not just this page's box.
+    const area = page.closest<HTMLElement>("[data-page-scroller]") ?? page;
+    let travel = 0;
+    let lastWheel = 0;
+    let lockedUntil = 0;
+
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.deltaY === 0) return; // pinch-zoom or sideways scroll
+      const target = event.target as Element | null;
+      if (target?.closest('[role="listbox"]')) return; // command suggestions scroll on their own
+      const down = event.deltaY > 0;
+
+      const log = logRef.current;
+      if (log && target && log.contains(target)) {
+        const atNewest = log.scrollHeight - log.scrollTop - log.clientHeight < 2;
+        const atOldest = log.scrollTop <= 0;
+        if ((down && !atNewest) || (!down && !atOldest)) return; // let the log scroll
+      }
+
+      const want: ConsoleView = down ? "graphs" : "stats";
+      if (viewRef.current === want) return; // already there; let the page scroll if it can
+      event.preventDefault();
+
+      const now = performance.now();
+      if (now < lockedUntil) return;
+      if (now - lastWheel > 200) travel = 0;
+      lastWheel = now;
+      travel += Math.abs(event.deltaY);
+      if (travel < SWAP_SCROLL_PX) return;
+
+      travel = 0;
+      lockedUntil = now + SWAP_LOCK_MS;
+      show(want);
+    };
+
+    area.addEventListener("wheel", onWheel, { passive: false });
+    return () => area.removeEventListener("wheel", onWheel);
+  }, [snap, pageRef, logRef]);
+
+  return {
+    snap,
+    view,
+    show,
+    statsOpen: !snap || view === "stats",
+    graphsOpen: !snap || view === "graphs",
+  };
+}
+
+/**
+ * Collapses its content to zero height. Hidden content is `inert`, so nothing in
+ * it can be focused or read out while it's out of view.
+ */
+function Collapse({ open, children, className }: { open: boolean; children: ReactNode; className?: string }) {
+  const { enabled: motion } = useMotion();
+  return (
+    <div
+      className={cn(
+        "grid ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+        motion ? "transition-[grid-template-rows,opacity] duration-300" : "transition-none",
+        open ? "opacity-100" : "opacity-0",
+      )}
+      style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+      aria-hidden={!open}
+      inert={!open}
+    >
+      <div className="min-h-0 overflow-hidden">
+        <div className={className}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function ConsolePage({
   params,
 }: {
@@ -311,6 +414,9 @@ export default function ConsolePage({
   const [netRate, setNetRate] = useState(0);
   const [, setTick] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
+  // Wide screens: stats above the console, or graphs below it; one scroll swaps them.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const consoleView = useConsoleViewSwap(pageRef, scroller);
   const stickToBottom = useRef(true);
   const ignoreScroll = useRef(false);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -984,8 +1090,6 @@ export default function ConsolePage({
   const memLimit = server?.memory.limitMb ?? 0;
   const diskUsed = server?.disk.usedMb ?? 0;
   const diskLimit = server?.disk.limitMb ?? 0;
-  const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
-  const diskPct = diskLimit > 0 ? (diskUsed / diskLimit) * 100 : 0;
   const netMax = Math.max(1, netRate, ...series.network);
   const suggestOpen = Boolean(
     canType && suggestFocused && commandMatches.length > 0 && (command.trim() || browseAll),
@@ -1000,9 +1104,10 @@ export default function ConsolePage({
   const exitMeta = lastExit ? lastExitBanner(lastExit) : null;
 
   return (
-    <div className="space-y-4">
+    // lg+: fill the page area exactly; the console takes whatever height the stats or graphs leave.
+    <div ref={pageRef} className="flex flex-col lg:h-full">
       {powerLayout === "standard" ? (
-        <div data-standard-power className="flex flex-wrap items-center justify-between gap-3">
+        <div data-standard-power className="flex flex-wrap items-center justify-between gap-3 pb-4">
           <PowerButtons
             status={server?.status}
             canStart={canStart}
@@ -1013,10 +1118,65 @@ export default function ConsolePage({
         </div>
       ) : null}
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
-        <Card className="overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Console</p>
+      {/* Readout strip: the server's live numbers in one instrument well. Hidden while the graphs show. */}
+      <Collapse open={consoleView.statsOpen} className="pb-4">
+      <Readout>
+        <button
+          type="button"
+          onClick={() => void copyAddress()}
+          className="no-press -mb-px -mr-px flex min-w-0 flex-col items-start justify-start px-4 pb-3.5 pt-3 text-left hover:bg-muted/40"
+          title={server?.allocation ? `Copy ${server.allocation}` : undefined}
+        >
+          <p className="text-[13px] text-muted-foreground">{copied ? "Copied to clipboard" : "Address"}</p>
+          <p className="mt-1.5 w-full truncate font-mono text-[15px] font-medium">{server?.allocation ?? "Not assigned"}</p>
+        </button>
+        <SideStat label="Uptime" value={formatUptime(startedAt, Boolean(running))} />
+        <SideStat
+          label="CPU"
+          value={
+            cpuLimit > 0 ? `${cpuUsed.toFixed(0)}%` : <UnlimitedStat used={`${cpuUsed.toFixed(1)}%`} />
+          }
+          detail={cpuLimit > 0 ? `of ${cpuLimit}%` : undefined}
+          barValue={cpuUsed}
+          barMax={cpuLimit > 0 ? cpuLimit : 100}
+        />
+        <SideStat
+          label="Memory"
+          value={memLimit > 0 ? formatMb(memUsed) : <UnlimitedStat used={formatMb(memUsed)} />}
+          detail={memLimit > 0 ? `of ${formatLimitMb(memLimit)}` : undefined}
+          barValue={memLimit > 0 ? memUsed : undefined}
+          barMax={memLimit > 0 ? memLimit : undefined}
+        />
+        <SideStat
+          label="Disk"
+          value={diskLimit > 0 ? formatMb(diskUsed) : <UnlimitedStat used={formatMb(diskUsed)} />}
+          detail={diskLimit > 0 ? `of ${formatLimitMb(diskLimit)}` : undefined}
+          barValue={diskLimit > 0 ? diskUsed : undefined}
+          barMax={diskLimit > 0 ? diskLimit : undefined}
+        />
+      </Readout>
+      </Collapse>
+
+      <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+        <Card variant="well" className="overflow-hidden lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+            <div className="flex items-center gap-3">
+              <h2 className="text-[16px] font-semibold">Console</h2>
+              {consoleView.snap ? (
+                // Same as scrolling: swaps the stats above for the graphs below. For keyboard and touch.
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 px-2 text-[13px] text-muted-foreground"
+                  title={consoleView.view === "stats" ? "Or scroll down" : "Or scroll up"}
+                  onClick={() => consoleView.show(consoleView.view === "stats" ? "graphs" : "stats")}
+                >
+                  {consoleView.view === "stats" ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />}
+                  {consoleView.view === "stats" ? "Show graphs" : "Show stats"}
+                </Button>
+              ) : null}
+            </div>
             <div className="flex rounded-md border border-border p-0.5" role="tablist" aria-label="Filter console lines">
               {FILTERS.map((option) => (
                 <button
@@ -1075,12 +1235,12 @@ export default function ConsolePage({
               </Button>
             </div>
           ) : null}
-          <div className="relative">
+          <div className="relative lg:min-h-0 lg:flex-1">
             <div
               ref={scroller}
               onScroll={onScroll}
               className={cn(
-                "terminal-scroll relative h-[32rem] overflow-y-auto bg-background p-4 font-mono text-[13px] leading-6 text-foreground transition-[padding] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] select-text",
+                "terminal-scroll relative h-[32rem] overflow-y-auto lg:h-full lg:min-h-[10rem] bg-background p-4 font-mono text-[13px] leading-6 text-foreground transition-[padding] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] select-text",
                 searchOpen && "pb-14",
               )}
             >
@@ -1133,7 +1293,7 @@ export default function ConsolePage({
             {selectionCopy ? (
               <button
                 type="button"
-                className="absolute z-30 inline-flex h-7 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs font-medium shadow-sm hover:bg-muted"
+                className="absolute z-30 inline-flex h-7 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs font-medium shadow-[var(--shadow-float)] hover:bg-muted"
                 style={{ top: selectionCopy.top, left: selectionCopy.left }}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
@@ -1151,7 +1311,7 @@ export default function ConsolePage({
                 "absolute bottom-3 right-3 z-20 flex h-8 max-w-[calc(100%-1.5rem)] items-center rounded-md",
                 "transition-[background-color,border-color,box-shadow,backdrop-filter] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
                 searchOpen
-                  ? "border border-border bg-card/95 shadow-sm backdrop-blur-sm"
+                  ? "border border-border bg-card shadow-[var(--shadow-float)]"
                   : "border border-transparent bg-transparent",
               )}
             >
@@ -1350,50 +1510,12 @@ export default function ConsolePage({
             />
           </form>
         </Card>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-          <button
-            type="button"
-            onClick={() => void copyAddress()}
-            className="rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/40"
-          >
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              {copied ? "Copied" : "Address"}
-            </p>
-            <p className="mt-1 font-mono text-lg font-semibold">{server?.allocation ?? "—"}</p>
-          </button>
-          <SideStat label="Uptime" value={formatUptime(startedAt, Boolean(running))} />
-          <SideStat
-            label="CPU load"
-            value={
-              cpuLimit > 0 ? `${cpuUsed.toFixed(1)}/${cpuLimit}%` : <UnlimitedStat used={`${cpuUsed.toFixed(1)}%`} />
-            }
-            barValue={cpuUsed}
-            barMax={cpuLimit > 0 ? cpuLimit : 100}
-          />
-          <SideStat
-            label="Memory"
-            value={
-              memLimit > 0 ? `${memPct.toFixed(1)}/${100}%` : <UnlimitedStat used={formatMb(memUsed)} />
-            }
-            detail={memLimit > 0 ? `${formatMb(memUsed)} / ${formatLimitMb(memLimit)}` : undefined}
-            barValue={memLimit > 0 ? memUsed : undefined}
-            barMax={memLimit > 0 ? memLimit : undefined}
-          />
-          <SideStat
-            label="Disk"
-            value={
-              diskLimit > 0 ? `${diskPct.toFixed(1)}/${100}%` : <UnlimitedStat used={formatMb(diskUsed)} />
-            }
-            detail={diskLimit > 0 ? `${formatMb(diskUsed)} / ${formatLimitMb(diskLimit)}` : undefined}
-            barValue={diskLimit > 0 ? diskUsed : undefined}
-            barMax={diskLimit > 0 ? diskLimit : undefined}
-          />
-        </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Card className="p-4">
+      {/* History graphs share one well, divided by seams. Hidden until you scroll down on wide screens. */}
+      <Collapse open={consoleView.graphsOpen} className="pt-4">
+      <div className="grid overflow-hidden rounded-lg border border-border bg-well sm:grid-cols-3 sm:divide-x divide-y sm:divide-y-0 divide-border">
+        <div className="p-4">
           <StatGraph
             tall
             label="CPU"
@@ -1409,8 +1531,8 @@ export default function ConsolePage({
             series={series.cpu}
             className="text-primary"
           />
-        </Card>
-        <Card className="p-4">
+        </div>
+        <div className="p-4">
           <StatGraph
             tall
             label="Memory"
@@ -1427,8 +1549,8 @@ export default function ConsolePage({
             className="text-status-running"
             warn={memLimit > 0}
           />
-        </Card>
-        <Card className="p-4">
+        </div>
+        <div className="p-4">
           <StatGraph
             tall
             label="Network"
@@ -1439,8 +1561,9 @@ export default function ConsolePage({
             className="text-status-info"
             warn={false}
           />
-        </Card>
+        </div>
       </div>
+      </Collapse>
     </div>
   );
 }

@@ -25,7 +25,7 @@ import { Popover } from "@mantine/core";
 import { AdminError, AdminPage } from "@/components/admin-table";
 import { DashboardSkeleton, OVERVIEW_DESCRIPTION } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
-import { Badge, Card, buttonClass } from "@/components/ui";
+import { Badge, Card, Rack } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import { useLiveReload, usePanelEvent } from "@/components/panel-socket";
@@ -173,8 +173,8 @@ export default function AdminDashboardPage() {
     ...offlineNodes.map((node) => ({
       href: `/admin/nodes/${node.id}`,
       label: `${node.name} is offline`,
-      tone: "text-status-offline",
-      dot: "bg-status-offline",
+      tone: "text-status-error", // a node being down is the most urgent thing here
+      dot: "bg-status-error",
     })),
     ...maintenanceNodes.map((node) => ({
       href: `/admin/nodes/${node.id}/settings`,
@@ -334,125 +334,144 @@ export default function AdminDashboardPage() {
       <AdminError message={loadError} />
       <VersionBanner />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {PROJECT_LINKS.map((link) => {
-          const Icon = link.icon;
-          return (
-            <a
-              key={link.label}
-              href={link.href}
-              target="_blank"
-              rel="noreferrer"
-              className={buttonClass({ variant: "secondary", className: "w-full justify-center" })}
-            >
-              <Icon className="size-4" />
-              {link.label}
-            </a>
-          );
-        })}
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {tiles.map((tile) => (
-          <SectionCard key={tile.title} tile={tile} />
-        ))}
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Needs attention
-          </p>
-          {alerts.length ? (
-            <ul className="mt-3 space-y-2">
-              {alerts.slice(0, 8).map((alert) => (
-                <li key={`${alert.href}-${alert.label}`} className="flex min-w-0 items-center gap-2">
-                  <span className={cn("size-1.5 shrink-0 rounded-full", alert.dot)} />
-                  <Link href={alert.href} className={cn("truncate text-sm hover:underline", alert.tone)}>
-                    {alert.label}
+      {/* Main column: what needs attention, then every admin area as one rack. Side: services and links. */}
+      <div className="grid items-start gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className="min-w-0 space-y-8">
+          <section aria-labelledby="overview-attention" className="space-y-3">
+            <h2 id="overview-attention" className="text-[20px] font-semibold">
+              Needs attention
+            </h2>
+            {alerts.length ? (
+              <Rack label="Needs attention">
+                {alerts.slice(0, 8).map((alert) => (
+                  <Link
+                    key={`${alert.href}-${alert.label}`}
+                    role="listitem"
+                    href={alert.href}
+                    className="relative flex min-w-0 items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/45"
+                  >
+                    <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", alert.dot)} />
+                    <span className={cn("truncate font-medium", alert.tone)}>{alert.label}</span>
                   </Link>
-                </li>
-              ))}
-              {alerts.length > 8 ? (
-                <li className="text-xs text-muted-foreground">and {alerts.length - 8} more</li>
-              ) : null}
-            </ul>
-          ) : (
-            <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="size-1.5 shrink-0 rounded-full bg-status-running" />
-              All nodes are online and no servers need action.
-            </p>
-          )}
-        </Card>
+                ))}
+                {alerts.length > 8 ? (
+                  <p role="listitem" className="px-4 py-2 text-[13px] text-muted-foreground">
+                    And {alerts.length - 8} more.
+                  </p>
+                ) : null}
+              </Rack>
+            ) : (
+              <p className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                <span className="size-2 shrink-0 rounded-full bg-status-running" aria-hidden />
+                All nodes are online and no servers need action.
+              </p>
+            )}
+          </section>
 
-        <Card className="p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Services
-          </p>
-          {healthError ? (
-            <p className="mt-3 text-sm text-destructive">{healthError}</p>
-          ) : !health ? (
-            <p className="mt-3 text-sm text-muted-foreground">Checking…</p>
-          ) : (
-            <ul className="mt-3 space-y-2.5">
-              {Object.entries(health.checks).map(([name, check]) => {
-                const meta = HEALTH_META[name];
-                const label = meta?.label ?? name;
+          <section aria-labelledby="overview-areas" className="space-y-3">
+            <h2 id="overview-areas" className="text-[20px] font-semibold">
+              Manage
+            </h2>
+            <Rack label="Admin areas">
+              {tiles.map((tile) => (
+                <AreaRow key={tile.title} tile={tile} />
+              ))}
+            </Rack>
+          </section>
+        </div>
+
+        <aside className="space-y-8">
+          <section aria-labelledby="overview-services" className="space-y-3">
+            <h2 id="overview-services" className="text-[20px] font-semibold">
+              Services
+            </h2>
+            <Card variant="well" className="px-4 py-3">
+              {healthError ? (
+                <p className="text-sm text-destructive">{healthError}</p>
+              ) : !health ? (
+                <p className="text-sm text-muted-foreground">Checking services…</p>
+              ) : (
+                <ul className="space-y-2.5">
+                  {Object.entries(health.checks).map(([name, check]) => {
+                    const meta = HEALTH_META[name];
+                    const label = meta?.label ?? name;
+                    return (
+                      <li key={name} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          <span
+                            aria-hidden
+                            className={cn("size-2 shrink-0 rounded-full", check.ok ? "bg-status-running" : "bg-status-error")}
+                          />
+                          <span className="truncate">{label}</span>
+                          {meta ? <ServiceHint meta={meta} /> : null}
+                        </span>
+                        <span
+                          className={cn(
+                            "shrink-0 text-[13px] tabular-nums",
+                            check.ok ? "text-muted-foreground" : "font-medium text-status-error",
+                          )}
+                        >
+                          {check.ok ? (check.latencyMs != null ? `${check.latencyMs} ms` : "Up") : "Down"}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Card>
+          </section>
+
+          <section aria-labelledby="overview-resources" className="space-y-3">
+            <h2 id="overview-resources" className="text-[20px] font-semibold">
+              Resources
+            </h2>
+            <ul className="space-y-1">
+              {PROJECT_LINKS.map((link) => {
+                const Icon = link.icon;
                 return (
-                  <li key={name} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span
-                        className={cn(
-                          "size-1.5 shrink-0 rounded-full",
-                          check.ok ? "bg-status-running" : "bg-status-error",
-                        )}
-                      />
-                      <span className="truncate">{label}</span>
-                      {meta ? <ServiceHint meta={meta} /> : null}
-                    </span>
-                    <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
-                      {check.ok
-                        ? check.latencyMs != null
-                          ? `${check.latencyMs} ms`
-                          : "Up"
-                        : "Down"}
-                    </span>
+                  <li key={link.label}>
+                    <a
+                      href={link.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2.5 rounded-md py-1.5 text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      <Icon className="size-4 shrink-0" />
+                      {link.label}
+                    </a>
                   </li>
                 );
               })}
             </ul>
-          )}
-        </Card>
+          </section>
+        </aside>
       </div>
     </AdminPage>
   );
 }
 
-/** Section tile: icon, title and count on top, description, live hint pinned to the bottom. */
-function SectionCard({ tile }: { tile: SectionTile }) {
+/** One admin area as a rack row: icon and name, what it's for, a live hint, and its count on the right. */
+function AreaRow({ tile }: { tile: SectionTile }) {
   const Icon = tile.icon;
   const prefetch = tile.prefetch;
   return (
     <Link
+      role="listitem"
       href={tile.href}
       onMouseEnter={prefetch ? () => prefetchQuery(prefetch) : undefined}
-      className="group block h-full"
+      className="group flex items-center gap-4 px-4 py-3 hover:bg-muted/45"
     >
-      <Card className="flex h-full flex-col p-5 transition-colors group-hover:border-primary/40 group-hover:bg-muted/30">
-        <div className="flex items-center justify-between gap-3">
-          <p className="flex min-w-0 items-center gap-2 font-semibold">
-            <Icon className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
-            <span className="truncate">{tile.title}</span>
-          </p>
-          {tile.count != null ? (
-            <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-              {tile.count}
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-1.5 text-sm text-muted-foreground">{tile.description}</p>
-        {tile.hint ? <p className="mt-auto pt-3 text-xs text-muted-foreground/80">{tile.hint}</p> : null}
-      </Card>
+      <Icon className="size-[18px] shrink-0 text-muted-foreground group-hover:text-primary" />
+      <div className="min-w-0 flex-1">
+        <p className="font-display text-[17px] font-semibold leading-tight">{tile.title}</p>
+        <p className="truncate text-[13px] text-muted-foreground">
+          {tile.description}
+          {tile.hint ? <span className="text-foreground/70"> {tile.hint}.</span> : null}
+        </p>
+      </div>
+      {tile.count != null ? (
+        <span className="shrink-0 font-display text-[20px] font-semibold tabular-nums">{tile.count}</span>
+      ) : null}
     </Link>
   );
 }

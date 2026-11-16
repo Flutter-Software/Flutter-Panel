@@ -1,6 +1,7 @@
 "use client";
 
-import { Button, Container, Group, Text, Title } from "@mantine/core";
+import { Button, buttonClass } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { HttpError } from "@/lib/api";
 import classes from "./error-page.module.css";
 
@@ -20,79 +21,89 @@ type Copy = {
   description: string;
   home: string;
   retry?: string;
-  tone: "plain" | "banner";
-  illustration?: boolean;
+  /** Colour of the status rail: error for failures, warn for "wait", offline for "not here". */
+  tone: "error" | "warn" | "offline";
 };
 
 const COPY: Record<ErrorKind, Copy> = {
   "not-found": {
     code: "404",
-    title: "You have found a secret place.",
+    title: "This page doesn't exist",
     description:
-      "Unfortunately, this is only a 404 page. You may have mistyped the address, or the page has been moved to another URL.",
-    home: "Take me back to home page",
-    tone: "plain",
+      "The address may be mistyped, or the page was moved or deleted. Check the URL, or go back to your servers.",
+    home: "Go to servers",
+    tone: "offline",
   },
   forbidden: {
     code: "403",
-    title: "You don't have access to this.",
+    title: "You don't have access to this page",
     description:
-      "Your account is signed in, but it doesn't have permission to open this page. If you think this is an error, ask an administrator.",
-    home: "Take me back to home page",
-    tone: "plain",
+      "You're signed in, but your account doesn't have permission to open it. Ask a panel administrator or the server owner for access.",
+    home: "Go to servers",
+    tone: "offline",
   },
   unauthorized: {
     code: "401",
-    title: "You need to sign in.",
-    description: "This page requires a session. Sign in and we'll send you back to where you were.",
+    title: "Sign in to continue",
+    description: "Your session ended, or you haven't signed in yet. Sign in and you'll come back to this page.",
     home: "Sign in",
-    tone: "plain",
+    tone: "offline",
   },
   "rate-limited": {
     code: "429",
-    title: "Slow down a little.",
-    description:
-      "Too many requests hit the panel just now. Wait a few seconds, then refresh the page.",
-    home: "Take me back to home page",
-    retry: "Refresh the page",
-    tone: "plain",
+    title: "Too many requests",
+    description: "The panel received a lot of requests from you in a short time. Wait a few seconds, then try again.",
+    home: "Go to servers",
+    retry: "Try again",
+    tone: "warn",
   },
   "server-error": {
     code: "500",
-    title: "Something bad just happened...",
+    title: "The panel hit an error",
     description:
-      "Our servers could not handle your request. Don't worry, our development team was already notified. Try refreshing the page.",
-    home: "Take me back to home page",
-    retry: "Refresh the page",
-    tone: "banner",
+      "Something failed while loading this page. Try again. If it keeps happening, check the panel logs or report the issue.",
+    home: "Go to servers",
+    retry: "Try again",
+    tone: "error",
   },
   "bad-gateway": {
     code: "502",
-    title: "We lost the connection...",
+    title: "The panel API isn't answering",
     description:
-      "The gateway is up, but the service behind it did not answer. It may be restarting. Wait a couple of seconds and refresh the page.",
-    home: "Take me back to home page",
-    retry: "Refresh the page",
-    tone: "banner",
+      "The web panel is up, but the API behind it didn't respond. It may be restarting. Wait a few seconds and try again.",
+    home: "Go to servers",
+    retry: "Try again",
+    tone: "error",
   },
   unavailable: {
-    title: "All of our servers are busy",
+    code: "503",
+    title: "The panel can't be reached right now",
     description:
-      "We cannot handle your request right now, please wait for a couple of minutes and refresh the page. Our team is already working on this issue.",
-    home: "Take me back to home page",
-    retry: "Refresh the page",
-    tone: "banner",
-    illustration: true,
+      "The service didn't respond in time. It may be busy or restarting. Wait a minute, then try again.",
+    home: "Go to servers",
+    retry: "Try again",
+    tone: "error",
   },
   maintenance: {
     title: "This node is in maintenance",
     description:
-      "The machine that runs this server is temporarily unavailable. Your server is still listed on the dashboard — check back after maintenance is complete.",
-    home: "Back to server list",
-    retry: "Refresh the page",
-    tone: "banner",
-    illustration: true,
+      "The machine that runs this server is temporarily unavailable. The server is still in your list. Check back once maintenance is finished.",
+    home: "Back to servers",
+    retry: "Try again",
+    tone: "warn",
   },
+};
+
+const RAIL: Record<Copy["tone"], string> = {
+  error: "bg-status-error",
+  warn: "bg-status-warn",
+  offline: "bg-status-offline",
+};
+
+const CODE_TEXT: Record<Copy["tone"], string> = {
+  error: "text-status-error",
+  warn: "text-status-warn",
+  offline: "text-muted-foreground",
 };
 
 export function kindFromFailure(error?: string | null, status?: number | null): ErrorKind {
@@ -126,50 +137,11 @@ export function kindFromUnknown(error: unknown): ErrorKind {
   return "server-error";
 }
 
-function OverloadIllustration({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 800 420"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden
-    >
-      <circle cx="400" cy="210" r="186" stroke="currentColor" strokeWidth="2" opacity="0.35" />
-      <circle cx="400" cy="210" r="132" stroke="currentColor" strokeWidth="2" opacity="0.25" />
-      <rect x="268" y="92" width="108" height="196" rx="14" fill="currentColor" opacity="0.35" />
-      <rect x="284" y="112" width="76" height="10" rx="5" fill="currentColor" opacity="0.7" />
-      <rect x="284" y="136" width="76" height="10" rx="5" fill="currentColor" opacity="0.7" />
-      <rect x="284" y="160" width="76" height="10" rx="5" fill="currentColor" opacity="0.7" />
-      <rect x="284" y="184" width="44" height="10" rx="5" fill="currentColor" opacity="0.45" />
-      <circle cx="348" cy="250" r="6" fill="currentColor" opacity="0.85" />
-      <circle cx="328" cy="250" r="6" fill="currentColor" opacity="0.5" />
-      <rect x="424" y="118" width="108" height="170" rx="14" fill="currentColor" opacity="0.28" />
-      <rect x="440" y="138" width="76" height="10" rx="5" fill="currentColor" opacity="0.7" />
-      <rect x="440" y="162" width="76" height="10" rx="5" fill="currentColor" opacity="0.7" />
-      <rect x="440" y="186" width="52" height="10" rx="5" fill="currentColor" opacity="0.45" />
-      <circle cx="504" cy="248" r="6" fill="currentColor" opacity="0.85" />
-      <path
-        d="M214 318c28-46 70-74 120-74 58 0 90 38 132 38 44 0 72-28 120-28 46 0 86 24 120 62"
-        stroke="currentColor"
-        strokeWidth="8"
-        strokeLinecap="round"
-        opacity="0.35"
-      />
-      <ellipse cx="400" cy="338" rx="92" ry="14" fill="currentColor" opacity="0.18" />
-      <path
-        d="M358 286c0-22 16-40 42-40s42 18 42 40v22c0 10-8 18-18 18h-48c-10 0-18-8-18-18v-22Z"
-        fill="currentColor"
-        opacity="0.55"
-      />
-      <circle cx="400" cy="214" r="22" fill="currentColor" opacity="0.7" />
-      <rect x="372" y="300" width="56" height="36" rx="8" fill="currentColor" opacity="0.45" />
-      <rect x="454" y="292" width="62" height="40" rx="8" fill="currentColor" opacity="0.4" />
-      <rect x="464" y="302" width="42" height="6" rx="3" fill="currentColor" opacity="0.75" />
-    </svg>
-  );
-}
-
+/**
+ * Full-page error. Laid out like a rack unit that has gone down: a status rail
+ * on the left edge in the failure's colour, then the code, a plain title, what
+ * happened and what to do, and one action. Left-aligned like the rest of the panel.
+ */
 export function ErrorPage({
   kind,
   homeHref = "/",
@@ -184,7 +156,6 @@ export function ErrorPage({
   retryLabel?: string;
 }) {
   const copy = COPY[kind];
-  const buttonVariant = copy.tone === "banner" ? "white" : "filled";
   const refresh = () => {
     if (onRetry) onRetry();
     else if (typeof window !== "undefined") window.location.reload();
@@ -193,30 +164,26 @@ export function ErrorPage({
     kind === "unauthorized" ? "/login" : homeHref && homeHref.startsWith("/") ? homeHref : "/";
 
   return (
-    <div className={classes.root} data-kind={kind} data-tone={copy.tone}>
-      <Container size={640}>
-        <div className={classes.inner}>
-          {copy.illustration ? <OverloadIllustration className={classes.image} /> : null}
-          <div className={classes.content}>
-            {copy.code ? <div className={classes.label}>{copy.code}</div> : null}
-            <Title className={classes.title}>{copy.title}</Title>
-            <Text size="lg" ta="center" className={classes.description}>
-              {copy.description}
-            </Text>
-            <Group justify="center">
-              {copy.retry ? (
-                <Button variant={buttonVariant} size="md" onClick={refresh}>
-                  {retryLabel ?? copy.retry}
-                </Button>
-              ) : (
-                <Button component="a" href={href} variant={buttonVariant} size="md">
-                  {homeLabel ?? copy.home}
-                </Button>
-              )}
-            </Group>
-          </div>
+    <div className={classes.root} data-kind={kind}>
+      <div className="relative w-full max-w-[60ch] py-1 pl-6">
+        <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", RAIL[copy.tone])} />
+        <p className={cn("text-[13px] font-medium", CODE_TEXT[copy.tone])} data-numeric>
+          {copy.code ? `Error ${copy.code}` : "Unavailable"}
+        </p>
+        <h1 className="mt-1 text-[31px] font-semibold">{copy.title}</h1>
+        <p className="mt-3 text-[15px] text-muted-foreground">{copy.description}</p>
+        <div className="mt-6">
+          {copy.retry ? (
+            <Button type="button" onClick={refresh}>
+              {retryLabel ?? copy.retry}
+            </Button>
+          ) : (
+            <a href={href} className={buttonClass()}>
+              {homeLabel ?? copy.home}
+            </a>
+          )}
         </div>
-      </Container>
+      </div>
     </div>
   );
 }

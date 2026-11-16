@@ -4,18 +4,24 @@ Extensions add your own pages and tools to the panel, for example a player list 
 
 - **Plain HTML/JS**, with no tooling at all.
 - **TypeScript**, with or without React. The panel compiles it for you, so there's no build step.
+- **Svelte 5** components. Also compiled by the panel, no build step.
 - **Rust (WebAssembly)**: you build a `.wasm` with wasm-bindgen; the panel loads and starts it.
 
 ## Templates
 
 Starters aren't shipped with the panel. Download them from the docs: **https://docs.flutter.software/extensions/templates**
 
+New to extensions? The ten-minute quickstart builds one from an empty folder: **https://docs.flutter.software/extensions/quickstart**
+
 | Template | Entry | Use it when | Build step |
 |---|---|---|---|
 | `html-starter` | `index.html` | You want plain HTML/CSS/JS, or to drop in your own bundler output | none |
 | `typescript-starter` | `src/main.ts` | You want TypeScript without a framework | none (the panel compiles) |
 | `react-starter` | `src/main.tsx` | You want React components and hooks | none (the panel compiles) |
+| `svelte-starter` | `src/App.svelte` | You want Svelte 5 components and runes | none (the panel compiles) |
 | `rust-starter` | `pkg/rust_starter_bg.wasm` | You want Rust (or Yew/Leptos/Dioxus) | `build.ps1` / `build.sh` |
+
+Complete, working examples (a Minecraft player list, a `server.properties` editor, quick command buttons, and a console log search) are at **https://docs.flutter.software/extensions/examples**.
 
 They all build the same page (server header, usage cards, live console with a Live/Reconnecting badge, and a command box). Each zip is one folder that's self-contained (it includes `flutter-sdk.d.ts` or the `flutter-extension` crate it needs) and can be uploaded unchanged. Rename the folder and change `id` and `name` in `extension.json` (the folder name must match `id`).
 
@@ -54,7 +60,7 @@ Folders starting with `.` or `_` are ignored, so `_drafts/` is a handy place to 
   "name": "Player List",
   "version": "1.0.0",                 // semver
   "description": "Short summary shown to admins.",
-  "author": "You",
+  "author": "You",                    // shown to admins next to the version; recommended
   "homepage": "https://example.com",  // optional
   "icon": "users",                    // see Icons below
   "permissions": ["server.read", "console.read", "console.command", "files.read"],
@@ -72,7 +78,7 @@ Folders starting with `.` or `_` are ignored, so `_drafts/` is a handy place to 
         "id": "players",              // a-z, 0-9, dashes; becomes /server/:id/ext/<ext>/<page>
         "label": "Players",           // sidebar label, max 24 chars
         "icon": "users",
-        "entry": "src/main.tsx",      // .tsx/.ts/.jsx/.js/.mjs (compiled), .wasm (Rust), or .html
+        "entry": "src/main.tsx",      // .tsx/.ts/.jsx/.js/.mjs or .svelte (compiled), .wasm (Rust), or .html
         "permission": "control.console" // optional: hide from viewers without this server permission
       }
     ]
@@ -81,6 +87,8 @@ Folders starting with `.` or `_` are ignored, so `_drafts/` is a handy place to 
 ```
 
 Admin → Extensions shows any validation errors next to the extension.
+
+`author` is who made the extension: a person, team or studio, up to 64 characters. Admins see it next to the version on the extension's row and in the enable/approve dialog, linked to `homepage` if you set one. Without it the extension is shown as **Unknown author**, which makes admins less likely to trust it. Pages can read it as `Flutter.context.extension.author`.
 
 ### Icons
 
@@ -136,6 +144,39 @@ For editor autocompletion, add `/// <reference path="../../flutter-sdk.d.ts" />`
 If the build fails, the error and its file:line show up inside the page. Fix the file and reload. Bundles are cached until one of their input files changes. Imports from outside your extension folder (or the allowed `node_modules`) are blocked, because compiled output is served publicly.
 
 You can also reference a `.tsx`/`.ts` file directly from your own HTML with `<script type="module" src="app.tsx">`. It's compiled the same way.
+
+### Svelte (`.svelte`)
+
+Point `entry` at a Svelte 5 component. The panel compiles it with the Svelte compiler, bundles it (and the Svelte runtime) with esbuild, and mounts it into `#root` for you, so you don't write a `main.ts`:
+
+```jsonc
+{ "id": "main", "label": "Players", "entry": "src/App.svelte" }
+```
+
+```svelte
+<!-- src/App.svelte -->
+<script lang="ts">
+  import Counter from "./Counter.svelte";
+  let name = $state("…");
+  Flutter.ready().then(({ server }) => (name = server.name));
+</script>
+
+<h1>Hello from {name}</h1>
+<Counter />
+
+<style>
+  h1 { color: var(--primary); }
+</style>
+```
+
+- **Svelte 5 with runes.** `$state`, `$derived`, `$effect` and `$props` all work. Svelte 4 syntax still compiles in legacy mode.
+- **`<script lang="ts">`** works for type annotations. Svelte strips them itself, so TypeScript-only syntax that emits code (such as `enum`) isn't supported inside components. Put that in a `.ts` file.
+- **Scoped `<style>`** blocks are injected at runtime. `import "./style.css"` works too.
+- **Shared state:** files named `*.svelte.ts` or `*.svelte.js` can use runes outside components, e.g. `export const store = $state({ count: 0 });`.
+- **Imports, assets and npm packages** work exactly as for TypeScript (see above). `svelte` comes from the panel; Svelte component libraries installed in your folder's `node_modules` work as well.
+- If a component fails to compile, the Svelte error shows inside the page with `file:line:column`.
+
+A `.svelte` file referenced from your own HTML (`<script type="module" src="App.svelte">`) is compiled to a plain component module (not mounted), so import it and call `mount()` from `svelte` yourself.
 
 ### Rust (WebAssembly)
 
@@ -238,7 +279,7 @@ Every method returns a Promise. A method rejects with an `Error` if the permissi
 
 | Call | Returns |
 |---|---|
-| `Flutter.ready()` | context: `{ apiVersion, extension, server, user, theme }` |
+| `Flutter.ready()` | context: `{ apiVersion, extension, server, user, theme }`. `extension` is `{ id, name, version, author, permissions, page }` |
 | `Flutter.context` | the same object, or `null` before ready |
 | `Flutter.on(event, fn)` | an unsubscribe function. Events: `"init"`, `"server"` (record changed: status, name…), `"theme"` |
 | `Flutter.server.get()` | `{ id, uuid, name, description, status, egg, node, nodeLocation, allocation, uptime, cpu, memory, disk }` |
@@ -352,7 +393,7 @@ The scan is pattern-based. It can miss things and flag harmless code, and it doe
 ## Development loop
 
 1. Create the folder and manifest (or start from a downloaded template), then Rescan and enable once.
-2. Edit TSX/HTML/JS/CSS and reload the page. Files are read from disk, and TSX is rebuilt whenever an input file changes.
+2. Edit TSX/Svelte/HTML/JS/CSS and reload the page. Files are read from disk, and TSX/Svelte is rebuilt whenever an input file changes.
 3. Manifest edits are picked up within about 10 seconds, or straight away when you press Rescan.
 4. Rust: rerun `build.ps1`/`build.sh` and reload. The page always fetches the latest `pkg/`.
 5. To ship it, zip the folder (skip `node_modules` and `target`, keep Rust's `pkg/`), or use the download button in Admin → Extensions.

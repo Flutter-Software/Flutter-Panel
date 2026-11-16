@@ -114,7 +114,7 @@ export function UserForm({
       router.push("/admin/users");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : creating ? "Create failed" : "Save failed");
+      setError(err instanceof Error ? err.message : creating ? "Couldn't create the user. Check the values below, then try again." : "Couldn't save the user. Check the values below, then try again.");
       setPending(false);
     }
   }
@@ -133,7 +133,7 @@ export function UserForm({
         title={creating ? "New user" : `Edit ${initial?.username ?? "user"}`}
         description={
           creating
-            ? "Create a panel account. Admins can manage nodes, eggs, and every server."
+            ? "Create a panel account. Admins can manage nodes, eggs and every server."
             : "Update this account. Leave the password blank to keep the current one."
         }
       />
@@ -145,7 +145,7 @@ export function UserForm({
           title="Account details"
           description="Identity used to sign in to the panel."
         >
-          <Field label="Username" required hint="3–32 chars: letters, numbers, and underscores.">
+          <Field label="Username" required hint="3 to 32 letters, numbers and underscores.">
             <Input
               name="username"
               value={username}
@@ -158,7 +158,7 @@ export function UserForm({
               autoComplete="username"
             />
           </Field>
-          <Field label="Email" required hint="Used for login and account recovery.">
+          <Field label="Email" required hint="Used to sign in and to recover the account.">
             <Input
               name="email"
               type="email"
@@ -196,7 +196,7 @@ export function UserForm({
               />
               <button
                 type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 onClick={() => setShowPassword((value) => !value)}
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
@@ -232,7 +232,7 @@ export function UserForm({
           />
           <p className="text-sm text-muted-foreground">
             {role === "admin"
-              ? "Admins can create locations, nodes, eggs, servers, and other users. Full access to the panel."
+              ? "Admins have full access: they can create locations, nodes, eggs, servers and other users."
               : "Users can sign in and manage only the servers assigned to this account."}
           </p>
           {!creating && initial ? (
@@ -252,7 +252,7 @@ export function UserForm({
         pending={pending}
         summary={
           <span className="inline-flex items-center gap-2">
-            <UserRound className="size-4 text-primary" />
+            <UserRound className="size-4 text-primary" aria-hidden />
             <span>
               {creating ? "Creating" : "Saving"}{" "}
               <span className="font-medium text-foreground">{username || "user"}</span> as{" "}

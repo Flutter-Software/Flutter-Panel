@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Button, Input } from "@/components/ui";
+import { Button, Field, Input } from "@/components/ui";
+import { AuthError } from "@/components/brand";
 import { api, type AuthResponse } from "@/lib/api";
 import type { PublicUser } from "@flutter-software/shared";
 
@@ -57,11 +58,8 @@ export function VerifyEmailForm({
   }
 
   return (
-    <form className="mt-6 space-y-4" onSubmit={(event) => void onSubmit(event)}>
-      <label className="block space-y-1.5">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Verification code
-        </span>
+    <form className="mt-8 space-y-5" onSubmit={(event) => void onSubmit(event)}>
+      <Field label="Verification code">
         <Input
           name="code"
           inputMode="numeric"
@@ -69,19 +67,19 @@ export function VerifyEmailForm({
           required
           maxLength={8}
           placeholder="481 902"
-          className="h-12 text-center font-mono text-xl tracking-[0.35em]"
+          className="h-11 font-mono text-lg tracking-[0.3em]"
         />
-      </label>
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {resent ? <p className="text-sm text-muted-foreground">A new code is on the way.</p> : null}
-      <Button type="submit" className="h-11 w-full" disabled={pending}>
-        {pending ? "Verifying…" : "Verify"}
+      </Field>
+      {error ? <AuthError>{error}</AuthError> : null}
+      {resent ? <p className="text-sm text-muted-foreground">New code sent. If it isn&apos;t in your inbox in a minute, check spam.</p> : null}
+      <Button type="submit" className="h-10 w-full" disabled={pending}>
+        {pending ? "Checking code…" : "Verify email"}
       </Button>
-      <p className="text-center text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Didn&apos;t get it?{" "}
         <button
           type="button"
-          className="font-medium text-primary disabled:opacity-60"
+          className="font-medium text-primary hover:underline disabled:opacity-60"
           onClick={() => void resend()}
           disabled={resending}
         >

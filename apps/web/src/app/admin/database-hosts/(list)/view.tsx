@@ -1,16 +1,19 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, type ReactNode } from "react";
 import Link from "next/link";
-import { Database, Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-table";
 import { AdminDatabaseHostsPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
-import { Button, ButtonLink, Card } from "@/components/ui";
+import { Button, ButtonLink, EmptyState, Rack, RowField } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import type { DatabaseHostRecord } from "../types";
+
+const COLUMNS = "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.6fr)_minmax(0,1fr)_auto]";
 
 export default function AdminDatabaseHostsPage({ skeletonCount }: { skeletonCount?: number }) {
   const { data, error, errorStatus, reload } = useQuery<{ data: { hosts: DatabaseHostRecord[] } }>(
@@ -66,41 +69,58 @@ export default function AdminDatabaseHostsPage({ skeletonCount }: { skeletonCoun
       }
     >
       {rows.length === 0 ? (
-        <Card className="px-6 py-16 text-center">
-          <p className="text-base font-semibold">No database hosts yet</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Add a MySQL or MariaDB server the panel can manage, then give game servers a database limit.
-          </p>
-        </Card>
+        <EmptyState
+          title="No database hosts yet"
+          description="Add a MySQL or MariaDB server the panel can manage, then give game servers a database limit."
+        />
       ) : (
-        <div className="space-y-4">
-          {rows.map((host) => (
-            <Card key={host.id} className="p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <Link
-                  href={`/admin/database-hosts/${host.id}`}
-                  onMouseEnter={() => prefetchQuery(`/api/v1/admin/database-hosts/${host.id}`)}
-                  className="min-w-0"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Database className="size-4 text-muted-foreground" />
-                    <span className="text-base font-semibold">{host.name}</span>
-                    <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                      {host.databaseCount}
-                      {host.maxDatabases > 0 ? `/${host.maxDatabases}` : ""} database
-                      {host.databaseCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <p className="mt-1 font-mono text-sm text-muted-foreground">
+        <div>
+          {/* Column legend for wide screens; rows wrap into labelled lines below lg. */}
+          <div aria-hidden className={cn("hidden px-4 py-2 text-[12px] text-muted-foreground lg:grid lg:gap-5", COLUMNS)}>
+            <span className="pl-1">Host</span>
+            <span>Address</span>
+            <span>Databases</span>
+            <span>Nodes</span>
+            <span className="w-[7.5rem]" />
+          </div>
+          <Rack label="Database hosts">
+            {rows.map((host) => (
+              <div
+                key={host.id}
+                role="listitem"
+                className={cn("relative grid gap-2 px-4 py-3 sm:grid-cols-2 lg:items-center lg:gap-5", COLUMNS)}
+              >
+                <div className="min-w-0 pl-1 sm:col-span-2 lg:col-span-1">
+                  <Link
+                    href={`/admin/database-hosts/${host.id}`}
+                    onMouseEnter={() => prefetchQuery(`/api/v1/admin/database-hosts/${host.id}`)}
+                    className="truncate font-display text-[17px] font-semibold leading-tight hover:text-primary"
+                  >
+                    {host.name}
+                  </Link>
+                </div>
+                <RowField breakpoint="lg" label="Address">
+                  <span className="font-mono text-[12.5px]">
                     {host.endpoint.host}:{host.endpoint.port}
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {host.nodeIds.length === 0
-                      ? "Available on every node"
-                      : host.nodeNames.join(" · ") || `${host.nodeIds.length} node${host.nodeIds.length === 1 ? "" : "s"}`}
-                  </p>
-                </Link>
-                <div className="flex shrink-0 items-center gap-2">
+                  </span>
+                </RowField>
+                <RowField breakpoint="lg" label="Databases">
+                  <span className="tabular-nums">{host.databaseCount}</span>
+                  {host.maxDatabases > 0 ? (
+                    <span className="text-muted-foreground">
+                      {" "}
+                      of <span className="tabular-nums">{host.maxDatabases}</span>
+                    </span>
+                  ) : null}
+                </RowField>
+                <RowField breakpoint="lg" label="Nodes">
+                  {host.nodeIds.length === 0 ? (
+                    <span className="text-muted-foreground">Every node</span>
+                  ) : (
+                    host.nodeNames.join(", ") || `${host.nodeIds.length} node${host.nodeIds.length === 1 ? "" : "s"}`
+                  )}
+                </RowField>
+                <div className="flex items-center gap-1.5 pl-1 lg:w-[7.5rem] lg:justify-end lg:pl-0">
                   <ButtonLink href={`/admin/database-hosts/${host.id}`} variant="secondary" size="sm">
                     <Pencil className="size-3.5" />
                     Edit
@@ -111,6 +131,7 @@ export default function AdminDatabaseHostsPage({ skeletonCount }: { skeletonCoun
                     size="sm"
                     className="size-8 px-0 text-muted-foreground hover:text-destructive"
                     aria-label={`Delete ${host.name}`}
+                    title={host.databaseCount > 0 ? "Delete this host's databases before deleting it" : undefined}
                     disabled={host.databaseCount > 0}
                     onClick={() => void onDelete(host)}
                   >
@@ -118,10 +139,11 @@ export default function AdminDatabaseHostsPage({ skeletonCount }: { skeletonCoun
                   </Button>
                 </div>
               </div>
-            </Card>
-          ))}
+            ))}
+          </Rack>
         </div>
       )}
     </AdminPage>
   );
 }
+

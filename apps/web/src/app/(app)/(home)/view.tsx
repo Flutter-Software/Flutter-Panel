@@ -1,11 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { LayoutGrid, Table2 } from "lucide-react";
-import { ServerCard, ServerTable, serverAttention } from "@/components/server-card";
+import { ServerCard, ServerRackHeader, serverAttention } from "@/components/server-card";
 import { QueryErrorPage } from "@/components/error-page";
 import { HomeServersSkeleton } from "@/components/skeletons";
-import { Badge, Button, Input } from "@/components/ui";
+import { EmptyState, Input, Rack } from "@/components/ui";
 import { useQuery } from "@/lib/query";
 import { useLiveReload } from "@/components/panel-socket";
 import type { ServerRecord } from "@/lib/types";
@@ -13,7 +12,6 @@ import { cn } from "@/lib/cn";
 
 export default function HomePage({ skeletonCount }: { skeletonCount?: number }) {
   const [tab, setTab] = useState<"my" | "other">("my");
-  const [layout, setLayout] = useState<"grid" | "table">("grid");
   const [query, setQuery] = useState("");
   const { data, error, errorStatus, reload } = useQuery<{ data: { servers: ServerRecord[] } }>(
     "/api/v1/client/servers",
@@ -47,83 +45,79 @@ export default function HomePage({ skeletonCount }: { skeletonCount?: number }) 
     return <HomeServersSkeleton count={skeletonCount} />;
   }
 
+  const running = source.filter((server) => server.status === "running").length;
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Server List</h1>
-        <div className="flex items-center gap-1 rounded-lg border border-border p-1">
-          <Button
-            size="sm"
-            variant={layout === "grid" ? "secondary" : "ghost"}
-            className="px-2"
-            onClick={() => setLayout("grid")}
-            aria-label="Grid layout"
-          >
-            <LayoutGrid className="size-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant={layout === "table" ? "secondary" : "ghost"}
-            className="px-2"
-            onClick={() => setLayout("table")}
-            aria-label="Table layout"
-          >
-            <Table2 className="size-4" />
-          </Button>
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div>
+          <h1 className="text-[31px] font-semibold">Servers</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {source.length === 0
+              ? "Nothing here yet."
+              : `${running} of ${source.length} running. Servers that need attention are listed first.`}
+          </p>
         </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className={cn(
-            "inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm",
-            tab === "my" ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/60",
-          )}
-          onClick={() => setTab("my")}
-        >
-          My servers
-          <Badge className="rounded-sm">{mine.length}</Badge>
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm",
-            tab === "other" ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/60",
-          )}
-          onClick={() => setTab("other")}
-        >
-          Shared with Me
-          <Badge className="rounded-sm bg-muted text-muted-foreground">{other.length}</Badge>
-        </button>
-        <div className="ml-auto w-full sm:w-64">
+        <div className="w-full sm:w-64">
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Filter servers"
+            placeholder="Filter by name, game or address"
+            aria-label="Filter servers"
           />
         </div>
       </div>
 
+      {/* Tabs sit on the rack's top seam, like labels on a drawer. */}
+      <div role="tablist" aria-label="Which servers" className="flex gap-6 border-b border-border">
+        {(
+          [
+            ["my", "My servers", mine.length],
+            ["other", "Shared with me", other.length],
+          ] as const
+        ).map(([value, label, count]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={tab === value}
+            className={cn(
+              "no-press -mb-px inline-flex items-center gap-2 border-b-2 pb-2 text-sm",
+              tab === value
+                ? "border-primary font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setTab(value)}
+          >
+            {label}
+            <span className="tabular-nums text-muted-foreground">{count}</span>
+          </button>
+        ))}
+      </div>
+
       {filtered.length === 0 ? (
-        <div className="rounded-xl border border-border bg-card px-6 py-16 text-center">
-          <p className="font-semibold">
-            {tab === "my"
-              ? "You don't own any servers!"
-              : "When someone shares a server with you, it shows up here."}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Create a node, add allocations, then create a server in Admin.
-          </p>
-        </div>
-      ) : layout === "grid" ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          {filtered.map((server) => (
-            <ServerCard key={server.id} server={server} />
-          ))}
-        </div>
+        query ? (
+          <EmptyState title={`No servers match “${query}”`} description="Check the spelling, or clear the filter to see every server." />
+        ) : tab === "my" ? (
+          <EmptyState
+            title="You don't have any servers yet"
+            description="An admin creates servers in Admin → Servers. Once one is assigned to you, it appears here."
+          />
+        ) : (
+          <EmptyState
+            title="Nobody has shared a server with you"
+            description="When a server owner adds you as a user, their server appears here."
+          />
+        )
       ) : (
-        <ServerTable servers={filtered} />
+        <div>
+          <ServerRackHeader />
+          <Rack label="Servers">
+            {filtered.map((server) => (
+              <ServerCard key={server.id} server={server} />
+            ))}
+          </Rack>
+        </div>
       )}
     </div>
   );

@@ -18,7 +18,7 @@
  *   ├────────────────────┴───────────────────────────────┤
  *   │ footer (hints, env notes)                          │
  *   └────────────────────────────────────────────────────┘
- *              ╭ Unsaved changes   Discard   Save ╮
+ *              [ Unsaved changes   Discard   Save ]
  *
  * - Rows put the explanation on the left and the control on the right, so
  *   every setting reads the same way. On phones they stack.
@@ -55,11 +55,12 @@ const DOT: Record<SettingsTone, string> = {
   info: "bg-status-info",
 };
 
-const BADGE: Record<SettingsTone, string> = {
-  ok: "bg-status-running/12 text-status-running ring-status-running/25",
-  warn: "bg-status-warn/12 text-status-warn ring-status-warn/25",
-  off: "bg-muted text-muted-foreground ring-border",
-  info: "bg-status-info/12 text-status-info ring-status-info/25",
+/** Status word colour; paired with the LED dot (DESIGN.md: status is an LED plus its word, no pill). */
+const STATUS_TEXT: Record<SettingsTone, string> = {
+  ok: "text-status-running",
+  warn: "text-status-warn",
+  off: "text-muted-foreground",
+  info: "text-status-info",
 };
 
 export function parseSettingsSection(value: string | null | undefined): SettingsSection | null {
@@ -107,7 +108,7 @@ export function SettingsWorkspace({
                 aria-selected={current}
                 onClick={() => onSection(tab.id)}
                 className={cn(
-                  "group relative -mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap outline-none transition-colors focus-visible:bg-muted/50",
+                  "group relative -mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap outline-none transition-colors focus-visible:bg-muted/50 focus-visible:text-foreground",
                   current
                     ? "border-primary font-medium text-foreground"
                     : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
@@ -137,7 +138,7 @@ export function SettingsWorkspace({
       <section aria-labelledby="settings-pane-title" className="min-w-0 space-y-5">
         <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
           <div className="min-w-0">
-            <h2 id="settings-pane-title" className="text-base font-semibold tracking-tight">
+            <h2 id="settings-pane-title" className="text-[20px] font-semibold">
               {title}
             </h2>
             <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">{description}</p>
@@ -153,13 +154,8 @@ export function SettingsWorkspace({
 
 export function StatusBadge({ tone, children }: { tone: SettingsTone; children: ReactNode }) {
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset",
-        BADGE[tone],
-      )}
-    >
-      <span className={cn("size-1.5 rounded-full", DOT[tone])} />
+    <span className={cn("inline-flex shrink-0 items-center gap-2 pt-1 text-[13px] font-medium", STATUS_TEXT[tone])}>
+      <span aria-hidden className={cn("size-2 rounded-full", DOT[tone])} />
       {children}
     </span>
   );
@@ -191,7 +187,7 @@ export function SettingsCard({
       {title ? (
         <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold">{title}</h3>
+            <h3 className="text-[16px] font-semibold">{title}</h3>
             {description ? <p className="mt-0.5 text-sm text-muted-foreground">{description}</p> : null}
           </div>
           {aside ? <div className="shrink-0">{aside}</div> : null}
@@ -199,7 +195,7 @@ export function SettingsCard({
       ) : null}
       {children ? <div className="divide-y divide-border">{children}</div> : null}
       {footer ? (
-        <div className="flex flex-wrap items-center gap-3 border-t border-border bg-muted/25 px-5 py-3 text-sm text-muted-foreground sm:px-6">
+        <div className="flex flex-wrap items-center gap-3 border-t border-border bg-well/60 px-5 py-3 text-[13px] text-muted-foreground sm:px-6">
           {footer}
         </div>
       ) : null}
@@ -275,7 +271,7 @@ export function SettingsSegmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex w-full rounded-lg border border-border bg-background p-0.5 sm:w-auto"
+      className="inline-flex w-full rounded-md border border-input bg-well p-0.5 sm:w-auto"
     >
       {options.map((option) => {
         const active = option.value === value;
@@ -287,8 +283,8 @@ export function SettingsSegmented<T extends string>({
             aria-checked={active}
             onClick={() => onChange(option.value)}
             className={cn(
-              "flex-1 rounded-md px-3 py-1.5 text-sm whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/40 sm:flex-none",
-              active ? "bg-muted font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              "flex-1 rounded-sm px-3 py-1.5 text-sm whitespace-nowrap outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/40 sm:flex-none",
+              active ? "bg-card font-medium text-foreground ring-1 ring-border" : "text-muted-foreground hover:text-foreground",
             )}
           >
             {option.label}
@@ -313,8 +309,8 @@ export function CopyField({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-3 py-2 font-mono text-xs">
-        {value || "—"}
+      <code className="min-w-0 flex-1 truncate rounded-md border border-input bg-well px-3 py-2 font-mono text-[12.5px]">
+        {value || "Not available yet"}
       </code>
       <Button type="button" variant="default" disabled={!value} onClick={onCopy} aria-label={label}>
         {copied ? "Copied" : "Copy"}
@@ -360,12 +356,13 @@ export function UnsavedChangesBar({
       <div
         role="region"
         aria-label="Unsaved changes"
-        className="flutter-toast-in pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-xl border border-border bg-card/95 py-2 pr-2 pl-4 shadow-xl shadow-black/25 backdrop-blur-md"
+        // Floating layer: the one place on this page allowed the float shadow and 6px corners (DESIGN.md).
+        className="flutter-toast-in pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-xl border border-border bg-card py-2 pr-2 pl-4 shadow-[var(--shadow-float)]"
       >
-        <span className="size-2 shrink-0 rounded-full bg-status-warn" />
-        <p className="min-w-0 flex-1 truncate text-sm font-medium">You have unsaved changes</p>
-        <kbd className="hidden rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline">
-          Ctrl S
+        <span aria-hidden className="size-2 shrink-0 rounded-full bg-status-warn" />
+        <p className="min-w-0 flex-1 truncate text-sm font-medium">Unsaved changes</p>
+        <kbd className="hidden rounded-md border border-border bg-well px-1.5 py-0.5 text-[12px] text-muted-foreground sm:inline">
+          Ctrl+S
         </kbd>
         <Button type="button" variant="subtle" color="gray" disabled={saving} onClick={onDiscard}>
           Discard

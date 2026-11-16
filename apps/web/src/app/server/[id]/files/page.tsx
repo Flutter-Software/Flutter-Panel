@@ -41,7 +41,7 @@ import { FileDateHeader } from "@/components/file-date-header";
 import { FileIdeModal } from "@/components/file-ide";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { toast } from "@/components/toast";
-import { Button, Card, Field, Input, Modal } from "@/components/ui";
+import { Button, Field, Input, Modal } from "@/components/ui";
 import { api, apiDownload, apiUpload } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import {
@@ -93,12 +93,18 @@ function DateCell({ value, className }: { value: string | null | undefined; clas
   const valid = date && !Number.isNaN(date.getTime());
   return (
     <td
-      className={cn("truncate whitespace-nowrap px-4 py-2.5 text-muted-foreground", className)}
+      className={cn("truncate whitespace-nowrap px-4 py-2.5 tabular-nums text-muted-foreground", className)}
       title={valid ? date.toLocaleString() : undefined}
     >
       {valid ? dateTimeFormat.format(date) : "—"}
     </td>
   );
+}
+
+/** Modified date shown under the file name on narrow screens, where the date column is hidden. */
+function shortDate(value: string | null | undefined) {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? dateTimeFormat.format(date) : null;
 }
 
 function joinPath(dir: string, name: string) {
@@ -494,9 +500,9 @@ function MovePathSearch({
                       <HighlightedPath display={display} query={highlightQuery} />
                     </span>
                     {item.kind === "nested" ? (
-                      <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">inside</span>
+                      <span className="ml-auto shrink-0 text-[12px] text-muted-foreground">Inside</span>
                     ) : current ? (
-                      <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">here</span>
+                      <span className="ml-auto shrink-0 text-[12px] text-muted-foreground">Current</span>
                     ) : null}
                   </button>
                 </li>
@@ -585,7 +591,7 @@ function TopLoadingBar({ label, percent }: { label: string; percent: number }) {
       title={`${label}… ${Math.round(value)}%`}
     >
       <div
-        className="h-full bg-primary shadow-[0_0_8px_2px] shadow-primary/80 transition-[width] duration-150 ease-out"
+        className="h-full bg-primary transition-[width] duration-150 ease-out"
         style={{ width: `${Math.max(2, value)}%` }}
       />
     </div>
@@ -710,8 +716,8 @@ export default function FilesPage({ params }: { params: Promise<{ id: string }> 
     <Suspense
       fallback={
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">Files</h2>
-          <div className="h-64 animate-pulse rounded-xl border border-border bg-card" />
+          <h2 className="text-[20px] font-semibold">Files</h2>
+          <div className="h-64 animate-pulse rounded-lg border border-border bg-card" />
         </div>
       }
     >
@@ -1486,8 +1492,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       {percent !== null ? <TopLoadingBar label={progressLabel ?? "Working"} percent={percent} /> : null}
 
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Files</h2>
+        <div className="min-w-0">
+          <h2 className="text-[20px] font-semibold">Files</h2>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
@@ -1595,11 +1601,11 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               </Button>
               <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openCreate("dir")}>
                 <FolderPlus className="size-3.5" />
-                Folder
+                New folder
               </Button>
               <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={() => openCreate("file")}>
                 <FilePlus className="size-3.5" />
-                File
+                New file
               </Button>
             </>
           ) : null}
@@ -1607,13 +1613,13 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
       </div>
 
       {searchHits ? (
-        <Card className="overflow-hidden p-0">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
             <p className="text-sm text-muted-foreground">
               {searchHits.matches.length === 0
                 ? `No matches in ${displayContainerPath(path)}`
                 : `${searchHits.matches.length} match${searchHits.matches.length === 1 ? "" : "es"} in ${displayContainerPath(path)}`}
-              {searchHits.truncated ? " · results are capped" : ""}
+              {searchHits.truncated ? ". Only the first results are shown." : ""}
             </p>
             <Button type="button" variant="ghost" size="sm" onClick={() => setSearchHits(null)}>
               Close
@@ -1633,7 +1639,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                     ) : (
                       <FileTypeIcon name={hit.name} className="size-3.5 shrink-0" />
                     )}
-                    <span className="min-w-0 truncate font-medium">{hit.name}</span>
+                    <span className="min-w-0 truncate">{hit.name}</span>
                     <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
                       {displayContainerPath(hit.path)}
                     </span>
@@ -1642,7 +1648,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               ))}
             </ul>
           ) : null}
-        </Card>
+        </div>
       ) : null}
 
       <div
@@ -1664,9 +1670,9 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
         onDrop={(event) => void onDrop(event)}
         onContextMenu={(event) => openMenu(event, { x: event.clientX, y: event.clientY, kind: "blank" })}
       >
-        <Card className="overflow-hidden">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
           {dragging ? (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-background/80 text-sm font-medium">
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-background/85 text-sm font-medium">
               Drop files to upload
             </div>
           ) : null}
@@ -1698,8 +1704,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
             }
           }}
         >
-          <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
+          <thead className="text-left text-[12px] text-muted-foreground">
+            <tr className="border-b border-border">
               <th className="w-12 p-0">
                 <SelectHit
                   checked={visibleEntries.length > 0 && selected.size === visibleEntries.length}
@@ -1709,9 +1715,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                   onChange={onSelectAll}
                 />
               </th>
-              <th className="px-4 py-2.5 font-medium">Name</th>
-              <th className="px-4 py-2.5 font-medium lg:w-24">Type</th>
-              <th className="px-4 py-2.5 font-medium lg:w-28">Size</th>
+              <th className="px-4 py-2 font-normal">Name</th>
+              <th className="px-4 py-2 text-right font-normal sm:w-28">Size</th>
               <FileDateHeader
                 field="modifiedAt"
                 label="Date modified"
@@ -1732,7 +1737,9 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 onFilter={(next) => setDateFilter("createdAt", next)}
                 counts={createdCounts}
               />
-              <th className="px-4 py-2.5 font-medium lg:w-16" />
+              <th className="w-14 px-2 py-2 font-normal">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody className={cn(listing && "pointer-events-none")}>
@@ -1743,8 +1750,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 <tr
                   key={entry.name}
                   className={cn(
-                    "cursor-pointer border-t border-border hover:bg-muted/40",
-                    (active || checked) && "bg-muted/60",
+                    "cursor-pointer border-t border-border first:border-t-0 hover:bg-muted/40",
+                    (active || checked) && "bg-primary/[0.07] hover:bg-primary/10",
                   )}
                   onContextMenu={(event) =>
                     openMenu(event, { x: event.clientX, y: event.clientY, kind: "entry", entry })
@@ -1767,22 +1774,32 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                   <td className="px-4 py-2.5">
                     <span className="flex min-w-0 items-center gap-2">
                       {entry.kind === "dir" ? (
-                        <Folder className="size-4 shrink-0 text-primary" />
+                        <Folder className="size-4 shrink-0 text-primary" aria-label="Folder" />
                       ) : (
                         <FileTypeIcon name={entry.name} className="shrink-0 text-muted-foreground" />
                       )}
-                      <span className="truncate font-medium" title={entry.name}>
-                        {entry.name}
+                      <span className="min-w-0">
+                        <span
+                          className={cn("block truncate", entry.kind === "dir" && "font-medium")}
+                          title={entry.name}
+                        >
+                          {entry.name}
+                        </span>
+                        {shortDate(entry.modifiedAt) ? (
+                          <span className="block whitespace-nowrap text-[12px] tabular-nums text-muted-foreground lg:hidden">
+                            <span className="sr-only">Modified </span>
+                            {shortDate(entry.modifiedAt)}
+                          </span>
+                        ) : null}
                       </span>
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 capitalize text-muted-foreground">{entry.kind}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {entry.kind === "dir" ? "—" : formatBytes(entry.size)}
+                  <td className="whitespace-nowrap px-4 py-2.5 text-right tabular-nums text-muted-foreground">
+                    {entry.kind === "dir" ? <span className="sr-only">Folder</span> : formatBytes(entry.size)}
                   </td>
                   <DateCell value={entry.modifiedAt} className="hidden lg:table-cell" />
                   <DateCell value={entry.createdAt} className="hidden xl:table-cell" />
-                  <td className="px-4 py-2.5">
+                  <td className="px-2 py-1.5">
                     <div className="flex justify-end">
                       <Button
                         type="button"
@@ -1809,8 +1826,8 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
               );
             })}
             {listing && entries.length === 0 ? (
-              <tr className="border-t border-border">
-                <td className="px-4 py-8 text-center text-sm text-muted-foreground" colSpan={7}>
+              <tr>
+                <td className="px-4 py-8 text-sm text-muted-foreground" colSpan={6}>
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="size-4 animate-spin" />
                     Loading folder…
@@ -1818,28 +1835,29 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
                 </td>
               </tr>
             ) : !listing && entries.length === 0 ? (
-              <tr className="border-t border-border">
-                <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={7}>
-                  This folder is empty. Drag files here, use Upload, or right-click.
+              <tr>
+                <td className="px-4 py-10 text-sm text-muted-foreground" colSpan={6}>
+                  <span className="block font-display text-[20px] font-semibold text-foreground">This folder is empty</span>
+                  Drag files here, or use Upload or New file to add some.
                 </td>
               </tr>
             ) : visibleEntries.length === 0 && entries.length > 0 ? (
-              <tr className="border-t border-border">
-                <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={7}>
-                  No items match these date filters.
+              <tr>
+                <td className="px-4 py-10 text-sm text-muted-foreground" colSpan={6}>
+                  Nothing matches these date filters. Clear them to see every item.
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
-        </Card>
+        </div>
       </div>
 
       {menu ? (
         <div
           ref={menuRef}
           role="menu"
-          className="fixed z-50 min-w-44 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-border bg-popover py-1 text-popover-foreground shadow-[var(--shadow-float)]"
           style={{ left: menu.x, top: menu.y }}
         >
           {menu.kind === "entry" ? (

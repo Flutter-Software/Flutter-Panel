@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 import { Check, Copy, Eye, EyeOff, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
-import { Button, Card, EmptyState, Field, Input, Modal, Select } from "@/components/ui";
+import { Button, EmptyState, Field, Input, Modal, Rack, Select } from "@/components/ui";
 import { toast } from "@/components/toast";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
@@ -96,7 +96,7 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
     return (
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">Databases</h2>
+          <h2 className="text-[20px] font-semibold">Databases</h2>
           <p className="text-sm text-muted-foreground">Loading this server…</p>
         </div>
       </div>
@@ -107,7 +107,7 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
     return (
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">Databases</h2>
+          <h2 className="text-[20px] font-semibold">Databases</h2>
           <p className="text-sm text-muted-foreground">
             This server has no database slots. An administrator can raise the database limit on the server.
           </p>
@@ -120,7 +120,7 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
     return (
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">Databases</h2>
+          <h2 className="text-[20px] font-semibold">Databases</h2>
           <p className="text-sm text-muted-foreground">You do not have permission to view databases on this server.</p>
         </div>
       </div>
@@ -196,9 +196,9 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Databases</h2>
+          <h2 className="text-[20px] font-semibold">Databases</h2>
           <p className="text-sm text-muted-foreground">
-            {rows.length}/{limit} slot{limit === 1 ? "" : "s"} used. Connection details are for plugins and apps on this server.
+            <span className="tabular-nums">{rows.length} of {limit}</span> slot{limit === 1 ? "" : "s"} used. Connection details are for plugins and apps on this server.
           </p>
         </div>
         {canCreate ? (
@@ -212,7 +212,7 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
       {hosts.length === 0 && rows.length === 0 ? (
         <EmptyState
           title="No database hosts"
-          description="An administrator needs to add a MySQL host under Admin → Databases before you can create one here."
+          description="An administrator needs to add a MySQL host in Admin, under Databases, before you can create one here."
         />
       ) : rows.length === 0 ? (
         <EmptyState
@@ -220,15 +220,15 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
           description="Create a database to get a MySQL username, password, and database name for this server."
         />
       ) : (
-        <div className="space-y-3">
+        <Rack label="Databases">
           {rows.map((row) => {
             const show = revealed[row.id];
             return (
-              <Card key={row.id} className="p-4">
+              <div key={row.id} role="listitem" className="px-4 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="font-medium">{row.name}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">{row.hostName}</p>
+                    <p className="truncate font-display text-[18px] font-semibold leading-tight">{row.name}</p>
+                    <p className="mt-0.5 text-[13px] text-muted-foreground">On {row.hostName}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {canUpdate ? (
@@ -243,41 +243,41 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
                         variant="ghost"
                         size="sm"
                         disabled={pending}
-                        className="text-destructive"
+                        className="size-8 px-0 text-muted-foreground hover:text-destructive"
+                        aria-label={`Delete ${row.name}`}
                         onClick={() => void onDelete(row)}
                       >
-                        <Trash2 className="size-3.5" />
-                        Delete
+                        <Trash2 className="size-4" />
                       </Button>
                     ) : null}
                   </div>
                 </div>
-                <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                <dl className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
                   <div>
-                    <dt className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <dt className="flex items-center justify-between text-[12px] text-muted-foreground">
                       Host
                       <CopyButton value={`${row.host}:${row.port}`} label="host" />
                     </dt>
-                    <dd className="mt-0.5 font-mono text-sm">
+                    <dd className="mt-0.5 break-all font-mono text-[13px]">
                       {row.host}:{row.port}
                     </dd>
                   </div>
                   <div>
-                    <dt className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <dt className="flex items-center justify-between text-[12px] text-muted-foreground">
                       Database
                       <CopyButton value={row.database} label="database" />
                     </dt>
-                    <dd className="mt-0.5 font-mono text-sm">{row.database}</dd>
+                    <dd className="mt-0.5 break-all font-mono text-[13px]">{row.database}</dd>
                   </div>
                   <div>
-                    <dt className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <dt className="flex items-center justify-between text-[12px] text-muted-foreground">
                       Username
                       <CopyButton value={row.username} label="username" />
                     </dt>
-                    <dd className="mt-0.5 font-mono text-sm">{row.username}</dd>
+                    <dd className="mt-0.5 break-all font-mono text-[13px]">{row.username}</dd>
                   </div>
                   <div>
-                    <dt className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <dt className="flex items-center justify-between text-[12px] text-muted-foreground">
                       Password
                       <span className="flex items-center gap-1">
                         <button
@@ -291,26 +291,26 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
                         <CopyButton value={row.password} label="password" />
                       </span>
                     </dt>
-                    <dd className="mt-0.5 font-mono text-sm">{show ? row.password : "••••••••••••"}</dd>
+                    <dd className="mt-0.5 break-all font-mono text-[13px]">{show ? row.password : "••••••••••••"}</dd>
                   </div>
-                  <div className="sm:col-span-2">
-                    <dt className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <div className="xl:col-span-1 sm:col-span-2">
+                    <dt className="flex items-center justify-between text-[12px] text-muted-foreground">
                       Connections from
                     </dt>
-                    <dd className="mt-0.5 font-mono text-sm">{row.remote}</dd>
+                    <dd className="mt-0.5 break-all font-mono text-[13px]">{row.remote}</dd>
                   </div>
-                  <div className="sm:col-span-2">
-                    <dt className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
-                      JDBC
+                  <div className="sm:col-span-2 xl:col-span-3">
+                    <dt className="flex items-center justify-between text-[12px] text-muted-foreground">
+                      JDBC URL
                       <CopyButton value={row.jdbc} label="JDBC URL" />
                     </dt>
-                    <dd className="mt-0.5 break-all font-mono text-sm">{row.jdbc}</dd>
+                    <dd className="mt-0.5 break-all font-mono text-[13px]">{row.jdbc}</dd>
                   </div>
                 </dl>
-              </Card>
+              </div>
             );
           })}
-        </div>
+        </Rack>
       )}
 
       <Modal
@@ -326,7 +326,7 @@ export default function DatabasesPage({ params }: { params: Promise<{ id: string
               Cancel
             </Button>
             <Button type="button" disabled={pending || !name.trim() || !hostId} onClick={() => void onCreate()}>
-              {pending ? "Creating…" : "Create"}
+              {pending ? "Creating…" : "Create database"}
             </Button>
           </>
         }

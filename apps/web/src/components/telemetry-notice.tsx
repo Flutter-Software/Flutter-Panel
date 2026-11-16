@@ -35,14 +35,19 @@ export function TelemetryNotice() {
       // Stays inside the viewport on phones, where a fixed width would clip.
       w="min(20rem, calc(100vw - 2rem))"
       position="top"
+      withArrow
+      arrowSize={6}
       events={{ hover: true, focus: true, touch: true }}
+      classNames={{ tooltip: "flutter-tooltip", arrow: "flutter-tooltip-arrow" }}
     >
+      {/* Status-warn amber: telemetry is a state worth noticing, not an error. */}
       <button
         type="button"
         aria-label={DISCLOSURE}
-        className="inline-flex rounded-sm text-amber-500 outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+        className="no-press inline-flex items-center gap-1 rounded-sm text-status-warn outline-none focus-visible:ring-2 focus-visible:ring-status-warn/50"
       >
-        <Activity className="h-3.5 w-3.5" aria-hidden />
+        <Activity className="size-3.5" aria-hidden />
+        <span aria-hidden>Telemetry on</span>
       </button>
     </Tooltip>
   );

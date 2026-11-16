@@ -21,6 +21,7 @@ export {
   OVERVIEW_DESCRIPTION,
   FormSkeleton,
   HomeServersSkeleton,
+  ServerConsoleSkeleton,
   NodeDetailSkeleton,
   SettingsSkeleton,
   SettingsWorkspaceSkeleton,

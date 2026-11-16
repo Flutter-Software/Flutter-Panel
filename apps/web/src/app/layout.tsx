@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Barlow_Semi_Condensed, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { ColorSchemeScript, mantineHtmlProps } from "@mantine/core";
 import { ThemeProvider } from "@/components/theme-provider";
 import { MotionProvider } from "@/components/motion-provider";
@@ -14,14 +14,29 @@ import { MOTION_BOOTSTRAP_SCRIPT } from "@/lib/motion";
 import { POWER_LAYOUT_BOOTSTRAP_SCRIPT } from "@/lib/power-layout";
 import "./globals.css";
 
-const geistSans = Geist({
+/*
+ * Type (see DESIGN.md):
+ *  - Barlow Semi Condensed: display. Page titles, section titles, unit names.
+ *    Condensed like the printed legends on server hardware.
+ *  - IBM Plex Sans: body and UI. Legible over long sessions, tabular figures.
+ *  - IBM Plex Mono: real machine text only (console, addresses, paths, code).
+ */
+const barlow = Barlow_Semi_Condensed({
   subsets: ["latin"],
-  variable: "--font-geist-sans",
+  weight: ["500", "600"],
+  variable: "--font-barlow",
 });
 
-const geistMono = Geist_Mono({
+const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
-  variable: "--font-geist-mono",
+  weight: ["400", "500", "600"],
+  variable: "--font-plex-sans",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-plex-mono",
 });
 
 export const metadata = {
@@ -51,7 +66,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark`}
+      className={`${barlow.variable} ${plexSans.variable} ${plexMono.variable} dark`}
       {...mantineHtmlProps}
       data-mantine-color-scheme="dark"
     >

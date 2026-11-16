@@ -47,7 +47,8 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
   return (
     <kbd
       className={cn(
-        "kbd-hint inline-flex h-5 min-w-5 items-center justify-center rounded border border-border bg-muted px-1 font-mono text-[10px] leading-none font-medium whitespace-pre text-muted-foreground",
+        // A key cap: the one place a label may use the mono face, because it stands for a physical key.
+        "kbd-hint inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-b-2 border-border bg-well px-1 font-mono text-[11px] leading-none font-medium whitespace-pre text-muted-foreground",
         className,
       )}
     >

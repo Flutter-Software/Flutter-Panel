@@ -152,10 +152,11 @@ export function SidebarNav({
             onMouseEnter={() => onPrefetch?.(item.href)}
             onFocus={() => onPrefetch?.(item.href)}
             className={cn(
-              "pressable relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm",
+              // Active item: a cyan rule on the left edge and brighter text, no filled pill (DESIGN.md).
+              "pressable relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm",
               active
-                ? "bg-accent font-medium text-primary before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary"
-                : "text-sidebar-foreground/80 hover:bg-accent/70 hover:text-foreground",
+                ? "font-medium text-foreground before:absolute before:inset-y-1 before:-left-3 before:w-[3px] before:bg-primary [&>svg]:text-primary"
+                : "text-sidebar-foreground/75 hover:bg-muted/50 hover:text-foreground",
             )}
           >
             <Icon className="size-4 shrink-0" />
@@ -256,7 +257,7 @@ export function AdminSidebar() {
           aria-grabbed={dragging}
           style={{ top: `calc(${handleTop} * (100% - ${HANDLE_SIZE_REM}rem))` }}
           className={cn(
-            "absolute right-0 z-20 flex size-9 translate-x-1/2 cursor-grab touch-none items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-md hover:bg-muted hover:text-foreground",
+            "absolute right-0 z-20 flex size-9 translate-x-1/2 cursor-grab touch-none items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
             dragging && "cursor-grabbing",
           )}
           onPointerDown={(event) => {
@@ -382,7 +383,7 @@ export function ServerSidebar({
       />
       {extensionItems.length ? (
         <div className="border-t border-sidebar-border">
-          <p className="px-6 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Extensions</p>
+          <p className="px-6 pt-3 text-[13px] text-muted-foreground">Extensions</p>
           <SidebarNav
             items={extensionItems}
             match={(href) => pathname === href}

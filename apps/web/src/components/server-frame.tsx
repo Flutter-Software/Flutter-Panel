@@ -14,7 +14,7 @@ import Link from "next/link";
 import { ArrowLeft, Box, Check, Copy, Cpu, Network, type LucideIcon } from "lucide-react";
 import { PowerButtons, type PowerAction } from "@/components/power-buttons";
 import { ServerSidebar } from "@/components/sidebar";
-import { StatusPill } from "@/components/status";
+import { LedRail, StatusPill } from "@/components/status";
 import { toast } from "@/components/toast";
 import { useAuth } from "@/components/auth-provider";
 import { ErrorPage, QueryErrorPage } from "@/components/error-page";
@@ -129,28 +129,29 @@ export function ServerFrame({
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <ServerSidebar serverId={serverId} server={server} />
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <header className="shrink-0 border-b border-border px-4 py-2.5 sm:px-6">
+            {/* The server's front panel: LED rail on the left edge, name in the display face. */}
+            <header className="relative shrink-0 border-b border-border bg-card px-4 py-3 sm:px-6">
+              {server ? <LedRail status={server.status} /> : null}
               <div className="flex items-center gap-3">
                 <Link
                   href="/"
                   aria-label="Back to servers"
                   title="Servers"
-                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:block"
+                  className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground [&_svg]:block"
                 >
                   <ArrowLeft className="size-4" />
                 </Link>
                 {server ? (
                   <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
-                      <h1 className="min-w-0 truncate text-base font-semibold tracking-tight sm:text-lg">
-                        {server.name}
-                      </h1>
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                      <h1 className="min-w-0 truncate text-[25px] font-semibold">{server.name}</h1>
                       <StatusPill status={server.status} />
                     </div>
-                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
                       <HeaderMeta icon={Box}>{server.egg}</HeaderMeta>
                       <HeaderMeta icon={Cpu}>
-                        {server.nodeLocation ? `${server.node} · ${server.nodeLocation}` : server.node}
+                        {server.node}
+                        {server.nodeLocation ? <span className="ml-1.5 opacity-70">({server.nodeLocation})</span> : null}
                       </HeaderMeta>
                       {server.allocation && server.allocation !== "unassigned" ? (
                         <button

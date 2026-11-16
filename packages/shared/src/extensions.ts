@@ -127,7 +127,7 @@ export type ExtensionIcon = (typeof EXTENSION_ICONS)[number];
 export const EXTENSION_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,47}$/;
 
 /** Allowed page entry files. */
-export const EXTENSION_ENTRY_PATTERN = /\.(html?|tsx|ts|jsx|js|mjs|wasm)$/i;
+export const EXTENSION_ENTRY_PATTERN = /\.(html?|tsx|ts|jsx|js|mjs|svelte|wasm)$/i;
 
 /**
  * For a WebAssembly entry built with wasm-bindgen (`wasm-pack --target web`,
@@ -141,8 +141,8 @@ export function extensionWasmGlue(entry: string): string | null {
   return entry.replace(/(_bg)?\.wasm$/i, ".js");
 }
 
-/** Source files the panel compiles on the fly when requested (TypeScript / JSX). */
-export const EXTENSION_COMPILED_PATTERN = /\.(tsx|ts|jsx|mts)$/i;
+/** Source files the panel compiles on the fly when requested (TypeScript / JSX / Svelte). */
+export const EXTENSION_COMPILED_PATTERN = /\.(tsx|ts|jsx|mts|svelte)$/i;
 
 /** Limits for installing an extension from a .zip upload. */
 export const EXTENSION_ZIP_LIMITS = {
@@ -180,14 +180,16 @@ const serverPageSchema = z.object({
    *  - an `.html` file, served as-is,
    *  - a script (`.tsx`, `.ts`, `.jsx`, `.js`, `.mjs`). The panel bundles it
    *    (TypeScript/JSX, imports, React) and wraps it in an HTML page with a
-   *    `<div id="root">` and the SDK already loaded, or
+   *    `<div id="root">` and the SDK already loaded,
+   *  - a Svelte 5 component (`.svelte`). Compiled and bundled the same way,
+   *    then mounted into `#root` automatically, or
    *  - a `.wasm` module built with wasm-bindgen (Rust and friends). The panel
    *    wraps it in the same page and starts it through its JS glue file (see
    *    `extensionWasmGlue`).
    */
   entry: extensionFilePath.refine(
     (value) => EXTENSION_ENTRY_PATTERN.test(value),
-    "Entry must be an .html, .tsx, .ts, .jsx, .js, .mjs or .wasm file",
+    "Entry must be an .html, .tsx, .ts, .jsx, .js, .mjs, .svelte or .wasm file",
   ),
   /** Hide the page from viewers who lack this server permission. */
   permission: z.enum(SERVER_PERMISSIONS).optional(),
@@ -209,7 +211,12 @@ export const extensionManifestSchema = z.object({
   name: z.string().min(1).max(64),
   version: z.string().regex(/^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/, "Semantic version, e.g. 1.0.0"),
   description: z.string().max(280).optional().default(""),
-  author: z.string().max(64).optional().default(""),
+  /**
+   * Who made the extension (a person, team or studio), shown to admins when
+   * they review it and on the extension's pages. Optional for older
+   * manifests; blank values are treated as unknown.
+   */
+  author: z.string().trim().max(64).optional().default(""),
   homepage: z.string().url().optional(),
   icon: z.enum(EXTENSION_ICONS).default("puzzle"),
   /** Bridge protocol the extension was written against. */
@@ -341,6 +348,8 @@ export type ClientExtension = {
   id: string;
   name: string;
   version: string;
+  /** Manifest `author`; empty string when the manifest doesn't name one. */
+  author: string;
   icon: ExtensionIcon;
   permissions: ExtensionPermission[];
   pages: ClientExtensionPage[];

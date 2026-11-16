@@ -1,15 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, Pencil, Plus, Search, Server, Trash2, X } from "lucide-react";
+import { ExternalLink, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { AdminPage } from "@/components/admin-table";
 import { AdminServersPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
-import { Button, ButtonLink, Card, EmptyState, Input, Select } from "@/components/ui";
-import { statusMeta, statusPillClass } from "@/components/status";
+import { Button, ButtonLink, EmptyState, Input, Rack, RowField, Select } from "@/components/ui";
+import { LedRail, statusMeta } from "@/components/status";
 import { serverAlerts, serverAttention } from "@/components/server-card";
 import { CpuLimit, LimitMb } from "@/components/unlimited";
 import { cn } from "@/lib/cn";
@@ -221,108 +220,111 @@ export default function AdminServersPage({ skeletonCount }: { skeletonCount?: nu
               description="Try a different search or clear the filters."
             />
           ) : (
-            filtered.map((server) => {
-              const meta = statusMeta(server.status);
-              const alerts = serverAlerts(server);
-              const nodeLabel = server.nodeLocation
-                ? `${server.node} · ${server.nodeLocation}`
-                : server.node;
-              return (
-                <Card key={server.id} className="p-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Link
-                          href={`/admin/servers/${server.id}`}
-                          onMouseEnter={() => prefetchQuery(`/api/v1/admin/servers/${server.id}`)}
-                          className="flex min-w-0 items-center gap-2 hover:underline"
-                        >
-                          <Server className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="truncate text-base font-semibold">{server.name}</span>
-                        </Link>
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
-                            statusPillClass(server.status),
-                          )}
-                        >
-                          <span className={cn("size-1.5 rounded-full", meta.bar)} />
-                          {meta.label}
+            <div>
+              {/* Column legend for wide screens; rows wrap into labelled lines below xl. */}
+              <div
+                aria-hidden
+                className="hidden px-4 py-2 text-[12px] text-muted-foreground xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,1.3fr)_auto] xl:gap-5"
+              >
+                <span className="pl-1">Server</span>
+                <span>Node</span>
+                <span>Address</span>
+                <span>Owner</span>
+                <span>Usage and limits</span>
+                <span className="w-[9.5rem]" />
+              </div>
+              <Rack label="Servers">
+                {filtered.map((server) => {
+                  const meta = statusMeta(server.status);
+                  const alerts = serverAlerts(server);
+                  return (
+                    <div
+                      key={server.id}
+                      role="listitem"
+                      className="relative grid gap-3 px-4 py-3.5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_minmax(0,1.3fr)_auto] xl:items-center xl:gap-5"
+                    >
+                      <LedRail status={server.status} />
+                      <div className="min-w-0 pl-1">
+                        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
+                          <Link
+                            href={`/admin/servers/${server.id}`}
+                            onMouseEnter={() => prefetchQuery(`/api/v1/admin/servers/${server.id}`)}
+                            className="truncate font-display text-[18px] font-semibold leading-tight hover:text-primary"
+                          >
+                            {server.name}
+                          </Link>
+                          <span className={cn("text-[13px] font-medium", meta.className)}>{meta.label}</span>
+                        </div>
+                        <p className="truncate text-[13px] text-muted-foreground">
+                          {server.egg}
+                          {server.description ? <span className="text-foreground/60">, {server.description}</span> : null}
+                        </p>
+                        {alerts.length ? (
+                          <ul className="mt-1 flex flex-wrap gap-x-3">
+                            {alerts.map((alert) => (
+                              <li
+                                key={alert.text}
+                                className={cn(
+                                  "text-[12px] font-medium",
+                                  alert.tone === "error" ? "text-status-error" : "text-status-warn",
+                                )}
+                              >
+                                {alert.text}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+
+                      <RowField label="Node">
+                        {server.node}
+                        {server.nodeLocation ? <span className="ml-1.5 text-muted-foreground">({server.nodeLocation})</span> : null}
+                      </RowField>
+                      <RowField label="Address">
+                        <span className="font-mono text-[12.5px]">{server.allocation}</span>
+                      </RowField>
+                      <RowField label="Owner">{server.ownerName ?? <span className="text-muted-foreground">Nobody</span>}</RowField>
+                      <RowField label="Usage and limits">
+                        <span className="block tabular-nums">
+                          CPU {Math.round(server.cpu.used)}% <span className="text-muted-foreground">of</span>{" "}
+                          <CpuLimit value={server.cpu.limit} />
                         </span>
+                        <span className="block text-[13px] tabular-nums text-muted-foreground">
+                          {formatCompact(server.memory.usedMb)} of <LimitMb value={server.memory.limitMb} /> RAM,{" "}
+                          {formatCompact(server.disk.usedMb)} of <LimitMb value={server.disk.limitMb} /> disk
+                        </span>
+                      </RowField>
+
+                      <div className="flex items-center gap-1.5 pl-1 xl:w-[9.5rem] xl:justify-end xl:pl-0">
                         <ButtonLink
                           href={`/server/${server.id}`}
-                          variant="secondary"
+                          variant="ghost"
                           size="sm"
-                          className="h-7 px-2"
+                          className="px-2"
+                          aria-label={`Open ${server.name}`}
                         >
-                          <ExternalLink className="size-3.5" />
-                          Open
+                          <ExternalLink className="size-4" />
                         </ButtonLink>
+                        <ButtonLink href={`/admin/servers/${server.id}`} variant="secondary" size="sm">
+                          <Pencil className="size-3.5" />
+                          Edit
+                        </ButtonLink>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="size-8 px-0 text-muted-foreground hover:text-destructive"
+                          aria-label={`Delete ${server.name}`}
+                          onClick={() => onDelete(server)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
                       </div>
-                      <p className="mt-1 text-sm text-muted-foreground">{server.egg}</p>
-                      {server.description ? (
-                        <p className="mt-1 text-sm text-muted-foreground">{server.description}</p>
-                      ) : null}
-                      {alerts.length ? (
-                        <ul className="mt-2 space-y-0.5">
-                          {alerts.map((alert) => (
-                            <li
-                              key={alert.text}
-                              className={cn(
-                                "text-xs font-medium",
-                                alert.tone === "error" ? "text-status-error" : "text-status-warn",
-                              )}
-                            >
-                              {alert.text}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <ButtonLink href={`/admin/servers/${server.id}`} variant="secondary" size="sm">
-                        <Pencil className="size-3.5" />
-                        Edit
-                      </ButtonLink>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="size-8 px-0 text-muted-foreground hover:text-destructive"
-                        aria-label={`Delete ${server.name}`}
-                        onClick={() => onDelete(server)}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
-                    <Meta label="Node" value={nodeLabel} />
-                    <Meta label="Address" value={server.allocation} mono />
-                    <Meta label="Owner" value={server.ownerName ?? "—"} />
-                    <Meta
-                      label="Usage"
-                      value={`CPU ${Math.round(server.cpu.used)}% · ${formatCompact(server.memory.usedMb)} · ${formatCompact(server.disk.usedMb)} disk`}
-                    />
-                    <Meta
-                      label="Limits"
-                      value={
-                        <span className="inline-flex items-center gap-1">
-                          <LimitMb value={server.memory.limitMb} />
-                          <span className="text-muted-foreground">·</span>
-                          <LimitMb value={server.disk.limitMb} />
-                          <span className="text-muted-foreground">·</span>
-                          <span className="inline-flex items-center gap-0.5">
-                            <CpuLimit value={server.cpu.limit} /> CPU
-                          </span>
-                        </span>
-                      }
-                    />
-                  </div>
-                </Card>
-              );
-            })
+                  );
+                })}
+              </Rack>
+            </div>
           )}
         </div>
       )}
@@ -330,11 +332,4 @@ export default function AdminServersPage({ skeletonCount }: { skeletonCount?: nu
   );
 }
 
-function Meta({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
-  return (
-    <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={cn("mt-1 truncate", mono && "font-mono text-xs")}>{value}</p>
-    </div>
-  );
-}
+

@@ -14,21 +14,18 @@
  * All need a signed-in admin session.
  */
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
-  AlertTriangle,
   BookOpen,
-  CircleCheck,
   CircleOff,
   Download,
-  FolderOpen,
   Power,
-  Puzzle,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Trash2,
   Upload,
+  UserRound,
 } from "lucide-react";
 import {
   EXTENSION_PERMISSIONS,
@@ -42,7 +39,7 @@ import { confirm } from "@/components/confirm-dialog";
 import { QueryErrorPage } from "@/components/error-page";
 import { AdminExtensionsPageSkeleton } from "@/components/skeletons";
 import { toast } from "@/components/toast";
-import { Button, Card, Modal } from "@/components/ui";
+import { Button, Card, EmptyState, Modal, Rack } from "@/components/ui";
 import { api, apiDownload, apiUpload, HttpError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { extensionIcon } from "@/lib/extension-icons";
@@ -69,11 +66,17 @@ function fileToBase64(file: File) {
   });
 }
 
-const STATUS: Record<AdminExtension["status"], { label: string; className: string; icon: typeof CircleCheck }> = {
-  enabled: { label: "Enabled", className: "bg-status-running/15 text-status-running", icon: CircleCheck },
-  disabled: { label: "Disabled", className: "bg-muted text-muted-foreground", icon: CircleOff },
-  "needs-approval": { label: "Needs approval", className: "bg-status-warn/15 text-status-warn", icon: ShieldAlert },
-  invalid: { label: "Invalid", className: "bg-status-error/15 text-status-error", icon: AlertTriangle },
+/**
+ * Extension status in Rack terms: `text` colours the status word, `rail` the
+ * 3px strip on the row's left edge and the LED dot (DESIGN.md -> LED rail).
+ * Extensions aren't servers, so this maps onto the server status colours
+ * instead of using `statusMeta`.
+ */
+const STATUS: Record<AdminExtension["status"], { label: string; text: string; rail: string }> = {
+  enabled: { label: "Enabled", text: "text-status-running", rail: "bg-status-running" },
+  disabled: { label: "Disabled", text: "text-muted-foreground", rail: "bg-status-offline/50" },
+  "needs-approval": { label: "Needs approval", text: "text-status-warn", rail: "bg-status-warn" },
+  invalid: { label: "Invalid", text: "text-status-error", rail: "bg-status-error" },
 };
 
 const EXAMPLE_MANIFEST = `{
@@ -308,33 +311,26 @@ export default function AdminExtensionsPage() {
     >
       <AdminError message={actionError} />
 
-      <Card className="flex flex-col gap-1 p-4 text-sm sm:flex-row sm:items-center sm:gap-3">
-        <span className="flex shrink-0 items-center gap-1.5 font-medium">
-          <FolderOpen className="size-4 text-muted-foreground" />
-          Install
-        </span>
-        <span className="min-w-0 text-muted-foreground">
-          Upload a .zip, or copy an extension folder into{" "}
-          <code className="break-all font-mono text-foreground">{data.data.directory}</code> and press Rescan. Uploading
-          a newer version of an installed extension updates it.
-        </span>
+      {/* How to install: a highlighted note (inset rule), not a box. */}
+      <Card variant="inset" className="max-w-[72ch] text-sm text-muted-foreground">
+        Upload a .zip, or copy an extension folder into{" "}
+        <code className="break-all font-mono text-[12.5px] text-foreground">{data.data.directory}</code> and press
+        Rescan. Uploading a newer version of an installed extension updates it.
       </Card>
 
       {extensions.length === 0 ? (
-        <Card className="px-6 py-16 text-center">
-          <Puzzle className="mx-auto size-6 text-muted-foreground" />
-          <p className="mt-3 text-base font-semibold">No extensions installed</p>
-          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            Extensions add pages to servers, like a player list for Minecraft or a map viewer. Build your own with
-            plain HTML and JavaScript.
-          </p>
-          <Button type="button" className="mt-5" variant="secondary" onClick={() => setGuideOpen(true)}>
+        <div className="space-y-3">
+          <EmptyState
+            title="No extensions installed"
+            description="Extensions add pages to servers, like a player list for Minecraft or a map viewer. Upload a .zip, or build your own with plain HTML and JavaScript."
+          />
+          <Button type="button" variant="secondary" onClick={() => setGuideOpen(true)}>
             <BookOpen className="size-4" />
             How to build one
           </Button>
-        </Card>
+        </div>
       ) : (
-        <Card className="divide-y divide-border overflow-hidden">
+        <Rack label="Extensions">
           {extensions.map((row) => (
             <ExtensionRow
               key={row.id}
@@ -347,7 +343,7 @@ export default function AdminExtensionsPage() {
               onReport={() => setReport(row)}
             />
           ))}
-        </Card>
+        </Rack>
       )}
 
       <Modal
@@ -376,7 +372,7 @@ export default function AdminExtensionsPage() {
             <ReviewBody row={reviewing} manifest={reviewing.manifest} />
             <AnalysisSummary analysis={reviewing.analysis} onOpenReport={() => setReport(reviewing)} />
             {highRisk ? (
-              <label className="flex items-start gap-2 rounded-lg border border-status-error/30 bg-status-error/10 px-3 py-2 text-xs text-status-error">
+              <label className="flex items-start gap-2 border-l-2 border-status-error bg-status-error/10 px-3 py-2 text-[13px] text-status-error">
                 <input
                   type="checkbox"
                   className="mt-0.5"
@@ -420,14 +416,14 @@ export default function AdminExtensionsPage() {
         <ol className="list-decimal space-y-3 pl-5 text-sm">
           <li>
             Create <code className="font-mono">{data.data.directory}/hello-world/extension.json</code>:
-            <pre className="mt-2 overflow-x-auto rounded-lg border border-border bg-background px-3 py-2.5 font-mono text-[11px]">
+            <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-well px-3 py-2.5 font-mono text-[12px]">
               {EXAMPLE_MANIFEST}
             </pre>
           </li>
           <li>
             Add <code className="font-mono">src/main.tsx</code>. TypeScript, JSX, imports, CSS and React work with no
             build step; the panel compiles it and loads the SDK for you:
-            <pre className="mt-2 overflow-x-auto rounded-lg border border-border bg-background px-3 py-2.5 font-mono text-[11px]">
+            <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-well px-3 py-2.5 font-mono text-[12px]">
               {EXAMPLE_TSX}
             </pre>
             Prefer plain HTML? Point <code className="font-mono">entry</code> at an <code className="font-mono">.html</code>{" "}
@@ -438,7 +434,7 @@ export default function AdminExtensionsPage() {
             permissions and enable it. It shows up in the server sidebar.
           </li>
         </ol>
-        <p className="mt-4 text-xs text-muted-foreground">
+        <p className="mt-4 text-[13px] text-muted-foreground">
           The full guide (manifest fields, every SDK method, permissions and theming) is in{" "}
           <code className="font-mono">extensions/README.md</code>, with editor types in{" "}
           <code className="font-mono">extensions/flutter-sdk.d.ts</code>. Starter templates (HTML, TypeScript, React
@@ -478,51 +474,62 @@ function ExtensionRow({
   const manifest = row.manifest;
   const Icon = extensionIcon(manifest?.icon);
   const status = STATUS[row.status];
-  const StatusIcon = status.icon;
+  const name = manifest?.name ?? row.id;
 
   return (
-    <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex min-w-0 gap-3">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/40">
-          <Icon className="size-5 text-muted-foreground" />
-        </div>
-        <div className="min-w-0 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold">{manifest?.name ?? row.id}</span>
+    <div
+      role="listitem"
+      className="relative grid gap-x-5 gap-y-3 px-4 py-3.5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start"
+    >
+      {/* Status rail: the row's one bold mark (DESIGN.md -> LED rail). */}
+      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", status.rail)} />
+      <div className="flex min-w-0 gap-3 pl-1">
+        <Icon className="mt-1 size-[18px] shrink-0 text-muted-foreground" aria-hidden />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              <span className="font-display text-[18px] font-semibold leading-tight">{name}</span>
+              {manifest ? (
+                <span className="font-mono text-[12.5px] text-muted-foreground">v{manifest.version}</span>
+              ) : null}
+              <span className={cn("inline-flex items-center gap-1.5 text-[13px] font-medium", status.text)}>
+                <span aria-hidden className={cn("size-2 shrink-0 rounded-full", status.rail)} />
+                {status.label}
+              </span>
+              <RiskBadge analysis={row.analysis} onClick={onReport} />
+            </div>
             {manifest ? (
-              <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-                v{manifest.version}
-              </code>
+              <div className="mt-0.5">
+                <AuthorTag manifest={manifest} />
+              </div>
             ) : null}
-            <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium", status.className)}>
-              <StatusIcon className="size-3" />
-              {status.label}
-            </span>
-            <RiskBadge analysis={row.analysis} onClick={onReport} />
           </div>
 
-          {manifest?.description ? <p className="text-sm text-muted-foreground">{manifest.description}</p> : null}
+          {manifest?.description ? (
+            <p className="max-w-[72ch] text-sm text-muted-foreground">{manifest.description}</p>
+          ) : null}
 
           {manifest ? (
             <>
-              <p className="text-xs text-muted-foreground">
-                {manifest.author ? `By ${manifest.author} · ` : ""}
-                <span className="font-mono">{row.id}</span>
-                {" · "}
-                {manifest.contributes.serverPages.length
-                  ? `Adds ${manifest.contributes.serverPages.map((page) => page.label).join(", ")}`
-                  : "No pages"}
-                {" · "}
-                {describeTargets(manifest)}
-              </p>
-              <PermissionChips
-                permissions={manifest.permissions}
-                pending={row.pendingPermissions}
-              />
+              {/* Separate labelled fields instead of an "id · pages · targets" meta string. */}
+              <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+                <RowField label="Folder">
+                  <span className="font-mono text-[12.5px]">{row.id}</span>
+                </RowField>
+                <RowField label="Pages">
+                  {manifest.contributes.serverPages.length ? (
+                    manifest.contributes.serverPages.map((page) => page.label).join(", ")
+                  ) : (
+                    <span className="text-muted-foreground">None</span>
+                  )}
+                </RowField>
+                <RowField label="Shown on">{describeTargets(manifest)}</RowField>
+              </dl>
+              <PermissionChips permissions={manifest.permissions} pending={row.pendingPermissions} />
             </>
           ) : (
-            <ul className="space-y-0.5 text-xs text-status-error">
-              <li className="font-mono text-muted-foreground">{row.id}/</li>
+            <ul className="space-y-0.5 text-[13px] text-status-error">
+              <li className="font-mono text-[12.5px] text-muted-foreground">{row.id}/</li>
               {row.errors.map((message) => (
                 <li key={message}>{message}</li>
               ))}
@@ -531,7 +538,7 @@ function ExtensionRow({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap gap-2 self-start">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 pl-[calc(18px+1rem)] lg:justify-end lg:pl-0">
         {manifest ? (
           <>
             {row.status === "needs-approval" ? (
@@ -565,26 +572,36 @@ function ExtensionRow({
           size="sm"
           variant="ghost"
           disabled={busy}
-          className="text-muted-foreground"
+          className="size-8 px-0 text-muted-foreground"
           onClick={onDownload}
           title="Download as .zip"
-          aria-label={`Download ${manifest?.name ?? row.id}`}
+          aria-label={`Download ${name}`}
         >
-          <Download className="size-3.5" />
+          <Download className="size-4" />
         </Button>
         <Button
           type="button"
           size="sm"
           variant="ghost"
           disabled={busy}
-          className="text-muted-foreground hover:text-destructive"
+          className="size-8 px-0 text-muted-foreground hover:text-destructive"
           onClick={onUninstall}
           title="Uninstall"
-          aria-label={`Uninstall ${manifest?.name ?? row.id}`}
+          aria-label={`Uninstall ${name}`}
         >
-          <Trash2 className="size-3.5" />
+          <Trash2 className="size-4" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** A labelled value in an extension row (term and description). */
+function RowField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[12px] text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 truncate">{children}</dd>
     </div>
   );
 }
@@ -597,7 +614,7 @@ function PermissionChips({
   pending: ExtensionPermission[];
 }) {
   if (!permissions.length) {
-    return <span className="text-[11px] text-muted-foreground">No permissions</span>;
+    return <p className="text-[13px] text-muted-foreground">Asks for no permissions.</p>;
   }
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -609,7 +626,7 @@ function PermissionChips({
             key={perm}
             title={info.description}
             className={cn(
-              "rounded-md border px-1.5 py-0.5 text-[11px]",
+              "rounded-md border px-1.5 py-0.5 text-[12px]",
               isPending
                 ? "border-status-warn/40 bg-status-warn/10 text-status-warn"
                 : info.sensitive
@@ -626,22 +643,59 @@ function PermissionChips({
   );
 }
 
+/**
+ * "by <author>" for an extension. Links to the manifest `homepage` when there
+ * is one. Manifests without an author say so explicitly, so an admin reviewing
+ * permissions can tell "unknown origin" apart from "didn't look".
+ */
+function AuthorTag({ manifest }: { manifest: ExtensionManifest }) {
+  const author = manifest.author.trim();
+  if (!author) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[13px] italic text-muted-foreground" title="extension.json has no author">
+        <UserRound className="size-3" />
+        Unknown author
+      </span>
+    );
+  }
+  const label = (
+    <>
+      <UserRound className="size-3" />
+      by <span className="font-medium text-foreground">{author}</span>
+    </>
+  );
+  return manifest.homepage ? (
+    <a
+      href={manifest.homepage}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-[13px] text-muted-foreground hover:underline"
+      title={manifest.homepage}
+    >
+      {label}
+    </a>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-[13px] text-muted-foreground">{label}</span>
+  );
+}
+
 function ReviewBody({ row, manifest }: { row: AdminExtension; manifest: ExtensionManifest }) {
   const sensitive = manifest.permissions.some((perm) => EXTENSION_PERMISSIONS[perm].sensitive);
   return (
     <div className="space-y-4 text-sm">
       <div>
-        <p className="font-medium">
-          {manifest.name} <span className="font-mono text-xs text-muted-foreground">v{manifest.version}</span>
+        <p className="flex flex-wrap items-baseline gap-x-3">
+          <span className="font-display text-[18px] font-semibold leading-tight">{manifest.name}</span>
+          <span className="font-mono text-[12.5px] text-muted-foreground">v{manifest.version}</span>
         </p>
-        <p className="text-xs text-muted-foreground">
-          {manifest.author ? `By ${manifest.author} · ` : ""}
-          {describeTargets(manifest)}
+        <p className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+          <AuthorTag manifest={manifest} />
+          <span>Shown on: {describeTargets(manifest)}</span>
         </p>
       </div>
 
       {manifest.permissions.length ? (
-        <ul className="divide-y divide-border rounded-lg border border-border">
+        <ul aria-label="Permissions" className="divide-y divide-border rounded-lg border border-border">
           {manifest.permissions.map((perm) => {
             const info = EXTENSION_PERMISSIONS[perm];
             const isNew = row.pendingPermissions.includes(perm);
@@ -655,11 +709,11 @@ function ReviewBody({ row, manifest }: { row: AdminExtension; manifest: Extensio
                 <div className="min-w-0">
                   <p className="font-medium">
                     {info.label}
-                    {isNew ? <span className="ml-1.5 text-xs font-normal text-status-warn">new</span> : null}
+                    {isNew ? <span className="ml-1.5 text-[12px] font-normal text-status-warn">New</span> : null}
                   </p>
-                  <p className="text-xs text-muted-foreground">{info.description}</p>
+                  <p className="text-[13px] text-muted-foreground">{info.description}</p>
                   {info.requires.length ? (
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    <p className="mt-0.5 text-[12px] text-muted-foreground">
                       Viewer also needs: <span className="font-mono">{info.requires.join(", ")}</span>
                     </p>
                   ) : null}
@@ -673,7 +727,7 @@ function ReviewBody({ row, manifest }: { row: AdminExtension; manifest: Extensio
       )}
 
       {sensitive ? (
-        <p className="rounded-lg border border-status-warn/30 bg-status-warn/10 px-3 py-2 text-xs text-status-warn">
+        <p className="border-l-2 border-status-warn bg-status-warn/10 px-3 py-2 text-[13px] text-status-warn">
           Some of these let the extension change servers. Only enable extensions whose code you trust.
         </p>
       ) : null}

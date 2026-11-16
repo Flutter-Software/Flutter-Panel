@@ -121,27 +121,48 @@ export function NodeFrame({ nodeId, children }: { nodeId: string; children: Reac
             <ArrowLeft className="size-4" />
             Nodes
           </Link>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{node?.name ?? "Node"}</h1>
+          {/* The node header carries its status rail, like a rack row. */}
+          <div className="relative pl-4">
             {node ? (
               <span
+                aria-hidden
                 className={cn(
-                  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                  node.online
-                    ? "bg-status-running/15 text-status-running"
-                    : "bg-status-offline/15 text-status-offline",
+                  "absolute inset-y-0 left-0 w-[3px]",
+                  node.maintenanceMode
+                    ? "bg-status-warn"
+                    : node.online
+                      ? "bg-status-running"
+                      : "bg-status-error",
                 )}
-              >
-                {node.online ? "Online" : "Offline"}
-              </span>
-            ) : null}
-            {node?.maintenanceMode ? (
-              <span className="inline-flex items-center rounded-full bg-status-warn/15 px-2 py-0.5 text-xs font-medium text-status-warn">
-                Maintenance
-              </span>
-            ) : null}
+              />
+            ) : (
+              <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-border" />
+            )}
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <h1 className="text-[31px] font-semibold">{node?.name ?? "Node"}</h1>
+              {node ? (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-2 text-[13px] font-medium",
+                    node.online ? "text-status-running" : "text-status-error",
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn("size-2 rounded-full", node.online ? "bg-status-running" : "bg-status-error")}
+                  />
+                  {node.online ? "Online" : "Offline"}
+                </span>
+              ) : null}
+              {node?.maintenanceMode ? (
+                <span className="inline-flex items-center gap-2 text-[13px] font-medium text-status-warn">
+                  <span aria-hidden className="size-2 rounded-full bg-status-warn" />
+                  In maintenance
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-0.5 font-mono text-[13px] text-muted-foreground">{node?.fqdn ?? "\u00a0"}</p>
           </div>
-          <p className="mt-1 font-mono text-sm text-muted-foreground">{node?.fqdn ?? "\u00a0"}</p>
         </div>
 
         <nav className="flex flex-wrap gap-1 border-b border-border pb-px">

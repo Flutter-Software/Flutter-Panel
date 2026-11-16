@@ -2,10 +2,9 @@
 
 import { use, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { AuthBrand } from "@/components/brand";
-import { AuthFooter } from "@/components/auth-footer";
+import { AuthError, AuthHeading, AuthShell } from "@/components/brand";
 import { QueryErrorPage } from "@/components/error-page";
-import { Button, Input } from "@/components/ui";
+import { Button, Field, Input } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { api, HttpError } from "@/lib/api";
 import { type PublicUser } from "@flutter-software/shared";
@@ -61,7 +60,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
       router.push(result.data.href || (result.data.serverId ? `/server/${result.data.serverId}/console` : "/"));
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create account");
+      setError(err instanceof Error ? err.message : "The account wasn't created. Check the details and try again.");
     } finally {
       setPending(false);
     }
@@ -79,68 +78,52 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   }
 
   return (
-    <div className="relative flex min-h-full flex-col items-center justify-center bg-background px-4 py-16">
-      <div className="w-full max-w-[400px]">
-        <AuthBrand className="mb-8" />
-        <div className="rounded-xl border border-border bg-card p-8">
-          <h1 className="text-2xl font-semibold tracking-tight">Set up your account</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {info
-              ? `You've been invited to ${info.serverName}.`
-              : error
-                ? error
-                : "Loading invite…"}
-          </p>
+    <AuthShell>
+      <AuthHeading title="Set up your account">
+        {info
+          ? `You've been invited to ${info.serverName}. Choose a username and password to get in.`
+          : error
+            ? error
+            : "Loading your invite…"}
+      </AuthHeading>
 
-          {info?.accountExists ? (
-            <div className="mt-6 space-y-3">
-              <p className="text-sm">
-                An account already exists for <span className="font-medium">{info.email}</span>. Sign
-                in and this server will be waiting on your dashboard.
-              </p>
-              <Button type="button" className="h-11 w-full" onClick={() => router.push("/login")}>
-                Sign in
-              </Button>
-            </div>
-          ) : info?.expired ? (
-            <p className="mt-6 text-sm text-destructive">
-              This invite has expired. Ask the server owner to send a new one.
-            </p>
-          ) : info ? (
-            <form className="mt-6 space-y-4" onSubmit={(event) => void onSubmit(event)}>
-              <label className="block space-y-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Email
-                </span>
-                <Input value={info.email} readOnly />
-              </label>
-              <label className="block space-y-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Username
-                </span>
-                <Input name="username" autoComplete="username" required minLength={3} maxLength={32} />
-              </label>
-              <label className="block space-y-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Password
-                </span>
-                <Input
-                  name="password"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  minLength={10}
-                />
-              </label>
-              {error ? <p className="text-sm text-destructive">{error}</p> : null}
-              <Button type="submit" className="h-11 w-full" disabled={pending}>
-                {pending ? "Creating account…" : "Create account"}
-              </Button>
-            </form>
-          ) : null}
+      {info?.accountExists ? (
+        <div className="mt-8 space-y-5">
+          <p className="text-sm">
+            An account already exists for <span className="font-medium">{info.email}</span>. Sign
+            in with it and the server appears in your list.
+          </p>
+          <Button type="button" className="h-10 w-full" onClick={() => router.push("/login")}>
+            Sign in
+          </Button>
         </div>
-      </div>
-      <AuthFooter />
-    </div>
+      ) : info?.expired ? (
+        <div className="mt-8">
+          <AuthError>This invite has expired. Ask the server owner to send you a new one.</AuthError>
+        </div>
+      ) : info ? (
+        <form className="mt-8 space-y-5" onSubmit={(event) => void onSubmit(event)}>
+          <Field label="Email">
+            <Input value={info.email} readOnly />
+          </Field>
+          <Field label="Username">
+            <Input name="username" autoComplete="username" required minLength={3} maxLength={32} />
+          </Field>
+          <Field label="Password" hint="At least 10 characters.">
+            <Input
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={10}
+            />
+          </Field>
+          {error ? <AuthError>{error}</AuthError> : null}
+          <Button type="submit" className="h-10 w-full" disabled={pending}>
+            {pending ? "Creating account…" : "Create account"}
+          </Button>
+        </form>
+      ) : null}
+    </AuthShell>
   );
 }

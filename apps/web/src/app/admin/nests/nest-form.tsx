@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Boxes, Pencil, Plus, Trash2 } from "lucide-react";
+import { Boxes, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { AdminCreateHeader, AdminSection, SaveIsland, isDirty } from "@/components/admin-create";
 import { confirm } from "@/components/confirm-dialog";
@@ -151,25 +151,32 @@ export function NestForm({
               variant="secondary"
               size="sm"
             >
+              <Upload className="size-3.5" />
               Import egg
             </ButtonLink>
           </div>
           {(initial?.eggs ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No eggs in this nest yet.</p>
+            <p className="text-sm text-muted-foreground">No eggs in this nest yet. Add one by hand or import an egg JSON.</p>
           ) : (
-            <ul className="divide-y divide-border rounded-lg border border-border">
+            // Seam-separated rows that run edge to edge in the panel, rather than a framed list inside it.
+            <ul aria-label={`Eggs in ${initial?.name ?? "this nest"}`} className="-mx-5 divide-y divide-border border-y border-border sm:-mx-6">
               {(initial?.eggs ?? []).map((egg) => (
-                <li key={egg.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <li key={egg.id} className="flex items-center justify-between gap-3 px-5 py-2.5 sm:px-6">
                   <div className="min-w-0">
                     <Link
                       href={`/admin/nests/eggs/${egg.id}`}
-                      className="text-sm font-medium hover:text-primary"
+                      className="font-display text-[17px] font-semibold leading-tight hover:text-primary"
                     >
                       {egg.name}
                     </Link>
-                    <p className="truncate font-mono text-xs text-muted-foreground">{egg.dockerImage}</p>
+                    <p className="truncate font-mono text-[12.5px] text-muted-foreground">{egg.dockerImage}</p>
                   </div>
-                  <ButtonLink href={`/admin/nests/eggs/${egg.id}`} variant="secondary" size="sm">
+                  <ButtonLink
+                    href={`/admin/nests/eggs/${egg.id}`}
+                    variant="secondary"
+                    size="sm"
+                    aria-label={`Edit ${egg.name}`}
+                  >
                     <Pencil className="size-3.5" />
                     Edit
                   </ButtonLink>
@@ -207,14 +214,12 @@ export function NestForm({
         pending={pending}
         disabled={!name.trim()}
         summary={
-          <span className="inline-flex items-center gap-2">
-            <Boxes className="size-4 text-primary" />
+          <span>
             {creating ? "Creating" : "Saving"}{" "}
             <span className="font-medium text-foreground">{name.trim() || "nest"}</span>
             {description.trim() ? (
               <>
-                {" "}
-                — <span className="text-foreground">{description.trim()}</span>
+                : <span className="text-foreground">{description.trim()}</span>
               </>
             ) : null}
           </span>

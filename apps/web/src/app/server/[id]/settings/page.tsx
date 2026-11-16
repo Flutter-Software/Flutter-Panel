@@ -4,7 +4,7 @@ import { use, useEffect, useState, type FormEvent } from "react";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { confirm } from "@/components/confirm-dialog";
 import { SaveButton } from "@/components/save-button";
-import { Button, buttonClass, Field, Input, Textarea } from "@/components/ui";
+import { Button, buttonClass, Card, Field, Input, Textarea } from "@/components/ui";
 import { useAuth } from "@/components/auth-provider";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
@@ -112,14 +112,15 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
   }
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-[72ch] space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">Settings</h2>
-        <p className="text-sm text-muted-foreground">Identity, reinstall, and connection details.</p>
+        <h2 className="text-[20px] font-semibold">Settings</h2>
+        <p className="text-sm text-muted-foreground">Name, connection details, and reinstall.</p>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-      <form onSubmit={onSave} className="space-y-4 rounded-xl border border-border bg-card p-4">
+      <form onSubmit={onSave} className="space-y-4 rounded-lg border border-border bg-card p-4">
+        <h3 className="text-[16px] font-semibold">Name and description</h3>
         <Field label="Name" required>
           <Input
             value={name}
@@ -146,13 +147,13 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
         </Field>
         <div className="flex items-center gap-3">
           <SaveButton pending={pending} saved={saved} disabled={!name.trim() || !can(server, "settings.rename")}>
-            Save
+            Save changes
           </SaveButton>
         </div>
       </form>
 
-      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-        <p className="text-sm font-semibold">Connection</p>
+      <Card className="space-y-3 p-4">
+        <h3 className="text-[16px] font-semibold">Connection</h3>
         <Field label="UUID">
           <Input value={server?.uuid ?? ""} readOnly className="font-mono" />
         </Field>
@@ -165,7 +166,7 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
               onCopy={() => void copyValue("address", sftpAddress)}
             />
           }
-          hint="Connect with FileZilla, WinSCP, or Cyberduck. Password is your panel account password."
+          hint="Connect with FileZilla, WinSCP, or Cyberduck. The password is your panel account password."
         >
           <Input value={sftpAddress} readOnly className="font-mono" />
         </Field>
@@ -190,12 +191,12 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
         <Field label="Primary allocation">
           <Input value={server?.allocation ?? ""} readOnly className="font-mono" />
         </Field>
-      </div>
+      </Card>
 
       {can(server, "settings.reinstall") ? (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
-        <div>
-          <p className="text-sm font-semibold">Reinstall</p>
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[16px] font-semibold">Reinstall</h3>
           <p className="text-sm text-muted-foreground">
             Runs the egg install script again on this node. Existing files are not wiped.
           </p>
@@ -206,9 +207,9 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
           disabled={reinstalling || server?.status === "installing"}
           onClick={() => void onReinstall()}
         >
-          {reinstalling || server?.status === "installing" ? "Installing…" : "Reinstall"}
+          {reinstalling || server?.status === "installing" ? "Installing…" : "Reinstall server"}
         </Button>
-      </div>
+      </Card>
       ) : null}
     </div>
   );

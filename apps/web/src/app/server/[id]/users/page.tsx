@@ -1,10 +1,10 @@
 "use client";
 
 import { use, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, Mail, Search, Trash2, UserPlus } from "lucide-react";
+import { Check, Copy, KeyRound, Mail, Search, Trash2, UserPlus } from "lucide-react";
 import { PERMISSION_GROUPS, type ServerPermission } from "@flutter-software/shared";
 import { confirm } from "@/components/confirm-dialog";
-import { Badge, Button, Card, EmptyState, Input, Modal } from "@/components/ui";
+import { Button, EmptyState, Input, Modal, Rack } from "@/components/ui";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
 import { can } from "@/lib/access";
@@ -289,7 +289,7 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Users</h2>
+          <h2 className="text-[20px] font-semibold">Users</h2>
           <p className="text-sm text-muted-foreground">
             Search an existing account, or type an email to invite someone new. Invites expire in 7 days.
           </p>
@@ -309,7 +309,7 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
       </div>
       {error && !addOpen && !editing ? <p className="text-sm text-destructive">{error}</p> : null}
       {notice ? (
-        <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
+        <div className="border-l-2 border-primary py-1 pl-4 text-sm">
           <p>{notice}</p>
           {inviteLink ? (
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -361,7 +361,7 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
               />
             </div>
             {openHits && identifier.trim().length >= 2 ? (
-              <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
+              <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover shadow-[var(--shadow-float)]">
                 {hits.map((hit) => {
                   const already = taken.has(hit.email.toLowerCase());
                   return (
@@ -443,47 +443,46 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
         />
       ) : (
         <div className="space-y-3">
-          {server ? (
-            <Card className="p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{server.ownerName ?? "Owner"}</p>
-                    <Badge>Owner</Badge>
+          <Rack label="People with access">
+            {server ? (
+              <div role="listitem" className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-baseline gap-x-3">
+                    <p className="truncate font-display text-[16px] font-semibold leading-tight">
+                      {server.ownerName ?? "Owner"}
+                    </p>
+                    <span className="text-[13px] font-medium text-primary">Owner</span>
                   </div>
-                  <p className="text-sm text-muted-foreground">Full access to this server</p>
+                  <p className="text-[13px] text-muted-foreground">Full access to this server</p>
                 </div>
               </div>
-            </Card>
-          ) : null}
-          {subusers.length === 0 ? (
-            <EmptyState
-              title="No subusers yet"
-              description="Search an account or invite someone by email to share this server."
-            />
-          ) : (
-            subusers.map((sub) => (
-            <Card key={sub.id} className="p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{sub.username ?? sub.email}</p>
+            ) : null}
+            {subusers.map((sub) => (
+              <div key={sub.id} role="listitem" className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-baseline gap-x-3">
+                    <p className="truncate font-display text-[16px] font-semibold leading-tight">
+                      {sub.username ?? sub.email}
+                    </p>
                     {sub.pending ? (
-                      <Badge className={sub.inviteExpired ? "bg-status-error/15 text-status-error" : ""}>
-                        {sub.inviteExpired ? "Invite expired" : "Pending invite"}
-                      </Badge>
+                      <span
+                        className={cn(
+                          "text-[13px] font-medium",
+                          sub.inviteExpired ? "text-status-error" : "text-status-warn",
+                        )}
+                      >
+                        {sub.inviteExpired ? "Invite expired" : "Invite pending"}
+                      </span>
                     ) : null}
                   </div>
-                  {sub.username ? (
-                    <p className="text-sm text-muted-foreground">{sub.email}</p>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Waiting for them to create an account</p>
-                  )}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {sub.permissions.length} permission{sub.permissions.length === 1 ? "" : "s"}
+                  <p className="text-[13px] text-muted-foreground">
+                    {sub.username ? sub.email : "Waiting for them to create an account"}
+                    {", "}
+                    <span className="tabular-nums">{sub.permissions.length}</span> permission
+                    {sub.permissions.length === 1 ? "" : "s"}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {sub.pending && canCreate ? (
                     <Button
                       type="button"
@@ -507,26 +506,33 @@ export default function UsersPage({ params }: { params: Promise<{ id: string }> 
                         setEditPerms(sub.permissions);
                       }}
                     >
-                      Permissions
+                      <KeyRound className="size-3.5" />
+                      Edit permissions
                     </Button>
                   ) : null}
                   {canDelete ? (
                     <Button
                       type="button"
                       size="sm"
-                      variant="danger"
+                      variant="ghost"
                       disabled={pending}
+                      className="size-8 px-0 text-muted-foreground hover:text-destructive"
+                      aria-label={`Remove ${sub.username ?? sub.email}`}
                       onClick={() => void remove(sub)}
                     >
-                      <Trash2 className="size-3.5" />
-                      Remove
+                      <Trash2 className="size-4" />
                     </Button>
                   ) : null}
                 </div>
               </div>
-            </Card>
-          ))
-          )}
+            ))}
+          </Rack>
+          {subusers.length === 0 ? (
+            <EmptyState
+              title="No subusers yet"
+              description="Search for an account or invite someone by email to share this server."
+            />
+          ) : null}
         </div>
       )}
     </div>

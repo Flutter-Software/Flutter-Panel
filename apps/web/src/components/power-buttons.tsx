@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Tooltip } from "@mantine/core";
 import { Play, RotateCcw, Skull, Square, type LucideIcon } from "lucide-react";
 import { Button, Modal } from "@/components/ui";
-import { cn } from "@/lib/cn";
 import type { ServerStatus } from "@/lib/types";
 
 export type PowerAction = "start" | "stop" | "restart" | "kill";
@@ -19,18 +18,10 @@ type PowerControl = {
   onClick: () => void;
 };
 
-// An explicit size, not aspect-ratio with stretch: a stretched square's width
-// isn't counted when its row is measured, which pushes the buttons off-screen.
-// 60px leaves 6px above and below inside the 72px header.
-const HEADER_BUTTON =
-  "no-press size-10 shrink-0 border px-0 disabled:opacity-60 disabled:grayscale sm:size-[60px]";
-
-// Status colors with a tinted fill and border stand out on the dark header.
-const HEADER_TONES: Record<string, string> = {
-  start: "border-status-running/50 bg-status-running/15 text-status-running hover:bg-status-running/25",
-  restart: "border-status-warn/50 bg-status-warn/15 text-status-warn hover:bg-status-warn/25",
-  stop: "border-destructive/60 bg-destructive/20 text-destructive hover:bg-destructive/30",
-};
+// Header controls are plain Rack buttons (3px corners, no tint, no shadow):
+// status colour belongs to the LED, not the controls (DESIGN.md → Colour).
+// Below `sm` they collapse to square icon buttons so the header fits a phone.
+const HEADER_BUTTON = "shrink-0 max-sm:size-9 max-sm:px-0";
 
 export function PowerButtons({
   status,
@@ -93,20 +84,19 @@ export function PowerButtons({
   return (
     <>
       {variant === "header" ? (
-        // The vertical margin leaves a small gap above and below. On the right,
-        // the header's own padding lines the buttons up with the page content.
-        <div className="flex shrink-0 gap-1.5 sm:-my-1">
+        // On the right, the header's own padding lines the buttons up with the page content.
+        <div className="flex shrink-0 items-center gap-1.5">
           {visible.map(({ key, label, icon: Icon, disabled, onClick }) => (
             <Tooltip key={key} label={label} position="bottom" transitionProps={{ duration: 0 }}>
               <Button
-                size="sm"
-                variant="ghost"
-                className={cn(HEADER_BUTTON, HEADER_TONES[key])}
+                variant={key === "stop" ? "danger" : "secondary"}
+                className={HEADER_BUTTON}
                 disabled={disabled}
                 aria-label={label}
                 onClick={onClick}
               >
-                <Icon className="size-5 sm:size-6" strokeWidth={2.25} aria-hidden />
+                <Icon className="size-4" aria-hidden />
+                <span className="max-sm:sr-only">{label}</span>
               </Button>
             </Tooltip>
           ))}
@@ -122,7 +112,7 @@ export function PowerButtons({
         </div>
       )}
       <Modal
-        title="Forcibly Stop Process"
+        title="Kill the server process?"
         open={killOpen}
         onClose={() => setKillOpen(false)}
         className="max-w-md"
@@ -139,13 +129,14 @@ export function PowerButtons({
                 onPower("kill");
               }}
             >
-              Continue
+              Kill process
             </Button>
           </>
         }
       >
         <p className="text-sm text-muted-foreground">
-          Forcibly stopping a server can lead to data corruption.
+          The server is still stopping. Killing the process ends it immediately and can corrupt world or save
+          data that hasn&apos;t been written yet.
         </p>
       </Modal>
     </>

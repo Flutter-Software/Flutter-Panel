@@ -27,8 +27,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type BeforeMount, type Monaco, type OnMount } from "@monaco-editor/react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import { useTheme } from "next-themes";
-import { FileCode, Gauge, GitCompare, Save, X } from "lucide-react";
+import { Gauge, Save, X } from "lucide-react";
 import { Button } from "@/components/ui";
+import { Rail, type RailTone } from "@/components/status";
+import { cn } from "@/lib/cn";
 
 const LANGUAGES: Record<string, string> = {
   ts: "typescript",
@@ -294,6 +296,191 @@ function DiffPane({ monaco, model, savedText, tier, readOnly }: DiffPaneProps) {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                             Themes and labels                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Monaco themes built from the Rack tokens (globals.css / DESIGN.md). Monaco
+ * needs literal hex values, so these mirror the CSS variables: the code sits in
+ * the recessed well colour, keys and keywords take the signal cyan, values and
+ * numbers reuse the status green and amber at a calmer strength.
+ */
+const RACK_THEMES = {
+  "rack-dark": {
+    base: "vs-dark" as const,
+    rules: [
+      { token: "comment", foreground: "7a7a80", fontStyle: "italic" },
+      { token: "keyword", foreground: "5cc8f2" },
+      { token: "key", foreground: "5cc8f2" },
+      { token: "type", foreground: "5cc8f2" },
+      { token: "tag", foreground: "5cc8f2" },
+      { token: "attribute.name", foreground: "5cc8f2" },
+      { token: "string.key.json", foreground: "5cc8f2" },
+      { token: "string", foreground: "8fdcb2" },
+      { token: "string.value.json", foreground: "8fdcb2" },
+      { token: "attribute.value", foreground: "8fdcb2" },
+      { token: "number", foreground: "f2c46b" },
+      { token: "keyword.json", foreground: "f2c46b" },
+      { token: "delimiter", foreground: "9a9a9f" },
+      { token: "operator", foreground: "9a9a9f" },
+    ],
+    colors: {
+      "editor.background": "#151516",
+      "editor.foreground": "#e8e8e9",
+      "editorGutter.background": "#151516",
+      "editorLineNumber.foreground": "#5a5a5f",
+      "editorLineNumber.activeForeground": "#e8e8e9",
+      "editor.lineHighlightBackground": "#1d1d1f",
+      "editor.lineHighlightBorder": "#00000000",
+      "editor.selectionBackground": "#2bb3ec40",
+      "editor.inactiveSelectionBackground": "#2bb3ec22",
+      "editorCursor.foreground": "#2bb3ec",
+      "editorIndentGuide.background1": "#262628",
+      "editorIndentGuide.activeBackground1": "#3c3c3f",
+      "editorWhitespace.foreground": "#3c3c3f",
+      "editorWidget.background": "#222223",
+      "editorWidget.border": "#323234",
+      "input.background": "#151516",
+      "input.border": "#3c3c3f",
+      "focusBorder": "#2bb3ec",
+      "scrollbarSlider.background": "#3c3c3f80",
+      "scrollbarSlider.hoverBackground": "#4a4a4ecc",
+      "diffEditor.insertedTextBackground": "#4cd38e26",
+      "diffEditor.removedTextBackground": "#ef5a5226",
+      "diffEditor.insertedLineBackground": "#4cd38e14",
+      "diffEditor.removedLineBackground": "#ef5a5214",
+    },
+  },
+  "rack-light": {
+    base: "vs" as const,
+    rules: [
+      { token: "comment", foreground: "8c8c92", fontStyle: "italic" },
+      { token: "keyword", foreground: "0b7fb8" },
+      { token: "key", foreground: "0b7fb8" },
+      { token: "type", foreground: "0b7fb8" },
+      { token: "tag", foreground: "0b7fb8" },
+      { token: "attribute.name", foreground: "0b7fb8" },
+      { token: "string.key.json", foreground: "0b7fb8" },
+      { token: "string", foreground: "17784a" },
+      { token: "string.value.json", foreground: "17784a" },
+      { token: "attribute.value", foreground: "17784a" },
+      { token: "number", foreground: "9a5f0e" },
+      { token: "keyword.json", foreground: "9a5f0e" },
+      { token: "delimiter", foreground: "6a6a70" },
+      { token: "operator", foreground: "6a6a70" },
+    ],
+    colors: {
+      "editor.background": "#f7f7f7",
+      "editor.foreground": "#1c1c1e",
+      "editorGutter.background": "#f7f7f7",
+      "editorLineNumber.foreground": "#a0a0a5",
+      "editorLineNumber.activeForeground": "#1c1c1e",
+      "editor.lineHighlightBackground": "#ededee",
+      "editor.lineHighlightBorder": "#00000000",
+      "editor.selectionBackground": "#0b7fb833",
+      "editor.inactiveSelectionBackground": "#0b7fb81c",
+      "editorCursor.foreground": "#0b7fb8",
+      "editorIndentGuide.background1": "#e4e4e6",
+      "editorIndentGuide.activeBackground1": "#c3c3c6",
+      "editorWidget.background": "#ffffff",
+      "editorWidget.border": "#d3d3d5",
+      "focusBorder": "#0b7fb8",
+      "diffEditor.insertedTextBackground": "#178a5326",
+      "diffEditor.removedTextBackground": "#c9372f22",
+      "diffEditor.insertedLineBackground": "#178a5312",
+      "diffEditor.removedLineBackground": "#c9372f10",
+    },
+  },
+};
+
+function defineRackThemes(monaco: Monaco) {
+  for (const [name, theme] of Object.entries(RACK_THEMES)) {
+    monaco.editor.defineTheme(name, { base: theme.base, inherit: true, rules: theme.rules, colors: theme.colors });
+  }
+}
+
+/** Names people recognise, for the status strip. Falls back to the Monaco id. */
+const LANGUAGE_LABELS: Record<string, string> = {
+  typescript: "TypeScript",
+  javascript: "JavaScript",
+  json: "JSON",
+  markdown: "Markdown",
+  css: "CSS",
+  scss: "SCSS",
+  less: "Less",
+  html: "HTML",
+  xml: "XML",
+  yaml: "YAML",
+  ini: "Config (key = value)",
+  shell: "Shell script",
+  powershell: "PowerShell",
+  python: "Python",
+  java: "Java",
+  kotlin: "Kotlin",
+  go: "Go",
+  rust: "Rust",
+  php: "PHP",
+  ruby: "Ruby",
+  lua: "Lua",
+  sql: "SQL",
+  c: "C",
+  cpp: "C++",
+  csharp: "C#",
+  swift: "Swift",
+  dockerfile: "Dockerfile",
+  plaintext: "Plain text",
+};
+
+/**
+ * Line and column, in its own component: cursor moves re-render only this
+ * readout, never the editor or the rest of the frame.
+ */
+function CursorReadout({ editor }: { editor: MonacoEditor.IStandaloneCodeEditor | null }) {
+  const [position, setPosition] = useState<{ line: number; column: number } | null>(null);
+  useEffect(() => {
+    if (!editor) return;
+    const read = () => {
+      const pos = editor.getPosition();
+      if (pos) setPosition({ line: pos.lineNumber, column: pos.column });
+    };
+    read();
+    const subscription = editor.onDidChangeCursorPosition(read);
+    return () => subscription.dispose();
+  }, [editor]);
+  if (!position) return null;
+  return (
+    <span className="tabular-nums">
+      Line {position.line.toLocaleString()}, column {position.column}
+    </span>
+  );
+}
+
+/**
+ * Current size and line count. `getValueLength()` and `getLineCount()` are O(1)
+ * on Monaco's piece table, and this lives in its own component so an edit only
+ * re-renders these two numbers. (`profile` is the opening snapshot, used for
+ * the performance tier, and would go stale as you type.)
+ */
+function LiveFileStats({ model, initial }: { model: MonacoEditor.ITextModel | null; initial: ContentProfile }) {
+  const [stats, setStats] = useState({ chars: initial.chars, lines: initial.lines });
+  useEffect(() => {
+    if (!model) return;
+    const read = () => setStats({ chars: model.getValueLength(), lines: model.getLineCount() });
+    read();
+    const subscription = model.onDidChangeContent(read);
+    return () => subscription.dispose();
+  }, [model]);
+  return (
+    <>
+      <span className="tabular-nums">{formatSize(stats.chars)}</span>
+      <span className="tabular-nums">
+        {stats.lines.toLocaleString()} {stats.lines === 1 ? "line" : "lines"}
+      </span>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                    Modal                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -311,6 +498,23 @@ type FileIdeModalProps = {
   onClose: () => void;
 };
 
+/** The file's state, shown on the header rail and in the status strip. */
+type SaveState = "clean" | "saved" | "dirty" | "saving" | "failed" | "readonly";
+
+const SAVE_STATE: Record<SaveState, { label: string; tone: RailTone; text: string }> = {
+  clean: { label: "No changes", tone: "off", text: "text-muted-foreground" },
+  saved: { label: "Saved", tone: "ok", text: "text-status-running" },
+  dirty: { label: "Unsaved changes", tone: "warn", text: "text-status-warn" },
+  saving: { label: "Saving…", tone: "warn", text: "text-status-warn" },
+  failed: { label: "Couldn't save. Your changes are still here; try again.", tone: "error", text: "text-status-error" },
+  readonly: { label: "Read-only", tone: "off", text: "text-muted-foreground" },
+};
+
+/**
+ * The file editor, styled as a Rack unit (see DESIGN.md): a front-panel header
+ * with the file's name and folder and a status rail on its left edge, the code
+ * in a recessed well, and a status strip along the bottom.
+ */
 export function FileIdeModal({ path, content, pending, readOnly = false, onSave, onClose }: FileIdeModalProps) {
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme !== "light";
@@ -326,6 +530,8 @@ export function FileIdeModal({ path, content, pending, readOnly = false, onSave,
   const options = useMemo(() => editorOptionsFor(tier, readOnly), [tier, readOnly]);
 
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+  // State copy of the editor for components that subscribe to it (cursor readout).
+  const [editor, setEditor] = useState<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const [monaco, setMonaco] = useState<Monaco | null>(null);
   const [model, setModel] = useState<MonacoEditor.ITextModel | null>(null);
 
@@ -335,9 +541,11 @@ export function FileIdeModal({ path, content, pending, readOnly = false, onSave,
   const [savedText, setSavedText] = useState(initialContent);
   const [dirty, setDirty] = useState(false);
   const [diffing, setDiffing] = useState(false);
+  /** Presentation only: did the last save succeed or fail? Cleared by the next edit. */
+  const [lastSave, setLastSave] = useState<"ok" | "failed" | null>(null);
 
   const fileName = path.split("/").pop() || path;
-  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) || "/" : "";
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) || "/" : "/";
 
   async function handleSave() {
     const current = editorRef.current?.getModel();
@@ -348,12 +556,17 @@ export function FileIdeModal({ path, content, pending, readOnly = false, onSave,
     const version = current.getAlternativeVersionId();
     const text = current.getValue();
     const ok = await onSave(text);
-    if (!ok || current.isDisposed()) return;
+    if (current.isDisposed()) return;
+    if (!ok) {
+      setLastSave("failed");
+      return;
+    }
 
     savedVersion.current = version;
     setSavedText(text);
     setDirty(current.getAlternativeVersionId() !== version);
     setDiffing(false);
+    setLastSave("ok");
   }
 
   // Window listener reads through a ref so it never needs re-binding.
@@ -376,23 +589,26 @@ export function FileIdeModal({ path, content, pending, readOnly = false, onSave,
   }, [onClose]);
 
   const beforeMount: BeforeMount = (instance) => {
+    defineRackThemes(instance);
     configureLanguageServices(instance, tier);
   };
 
-  const onMount: OnMount = (editor, instance) => {
-    const mounted = editor.getModel();
-    editorRef.current = editor;
+  const onMount: OnMount = (mountedEditor, instance) => {
+    const mounted = mountedEditor.getModel();
+    editorRef.current = mountedEditor;
+    setEditor(mountedEditor);
     setMonaco(instance);
     setModel(mounted);
     if (!mounted) return;
 
     savedVersion.current = mounted.getAlternativeVersionId();
-    // O(1) per edit. React bails out when the boolean doesn't change, so
+    // O(1) per edit. React bails out when the values don't change, so
     // ordinary typing causes no re-render at all.
-    editor.onDidChangeModelContent(() => {
+    mountedEditor.onDidChangeModelContent(() => {
       setDirty(mounted.getAlternativeVersionId() !== savedVersion.current);
+      setLastSave(null);
     });
-    editor.focus();
+    mountedEditor.focus();
   };
 
   // Returning from the diff: the editor was display:none, so re-measure and refocus.
@@ -402,99 +618,97 @@ export function FileIdeModal({ path, content, pending, readOnly = false, onSave,
     editorRef.current?.focus();
   }, [diffing]);
 
+  const saveState: SaveState = readOnly
+    ? "readonly"
+    : pending
+      ? "saving"
+      : lastSave === "failed"
+        ? "failed"
+        : dirty
+          ? "dirty"
+          : lastSave === "ok"
+            ? "saved"
+            : "clean";
+  const state = SAVE_STATE[saveState];
+  const canCompare = !readOnly && (dirty || diffing);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
-      <button
-        type="button"
-        className="absolute inset-0 bg-background/80 backdrop-blur-sm"
-        aria-label="Close editor"
-        onClick={onClose}
-      />
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center sm:p-4">
+      <button type="button" className="absolute inset-0 bg-background/75" aria-label="Close editor" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={`Edit ${path}`}
-        className="relative flex h-[min(92vh,52rem)] w-full max-w-[min(96rem,96vw)] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-2xl"
+        className="relative flex w-full max-w-[96rem] flex-col overflow-hidden bg-card shadow-[var(--shadow-float)] sm:rounded-xl"
       >
-        <div className="flex h-7 shrink-0 items-center bg-muted/70">
-          <p className="min-w-0 flex-1 truncate px-2.5 text-center font-mono text-[11px] leading-none text-muted-foreground">
-            {dirty ? "● " : ""}
-            {fileName}
-            {dir ? ` — ${dir}` : ""}
-          </p>
-          <div className="flex shrink-0 items-stretch">
-            {readOnly ? null : (
-              <>
-                {dirty || diffing ? (
-                  <Button
+        {/* Front panel: the file as a unit. The rail on the left edge is its save state. */}
+        <header className="relative flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-3 sm:px-5">
+          <Rail tone={state.tone} pulse={saveState === "saving"} />
+          <div className="min-w-0 flex-1 pl-1">
+            <h2 className="truncate text-[22px] font-semibold" title={path}>
+              {fileName}
+            </h2>
+            <p className="truncate font-mono text-[12.5px] text-muted-foreground" title={path}>
+              {dir}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {canCompare ? (
+              // Edit the file, or see what changed since the last save. Both views share one buffer.
+              <div role="group" aria-label="View" className="flex rounded-md border border-border p-0.5">
+                {(
+                  [
+                    [false, "Edit"],
+                    [true, "Changes"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={label}
                     type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 gap-1 rounded-none px-2 text-[11px]"
+                    aria-pressed={diffing === value}
                     disabled={pending || !model}
-                    onClick={() => setDiffing((current) => !current)}
-                    title={diffing ? "Back to editor" : "Compare with last saved"}
+                    onClick={() => setDiffing(value)}
+                    title={value ? "Compare with the last saved version" : undefined}
+                    className={cn(
+                      "no-press h-7 rounded-sm px-2.5 text-[13px] font-medium disabled:opacity-50",
+                      diffing === value ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
+                    )}
                   >
-                    <GitCompare className="size-3.5" />
-                    {diffing ? "Editor" : "Diff"}
-                  </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 gap-1 rounded-none px-2 text-[11px]"
-                  disabled={pending || !dirty}
-                  onClick={() => void handleSave()}
-                  title="Save (Ctrl+S)"
-                >
-                  <Save className="size-3.5" />
-                  {pending ? "Saving" : "Save"}
-                </Button>
-              </>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {readOnly ? null : (
+              <Button
+                type="button"
+                size="sm"
+                disabled={pending || !dirty}
+                onClick={() => void handleSave()}
+                title="Save changes (Ctrl+S)"
+              >
+                <Save className="size-3.5" />
+                {pending ? "Saving…" : "Save changes"}
+              </Button>
             )}
-            <button
+            <Button
               type="button"
-              className="flex size-7 items-center justify-center text-muted-foreground hover:bg-destructive hover:text-white"
+              size="sm"
+              variant="ghost"
+              className="hit-slop size-8 px-0 text-muted-foreground"
               onClick={onClose}
-              aria-label="Close"
+              aria-label="Close editor"
               title="Close (Esc)"
             >
-              <X className="size-3.5" />
-            </button>
+              <X className="size-4" />
+            </Button>
           </div>
-        </div>
-        <div className="flex h-7 shrink-0 items-stretch border-b border-border bg-muted/40">
-          <div className="flex min-w-0 max-w-[min(100%,24rem)] items-center gap-1.5 border-r border-border bg-card px-2.5" title={path}>
-            <FileCode className="size-3 shrink-0 text-muted-foreground" />
-            <span className="truncate font-mono text-[12px] leading-none">{fileName}</span>
-            {dirty ? (
-              <span className="size-1.5 shrink-0 rounded-full bg-foreground/70" title="Unsaved changes" />
-            ) : null}
-            <span className="hidden shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground sm:inline">
-              {language}
-            </span>
-          </div>
-          {tier !== "normal" ? (
-            <div
-              className="ml-auto flex shrink-0 items-center gap-1 px-2.5 text-[10px] text-muted-foreground"
-              title={
-                tier === "huge"
-                  ? "Very large file: syntax highlighting, word wrap, folding, suggestions and validation are off to keep editing responsive."
-                  : "Large file: word wrap, folding, bracket colouring, suggestions and validation are off to keep editing responsive."
-              }
-            >
-              <Gauge className="size-3" />
-              <span>
-                {tier === "huge" ? "Performance mode · no highlighting" : "Performance mode"} ·{" "}
-                {formatSize(profile.chars)} · {profile.lines.toLocaleString()} lines
-              </span>
-            </div>
-          ) : null}
-        </div>
-        <div className="relative min-h-0 flex-1 bg-background">
+        </header>
+
+        <div className="relative min-h-0 flex-1 bg-well">
           {/*
-            The editor stays mounted while diffing (just hidden) so its model,
+            The editor stays mounted while comparing (just hidden) so its model,
             undo stack, cursor and scroll position survive the round trip.
           */}
           <div className={diffing ? "hidden" : "h-full"}>
@@ -502,15 +716,11 @@ export function FileIdeModal({ path, content, pending, readOnly = false, onSave,
               height="100%"
               defaultValue={initialContent}
               language={language}
-              theme={dark ? "vs-dark" : "light"}
+              theme={dark ? "rack-dark" : "rack-light"}
               beforeMount={beforeMount}
               onMount={onMount}
               options={options}
-              loading={
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  Loading editor…
-                </div>
-              }
+              loading={<div className="flex h-full items-center px-5 text-sm text-muted-foreground">Loading the editor…</div>}
             />
           </div>
           {diffing && monaco && model ? (
@@ -519,6 +729,30 @@ export function FileIdeModal({ path, content, pending, readOnly = false, onSave,
             </div>
           ) : null}
         </div>
+
+        {/* Status strip: separate fields, no dot-joined meta. */}
+        <footer className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-border px-4 py-2 text-[12.5px] text-muted-foreground sm:px-5">
+          <span role="status" className={cn("flex items-center gap-2 font-medium", state.text)}>
+            <span aria-hidden className={cn("size-2 shrink-0 rounded-full bg-current", saveState === "saving" && "led-pulse")} />
+            {state.label}
+          </span>
+          {diffing ? <span>Comparing with the last saved version</span> : <CursorReadout editor={editor} />}
+          <span>{LANGUAGE_LABELS[language] ?? language}</span>
+          <LiveFileStats model={model} initial={profile} />
+          {tier !== "normal" ? (
+            <span
+              className="flex items-center gap-1.5 text-status-warn sm:ml-auto"
+              title={
+                tier === "huge"
+                  ? "Very large file: syntax highlighting, word wrap, folding, suggestions and validation are off to keep editing responsive."
+                  : "Large file: word wrap, folding, bracket colouring, suggestions and validation are off to keep editing responsive."
+              }
+            >
+              <Gauge className="size-3.5" />
+              {tier === "huge" ? "Performance mode: no highlighting" : "Performance mode"}
+            </span>
+          ) : null}
+        </footer>
       </div>
     </div>
   );

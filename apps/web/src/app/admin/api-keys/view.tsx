@@ -15,8 +15,8 @@
  * used to mint new keys.
  */
 
-import { useState } from "react";
-import { Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Check, Copy, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import {
   API_KEY_APPLICATION_PREFIX,
   APPLICATION_SCOPE_GROUPS,
@@ -27,7 +27,7 @@ import { confirm } from "@/components/confirm-dialog";
 import { QueryErrorPage } from "@/components/error-page";
 import { AdminApiKeysPageSkeleton } from "@/components/skeletons";
 import { toast } from "@/components/toast";
-import { Button, Card, Field, Input, Modal, Select } from "@/components/ui";
+import { Button, EmptyState, Field, Input, Modal, Rack, Select } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useQuery } from "@/lib/query";
@@ -150,7 +150,7 @@ export default function AdminApiKeysPage() {
       setSecret({ name: result.data.key.name, token: result.data.token });
       await reload();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Could not create the API key");
+      setFormError(err instanceof Error ? err.message : "Couldn't create the API key. Check the name and access, then try again.");
     } finally {
       setBusy(false);
     }
@@ -170,7 +170,7 @@ export default function AdminApiKeysPage() {
       toast(`Revoked ${row.name}.`, "success");
       await reload();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Could not revoke the API key");
+      setActionError(err instanceof Error ? err.message : "Couldn't revoke the API key. Refresh the page and try again.");
     }
   }
 
@@ -190,8 +190,8 @@ export default function AdminApiKeysPage() {
 
   return (
     <AdminPage
-      title="API Keys"
-      description="Application keys give scripts, bots, and billing systems full or scoped access to the admin API."
+      title="API keys"
+      description="Application keys give scripts, bots and billing systems full or limited access to the admin API."
       actions={
         <Button type="button" onClick={openCreate}>
           <Plus className="size-4" />
@@ -201,32 +201,36 @@ export default function AdminApiKeysPage() {
     >
       <AdminError message={actionError} />
 
-      <Card className="flex flex-col gap-1 p-4 text-sm sm:flex-row sm:items-center sm:gap-3">
-        <span className="font-medium">How to use</span>
-        <span className="text-muted-foreground">
-          Send <code className="font-mono text-foreground">Authorization: Bearer {API_KEY_APPLICATION_PREFIX}…</code> to
-          any <code className="font-mono text-foreground">/api/v1/admin</code> endpoint.
-        </span>
-      </Card>
+      <p className="max-w-[72ch] text-sm text-muted-foreground">
+        To use a key, send{" "}
+        <code className="break-all font-mono text-[13px] text-foreground">
+          Authorization: Bearer {API_KEY_APPLICATION_PREFIX}…
+        </code>{" "}
+        with any request to <code className="font-mono text-[13px] text-foreground">/api/v1/admin</code>.
+      </p>
 
       {keys.length === 0 ? (
-        <Card className="px-6 py-16 text-center">
-          <KeyRound className="mx-auto size-6 text-muted-foreground" />
-          <p className="mt-3 text-base font-semibold">No API keys yet</p>
-          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            Create a key to connect HostCore, WHMCS, a Discord bot, or your own scripts to this panel.
-          </p>
-          <Button type="button" className="mt-5" onClick={openCreate}>
-            <Plus className="size-4" />
-            New API key
-          </Button>
-        </Card>
+        <EmptyState
+          title="No API keys yet"
+          description="Create a key to connect HostCore, WHMCS, a Discord bot or your own scripts to this panel."
+        />
       ) : (
-        <Card className="divide-y divide-border overflow-hidden">
-          {keys.map((row) => (
-            <KeyRow key={row.id} row={row} onRevoke={() => void revoke(row)} />
-          ))}
-        </Card>
+        <div>
+          {/* Column legend for wide screens; rows wrap into labelled lines below lg. */}
+          <div aria-hidden className={cn("hidden px-4 py-2 text-[12px] text-muted-foreground lg:grid lg:gap-5", KEY_COLUMNS)}>
+            <span className="pl-1">Key</span>
+            <span>Access</span>
+            <span>Created</span>
+            <span>Last used</span>
+            <span>Expires</span>
+            <span className="w-[6.5rem]" />
+          </div>
+          <Rack label="API keys">
+            {keys.map((row) => (
+              <KeyRow key={row.id} row={row} onRevoke={() => void revoke(row)} />
+            ))}
+          </Rack>
+        </div>
       )}
 
       <Modal
@@ -254,14 +258,14 @@ export default function AdminApiKeysPage() {
             void createKey();
           }}
         >
-          {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
+          {formError ? <p className="border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">{formError}</p> : null}
           <Field label="Name" required>
             <Input
               autoFocus
               maxLength={64}
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="WHMCS, Discord bot, backups…"
+              placeholder="WHMCS, Discord bot, backups"
             />
           </Field>
           <Field label="Expires">
@@ -305,7 +309,7 @@ export default function AdminApiKeysPage() {
               </div>
             ) : null}
             {!fullAccess && customScopes.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Give the key access to at least one resource.</p>
+              <p className="text-[13px] text-muted-foreground">Give the key access to at least one resource.</p>
             ) : null}
           </div>
           {/* Hidden submit so Enter in the name field creates the key. */}
@@ -332,12 +336,12 @@ export default function AdminApiKeysPage() {
         {secret ? (
           <div className="space-y-3">
             <p className="text-sm font-medium">{secret.name}</p>
-            <pre className="overflow-x-auto rounded-lg border border-border bg-background px-3 py-2.5 font-mono text-xs">
+            <pre className="overflow-x-auto rounded-md border border-border bg-well px-3 py-2.5 font-mono text-[12.5px]">
               {secret.token}
             </pre>
             <div>
-              <p className="text-xs text-muted-foreground">Try it:</p>
-              <pre className="mt-1 overflow-x-auto rounded-lg border border-border bg-background px-3 py-2.5 font-mono text-[11px] text-muted-foreground">
+              <p className="text-[13px] text-muted-foreground">Try it:</p>
+              <pre className="mt-1 overflow-x-auto rounded-md border border-border bg-well px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
                 {`curl -H "Authorization: Bearer ${secret.token}" \\\n  ${typeof window === "undefined" ? "" : window.location.origin}/api/v1/admin/servers`}
               </pre>
             </div>
@@ -348,56 +352,80 @@ export default function AdminApiKeysPage() {
   );
 }
 
+const KEY_COLUMNS =
+  "lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_auto]";
+
 function KeyRow({ row, onRevoke }: { row: AdminApiKey; onRevoke: () => void }) {
   const expired = isExpired(row);
   const chips = scopeChips(row.scopes);
   return (
-    <div className={cn("flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between", expired && "opacity-70")}>
-      <div className="min-w-0 space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <KeyRound className="size-4 shrink-0 text-muted-foreground" />
-          <span className="font-semibold">{row.name}</span>
-          <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-            {row.tokenPrefix}••••
-          </code>
-          {expired ? (
-            <span className="rounded-full bg-status-error/15 px-2 py-0.5 text-[11px] font-medium text-status-error">
-              Expired
-            </span>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {chips.length ? (
-            chips.map((chip) => (
-              <span key={chip} className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                {chip}
-              </span>
-            ))
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-md bg-status-warn/15 px-1.5 py-0.5 text-[11px] font-medium text-status-warn">
-              <ShieldCheck className="size-3" />
-              Full access
-            </span>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {row.owner.username ? `Created by ${row.owner.username}` : "Owner deleted"} · {formatDate(row.createdAt)}
-          {" · "}
-          {row.lastUsedAt ? `last used ${formatRelative(row.lastUsedAt)}` : "never used"}
-          {row.expiresAt && !expired ? ` · expires ${formatDate(row.expiresAt)}` : ""}
-          {row.expiresAt && expired ? ` · expired ${formatDate(row.expiresAt)}` : ""}
-        </p>
+    <div
+      role="listitem"
+      className={cn("relative grid gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-2 lg:items-start lg:gap-5", KEY_COLUMNS)}
+    >
+      {/* Only an expired key carries a rail: it's the one state that needs attention. */}
+      {expired ? <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-status-error" /> : null}
+      <div className="min-w-0 pl-1 sm:col-span-2 lg:col-span-1">
+        <p className="truncate font-display text-[17px] font-semibold leading-tight">{row.name}</p>
+        <p className="truncate font-mono text-[12.5px] text-muted-foreground">{row.tokenPrefix}••••</p>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="shrink-0 self-start text-muted-foreground hover:text-destructive"
-        onClick={onRevoke}
-      >
-        <Trash2 className="size-3.5" />
-        Revoke
-      </Button>
+      <KeyField label="Access">
+        {chips.length ? (
+          <span className="whitespace-normal">{chips.join(", ")}</span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 font-medium text-status-warn">
+            <ShieldCheck className="size-3.5" aria-hidden />
+            Full access
+          </span>
+        )}
+      </KeyField>
+      <KeyField label="Created">
+        <span className="tabular-nums">{formatDate(row.createdAt)}</span>
+        <span className="block truncate text-[13px] text-muted-foreground">
+          {row.owner.username ? `by ${row.owner.username}` : "Owner deleted"}
+        </span>
+      </KeyField>
+      <KeyField label="Last used">
+        {row.lastUsedAt ? (
+          <span className="tabular-nums">{formatRelative(row.lastUsedAt)}</span>
+        ) : (
+          <span className="text-muted-foreground">Never</span>
+        )}
+      </KeyField>
+      <KeyField label="Expires">
+        {!row.expiresAt ? (
+          <span className="text-muted-foreground">Never</span>
+        ) : expired ? (
+          <span className="font-medium text-status-error">
+            Expired <span className="tabular-nums">{formatDate(row.expiresAt)}</span>
+          </span>
+        ) : (
+          <span className="tabular-nums">{formatDate(row.expiresAt)}</span>
+        )}
+      </KeyField>
+      <div className="flex items-center pl-1 lg:w-[6.5rem] lg:justify-end lg:pl-0">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-destructive"
+          aria-label={`Revoke ${row.name}`}
+          onClick={onRevoke}
+        >
+          <Trash2 className="size-3.5" />
+          Revoke
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A field in a key row. Its label is visible only when the row wraps (below lg), where there's no column legend. */
+function KeyField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0 pl-1 text-sm lg:pl-0">
+      <p className="text-[12px] text-muted-foreground lg:sr-only">{label}</p>
+      <div className="min-w-0 truncate">{children}</div>
     </div>
   );
 }
@@ -419,12 +447,12 @@ function AccessChoice({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "rounded-lg border px-3 py-2.5 text-left transition-colors",
+        "rounded-md border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         active ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40",
       )}
     >
       <span className="block text-sm font-medium">{title}</span>
-      <span className="block text-xs text-muted-foreground">{hint}</span>
+      <span className="block text-[13px] text-muted-foreground">{hint}</span>
     </button>
   );
 }
@@ -448,7 +476,7 @@ function Segmented({
           aria-checked={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "rounded px-2 py-1 text-xs transition-colors",
+            "rounded-sm px-2 py-1 text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
             value === option.value
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground",

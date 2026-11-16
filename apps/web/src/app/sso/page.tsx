@@ -16,10 +16,10 @@ export default function SsoPage() {
   }, []);
 
   return (
-    <div className="flex min-h-full flex-col items-center justify-center bg-background px-4">
-      <Loader2 className="size-8 animate-spin text-primary" aria-hidden />
-      <p className="mt-4 text-sm text-muted-foreground" role="status" aria-live="polite">
-        We&apos;re trying to sign you in...
+    <div className="flex min-h-full items-center justify-center bg-background px-4">
+      <p className="flex items-center gap-2.5 text-sm text-muted-foreground" role="status" aria-live="polite">
+        <Loader2 className="size-4 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
+        Signing you in…
       </p>
     </div>
   );

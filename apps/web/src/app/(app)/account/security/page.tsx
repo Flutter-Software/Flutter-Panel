@@ -6,13 +6,13 @@ import { Box, Center, Group, PasswordInput, Progress, Text } from "@mantine/core
 import { PASSWORD_MIN_LENGTH } from "@flutter-software/shared";
 import { useAuth } from "@/components/auth-provider";
 import { TwoFactorCard } from "@/components/two-factor-card";
-import { Button, Card } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { api } from "@/lib/api";
-import { SettingsSection } from "../settings-nav";
+import { SettingsFooter, SettingsMessage, SettingsPanel, SettingsRow, SettingsSection } from "../settings-nav";
 
 function PasswordRequirement({ meets, label }: { meets: boolean; label: string }) {
   return (
-    <Text component="div" c={meets ? "teal" : "red"} mt={5} size="sm">
+    <Text component="div" c={meets ? "var(--status-running)" : "var(--muted-foreground)"} mt={4} size="13px">
       <Center inline>
         {meets ? <Check size={14} strokeWidth={1.5} /> : <X size={14} strokeWidth={1.5} />}
         <Box ml={7}>{label}</Box>
@@ -22,10 +22,10 @@ function PasswordRequirement({ meets, label }: { meets: boolean; label: string }
 }
 
 const requirements = [
-  { re: /[0-9]/, label: "Includes number" },
-  { re: /[a-z]/, label: "Includes lowercase letter" },
-  { re: /[A-Z]/, label: "Includes uppercase letter" },
-  { re: /[$&+,:;=?@#|'<>.^*()%!-]/, label: "Includes special symbol" },
+  { re: /[0-9]/, label: "A number" },
+  { re: /[a-z]/, label: "A lowercase letter" },
+  { re: /[A-Z]/, label: "An uppercase letter" },
+  { re: /[$&+,:;=?@#|'<>.^*()%!-]/, label: "A symbol, such as ! or #" },
 ];
 
 function getStrength(password: string) {
@@ -47,7 +47,9 @@ export default function AccountSecurityPage() {
   const [passwordFocused, setPasswordFocused] = useState(false);
 
   const strength = getStrength(password);
-  const strengthColor = strength > 80 ? "teal" : strength > 50 ? "yellow" : "red";
+  // Status colours, so the meter reads like the rest of the panel's meters.
+  const strengthColor =
+    strength > 80 ? "var(--status-running)" : strength > 50 ? "var(--status-warn)" : "var(--status-error)";
   const showRequirements = passwordFocused || password.length > 0;
 
   async function onResetPassword(event: FormEvent<HTMLFormElement>) {
@@ -55,7 +57,7 @@ export default function AccountSecurityPage() {
     setError(null);
     setSuccess(null);
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError("The two new passwords don't match. Type the same password in both boxes.");
       return;
     }
     setPending(true);
@@ -67,7 +69,7 @@ export default function AccountSecurityPage() {
       setCurrentPassword("");
       setPassword("");
       setConfirmPassword("");
-      setSuccess("Password updated. Other signed-in sessions have been signed out.");
+      setSuccess("Password changed. Your other sessions were signed out.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reset password");
     } finally {
@@ -76,84 +78,88 @@ export default function AccountSecurityPage() {
   }
 
   return (
-    <SettingsSection title="Security" description="Password and two-factor authentication for this account.">
+    <SettingsSection title="Security" description="Your password and two-factor authentication.">
       {/* Marker read by globals.css to hide the scrollbar of the shared <main>. */}
       <span hidden data-hide-page-scrollbar />
-      <Card className="p-5 sm:p-6">
-        <h3 className="text-sm font-semibold">Reset password</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Choose a new password for this account. You will stay signed in here.
-        </p>
-        <form className="mt-4 space-y-4" onSubmit={(event) => void onResetPassword(event)}>
-          <PasswordInput
-            label="Current password"
-            required
-            autoComplete="current-password"
-            value={currentPassword}
-            onChange={(event) => setCurrentPassword(event.currentTarget.value)}
-          />
-          <div>
-            <PasswordInput
-              label="New password"
-              required
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.currentTarget.value)}
-              onFocus={() => setPasswordFocused(true)}
-              onBlur={() => setPasswordFocused(false)}
-              minLength={PASSWORD_MIN_LENGTH}
-            />
-            {showRequirements ? (
-              <>
-                <Group gap={5} grow mt="xs" mb="md">
-                  {Array(4)
-                    .fill(0)
-                    .map((_, index) => (
-                      <Progress
-                        styles={{ section: { transitionDuration: "0ms" } }}
-                        value={
-                          password.length > 0 && index === 0
-                            ? 100
-                            : strength >= ((index + 1) / 4) * 100
-                              ? 100
-                              : 0
-                        }
-                        color={strengthColor}
-                        key={index}
-                        size={4}
-                        aria-label={`Password strength segment ${index + 1}`}
+      <form onSubmit={(event) => void onResetPassword(event)}>
+        <SettingsPanel>
+          <SettingsRow
+            title="Change password"
+            description="You stay signed in here. Every other session is signed out."
+          >
+            <div className="space-y-4">
+              <PasswordInput
+                label="Current password"
+                required
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.currentTarget.value)}
+              />
+              <div>
+                <PasswordInput
+                  label="New password"
+                  required
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.currentTarget.value)}
+                  onFocus={() => setPasswordFocused(true)}
+                  onBlur={() => setPasswordFocused(false)}
+                  minLength={PASSWORD_MIN_LENGTH}
+                />
+                {showRequirements ? (
+                  <>
+                    <Group gap={5} grow mt="xs" mb="md">
+                      {Array(4)
+                        .fill(0)
+                        .map((_, index) => (
+                          <Progress
+                            styles={{ section: { transitionDuration: "0ms" } }}
+                            value={
+                              password.length > 0 && index === 0
+                                ? 100
+                                : strength >= ((index + 1) / 4) * 100
+                                  ? 100
+                                  : 0
+                            }
+                            color={strengthColor}
+                            key={index}
+                            size={4}
+                            aria-label={`Password strength segment ${index + 1}`}
+                          />
+                        ))}
+                    </Group>
+                    <p className="text-[13px] text-muted-foreground">A strong password has:</p>
+                    <PasswordRequirement
+                      label={`At least ${PASSWORD_MIN_LENGTH} characters`}
+                      meets={password.length >= PASSWORD_MIN_LENGTH}
+                    />
+                    {requirements.map((requirement) => (
+                      <PasswordRequirement
+                        key={requirement.label}
+                        label={requirement.label}
+                        meets={requirement.re.test(password)}
                       />
                     ))}
-                </Group>
-                <PasswordRequirement
-                  label={`Has at least ${PASSWORD_MIN_LENGTH} characters`}
-                  meets={password.length >= PASSWORD_MIN_LENGTH}
-                />
-                {requirements.map((requirement) => (
-                  <PasswordRequirement
-                    key={requirement.label}
-                    label={requirement.label}
-                    meets={requirement.re.test(password)}
-                  />
-                ))}
-              </>
-            ) : null}
-          </div>
-          <PasswordInput
-            label="Confirm new password"
-            required
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.currentTarget.value)}
-            minLength={PASSWORD_MIN_LENGTH}
-          />
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          {success ? <p className="text-sm text-status-running">{success}</p> : null}
-          <Button type="submit" disabled={pending}>
-            {pending ? "Updating…" : "Reset password"}
-          </Button>
-        </form>
-      </Card>
+                  </>
+                ) : null}
+              </div>
+              <PasswordInput
+                label="Confirm new password"
+                required
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.currentTarget.value)}
+                minLength={PASSWORD_MIN_LENGTH}
+              />
+            </div>
+          </SettingsRow>
+          <SettingsFooter message={<SettingsMessage error={error} success={success} />}>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Changing password…" : "Change password"}
+            </Button>
+          </SettingsFooter>
+        </SettingsPanel>
+      </form>
       <TwoFactorCard enabled={Boolean(user?.totpEnabled)} onUser={setUser} />
     </SettingsSection>
   );

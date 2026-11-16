@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { formatCompact, type ServerRecord } from "@/lib/types";
 import { cn } from "@/lib/cn";
-import { statusMeta, statusPillClass } from "@/components/status";
+import { LedRail, statusMeta } from "@/components/status";
 import { prefetchQuery } from "@/lib/query";
 import { serverHomeHref } from "@/lib/access";
 
@@ -68,161 +68,110 @@ export function serverAttention(server: ServerRecord) {
   return score;
 }
 
-export function ServerCard({ server }: { server: ServerRecord }) {
-  const meta = statusMeta(server.status);
-  const nodeLabel = server.nodeLocation ? `${server.node} · ${server.nodeLocation}` : server.node;
-  const cpuPct = cpuPercent(server);
-  const ramPct = ramPercent(server);
-  const diskPct = diskPercent(server);
-  const alerts = serverAlerts(server);
+/**
+ * One server as a rack row (DESIGN.md → Layout grammar → Rack).
+ *
+ *   ▌● Survival      us-east-1 (nyc)   play.example:25565   CPU ▂▂  RAM ▂▂▂  Disk ▂   Running
+ *     Paper
+ *
+ * The LED rail on the left edge is the status; everything else stays quiet.
+ * On narrow screens the columns wrap under the name.
+ */
+export const SERVER_RACK_COLUMNS =
+  "lg:grid lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.2fr)_repeat(3,5.75rem)_7rem] lg:items-center lg:gap-5";
 
+/** Column legend shown above the rows on wide screens, so the numbers read like a table. */
+export function ServerRackHeader() {
   return (
-    <Link
-      href={serverHomeHref(server)}
-      onMouseEnter={() => prefetchQuery(`/api/v1/client/servers/${server.id}`)}
-      onFocus={() => prefetchQuery(`/api/v1/client/servers/${server.id}`)}
-      className="block rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/40"
+    <div
+      aria-hidden
+      className={cn("hidden px-4 py-2 text-[12px] text-muted-foreground", SERVER_RACK_COLUMNS)}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-[15px] font-semibold">{server.name}</p>
-          <p className="mt-0.5 truncate text-sm text-muted-foreground">{server.egg}</p>
-        </div>
-        <span
-          className={cn(
-            "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium",
-            statusPillClass(server.status),
-          )}
-        >
-          <span className={cn("size-1.5 rounded-full", meta.bar)} />
-          {meta.label}
-        </span>
-      </div>
-
-      {alerts.length ? (
-        <ul className="mt-3 space-y-1">
-          {alerts.map((alert) => (
-            <li
-              key={alert.text}
-              className={cn(
-                "text-xs font-medium",
-                alert.tone === "error" ? "text-status-error" : "text-status-warn",
-              )}
-            >
-              {alert.text}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      <dl className="mt-4 space-y-2 text-sm">
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-muted-foreground">Node</dt>
-          <dd className="truncate font-medium">{nodeLabel}</dd>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-muted-foreground">Address</dt>
-          <dd className="truncate font-mono text-xs">{server.allocation}</dd>
-        </div>
-      </dl>
-
-      <div className="mt-4 grid grid-cols-3 gap-4 border-t border-border pt-4">
-        <Metric label="CPU" value={`${Math.round(server.cpu.used)}%`} pct={cpuPct} bar={usageBar(cpuPct, "bg-primary")} />
-        <Metric
-          label="RAM"
-          value={formatCompact(server.memory.usedMb)}
-          pct={ramPct}
-          bar={usageBar(ramPct, "bg-status-running")}
-        />
-        <Metric
-          label="DISK"
-          value={formatCompact(server.disk.usedMb)}
-          pct={diskPct}
-          bar={usageBar(diskPct, "bg-status-warn")}
-        />
-      </div>
-    </Link>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  pct,
-  bar,
-}: {
-  label: string;
-  value: string;
-  pct: number;
-  bar: string;
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-1 text-[11px]">
-        <span className="font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-        <span className="tabular-nums text-foreground">{value}</span>
-      </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full", bar)} style={{ width: `${pct}%` }} />
-      </div>
+      <span className="pl-1">Server</span>
+      <span>Node</span>
+      <span>Address</span>
+      <span>CPU</span>
+      <span>Memory</span>
+      <span>Disk</span>
+      <span>Status</span>
     </div>
   );
 }
 
-export function ServerTable({ servers }: { servers: ServerRecord[] }) {
+export function ServerCard({ server }: { server: ServerRecord }) {
+  const meta = statusMeta(server.status);
+  const cpuPct = cpuPercent(server);
+  const ramPct = ramPercent(server);
+  const diskPct = diskPercent(server);
+  const alerts = serverAlerts(server);
+  const live = server.status === "running";
+
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th className="px-4 py-2.5 font-medium">Server</th>
-            <th className="px-4 py-2.5 font-medium">Egg</th>
-            <th className="px-4 py-2.5 font-medium">Node</th>
-            <th className="px-4 py-2.5 font-medium">Network</th>
-            <th className="px-4 py-2.5 font-medium">Resources</th>
-          </tr>
-        </thead>
-        <tbody>
-          {servers.map((server) => {
-            const meta = statusMeta(server.status);
-            const nodeLabel = server.nodeLocation
-              ? `${server.node} · ${server.nodeLocation}`
-              : server.node;
-            const alerts = serverAlerts(server);
-            return (
-              <tr key={server.id} className="border-t border-border hover:bg-muted/40">
-                <td className="px-4 py-3">
-                  <Link
-                    href={serverHomeHref(server)}
-                    onMouseEnter={() => prefetchQuery(`/api/v1/client/servers/${server.id}`)}
-                    className="font-medium hover:text-primary"
-                  >
-                    {server.name}
-                  </Link>
-                  <div className={cn("mt-0.5 text-xs", meta.className)}>{meta.label}</div>
-                  {alerts.length ? (
-                    <p
-                      className={cn(
-                        "mt-0.5 text-xs",
-                        alerts[0]?.tone === "error" ? "text-status-error" : "text-status-warn",
-                      )}
-                    >
-                      {alerts.map((alert) => alert.text).join(" · ")}
-                    </p>
-                  ) : null}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{server.egg}</td>
-                <td className="px-4 py-3 text-muted-foreground">{nodeLabel}</td>
-                <td className="px-4 py-3 font-mono text-xs">{server.allocation}</td>
-                <td className="px-4 py-3 text-xs text-muted-foreground">
-                  CPU {Math.round(server.cpu.used)}% · {formatCompact(server.memory.usedMb)} ·{" "}
-                  {formatCompact(server.disk.usedMb)} disk
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <Link
+      role="listitem"
+      href={serverHomeHref(server)}
+      onMouseEnter={() => prefetchQuery(`/api/v1/client/servers/${server.id}`)}
+      onFocus={() => prefetchQuery(`/api/v1/client/servers/${server.id}`)}
+      className={cn(
+        "relative flex flex-col gap-2 px-4 py-3.5 outline-none hover:bg-muted/45 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        SERVER_RACK_COLUMNS,
+      )}
+    >
+      <LedRail status={server.status} />
+
+      <div className="min-w-0 pl-1">
+        <p className="truncate font-display text-[18px] font-semibold leading-tight">{server.name}</p>
+        <p className="truncate text-[13px] text-muted-foreground">{server.egg}</p>
+        {alerts.length ? (
+          <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            {alerts.map((alert) => (
+              <li
+                key={alert.text}
+                className={cn(
+                  "text-[12px] font-medium",
+                  alert.tone === "error" ? "text-status-error" : "text-status-warn",
+                )}
+              >
+                {alert.text}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      <p className="min-w-0 truncate pl-1 text-[13px] lg:pl-0">
+        {server.node}
+        {server.nodeLocation ? <span className="ml-1.5 text-muted-foreground">({server.nodeLocation})</span> : null}
+      </p>
+      <p className="min-w-0 truncate pl-1 font-mono text-[12.5px] text-muted-foreground lg:pl-0">{server.allocation}</p>
+
+      <div className="grid grid-cols-3 gap-4 pl-1 lg:contents">
+        <Meter label="CPU" value={live ? `${Math.round(server.cpu.used)}%` : "Off"} pct={live ? cpuPct : 0} />
+        <Meter label="Memory" value={live ? formatCompact(server.memory.usedMb) : "Off"} pct={live ? ramPct : 0} />
+        <Meter label="Disk" value={formatCompact(server.disk.usedMb)} pct={diskPct} />
+      </div>
+
+      <p className={cn("hidden items-center gap-2 text-[13px] font-medium lg:flex", meta.className)}>
+        {meta.label}
+      </p>
+      {/* Small screens: status word next to the name instead of its own column. */}
+      <p className={cn("absolute right-4 top-3.5 text-[13px] font-medium lg:hidden", meta.className)}>{meta.label}</p>
+    </Link>
+  );
+}
+
+/** A usage figure with a thin meter underneath. The meter warns at 80% and 90%. */
+function Meter({ label, value, pct }: { label: string; value: string; pct: number }) {
+  const tone = pct >= 90 ? "bg-status-error" : pct >= 80 ? "bg-status-warn" : "bg-foreground/45";
+  return (
+    <div className="min-w-0">
+      <p className="flex items-baseline justify-between gap-2 text-[13px] tabular-nums">
+        <span className="text-muted-foreground lg:sr-only">{label}</span>
+        <span>{value}</span>
+      </p>
+      <span className="mt-1.5 block h-[3px] bg-border" aria-hidden>
+        <span className={cn("block h-full", tone)} style={{ width: `${pct}%` }} />
+      </span>
     </div>
   );
 }

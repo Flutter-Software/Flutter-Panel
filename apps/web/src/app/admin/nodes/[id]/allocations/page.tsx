@@ -6,9 +6,11 @@ import { Plus, Trash2 } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { useAdminNode } from "@/components/node-frame";
 import { confirm } from "@/components/confirm-dialog";
-import { Button, ButtonLink, Card } from "@/components/ui";
+import { Button, ButtonLink, EmptyState, Rack } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
+
+const COLUMNS = "md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]";
 
 export default function NodeAllocationsPage() {
   const { node, reload } = useAdminNode();
@@ -23,7 +25,7 @@ export default function NodeAllocationsPage() {
     if (
       !(await confirm({
         title: "Remove allocation",
-        description: `Remove ${label}?`,
+        description: `Remove ${label} from this node? Servers will no longer be able to use it.`,
         confirmLabel: "Remove",
       }))
     ) {
@@ -35,17 +37,18 @@ export default function NodeAllocationsPage() {
       await api(`/api/v1/admin/nodes/${nodeId}/allocations/${id}`, { method: "DELETE" });
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not remove allocation");
+      setError(err instanceof Error ? err.message : "Couldn't remove the allocation. Refresh the page; a server may have claimed it.");
     } finally {
       setRemovingId(null);
     }
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          {used} assigned / {node.allocations.length} total
+          <span className="tabular-nums text-foreground">{used}</span> in use,{" "}
+          <span className="tabular-nums text-foreground">{node.allocations.length - used}</span> free
         </p>
         <ButtonLink href={`/admin/nodes/${node.id}/allocations/new`} size="sm">
           <Plus className="size-3.5" />
@@ -54,42 +57,36 @@ export default function NodeAllocationsPage() {
       </div>
       <AdminError message={error} />
       {node.allocations.length ? (
-        <Card className="overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_1fr_auto] gap-x-4 border-b border-border px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div>
+          {/* Column legend for wide screens; rows wrap into labelled lines below md. */}
+          <div aria-hidden className={cn("hidden px-4 py-2 text-[12px] text-muted-foreground md:grid md:gap-5", COLUMNS)}>
             <span>Address</span>
             <span>Alias</span>
             <span>Server</span>
-            <span className="text-right">Status</span>
+            <span className="w-[7.5rem]" />
           </div>
-          <ul className="divide-y divide-border">
+          <Rack label="Allocations">
             {node.allocations.map((row) => (
-              <li
+              <div
                 key={row.id}
-                className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-x-4 px-4 py-2.5 text-sm"
+                role="listitem"
+                className={cn("relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm md:gap-x-5", COLUMNS)}
               >
-                <span className="font-mono text-xs">
+                <span className="min-w-0 truncate font-mono text-[13px]">
                   {row.ip}:{row.port}
                 </span>
-                <span className="text-xs text-muted-foreground">{row.alias || "—"}</span>
-                <span className="truncate">
-                  {row.serverId ? (
-                    <Link href={`/admin/servers/${row.serverId}`} className="text-primary hover:underline">
-                      {row.serverName || row.serverId}
-                    </Link>
-                  ) : (
-                    <span className="text-muted-foreground">Unassigned</span>
-                  )}
-                </span>
-                <span className="inline-flex items-center justify-end gap-2">
+                <span className="row-span-3 flex items-center justify-end gap-2 md:order-last md:row-span-1 md:w-[7.5rem]">
                   <span
                     className={cn(
-                      "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                      row.assigned ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+                      "text-[13px] font-medium",
+                      row.assigned ? "text-foreground" : "text-status-running",
                     )}
                   >
                     {row.assigned ? "In use" : "Free"}
                   </span>
-                  {row.assigned ? null : (
+                  {row.assigned ? (
+                    <span className="size-8" aria-hidden />
+                  ) : (
                     <Button
                       type="button"
                       size="sm"
@@ -103,14 +100,27 @@ export default function NodeAllocationsPage() {
                     </Button>
                   )}
                 </span>
-              </li>
+                <span className={cn("min-w-0 truncate text-[13px] text-muted-foreground", !row.alias && "hidden md:block")}>
+                  {row.alias ? <span className="font-mono text-[12.5px]">{row.alias}</span> : "No alias"}
+                </span>
+                <span className="min-w-0 truncate">
+                  {row.serverId ? (
+                    <Link href={`/admin/servers/${row.serverId}`} className="text-primary hover:underline">
+                      {row.serverName || row.serverId}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground">Not assigned</span>
+                  )}
+                </span>
+              </div>
             ))}
-          </ul>
-        </Card>
+          </Rack>
+        </div>
       ) : (
-        <Card className="px-4 py-10 text-center text-sm text-muted-foreground">
-          No allocations yet. Add an IP and port range to place servers on this node.
-        </Card>
+        <EmptyState
+          title="No allocations yet"
+          description="Add an IP and a port range so servers on this node have somewhere to listen."
+        />
       )}
     </div>
   );

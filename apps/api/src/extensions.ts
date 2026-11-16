@@ -304,6 +304,7 @@ export async function extensionsForServer(serverId: string, viewerId: string, ad
       id: manifest.id,
       name: manifest.name,
       version: manifest.version,
+      author: manifest.author,
       icon: manifest.icon,
       permissions: manifest.permissions,
       pages: manifest.contributes.serverPages
@@ -400,10 +401,12 @@ function wasmBootstrap(glueUrl: string, wasmUrl: string) {
 }
 
 /**
- * HTML page for a script or wasm entry. Loads the SDK and gives the code a
- * `#root` to render into.
+ * HTML page for a script, Svelte or wasm entry. Loads the SDK and gives the
+ * code a `#root` to render into.
  *  - Scripts (`.tsx`, `.ts`, `.jsx`, `.js`, `.mjs`) are requested with
  *    `?build=1` so they're bundled even when plain `.js`.
+ *  - `.svelte` entries are requested with `?build=1` too, which bundles a
+ *    wrapper that mounts the component into `#root`.
  *  - `.wasm` entries are started through their wasm-bindgen glue module.
  */
 export async function renderExtensionPage(id: string, pageId: string) {
@@ -465,11 +468,14 @@ export async function readExtensionAsset(id: string, relPath: string, options: {
   if (!info?.isFile()) throw FlutterError.notFound("Asset not found");
   if (info.size > MAX_ASSET_BYTES) throw FlutterError.validation("Asset is too large");
 
-  // TypeScript/JSX always compiles; plain JS only when a generated page asks for a bundle.
+  // TypeScript/JSX/Svelte always compiles; plain JS only when a generated page asks for a bundle.
   const compiled = EXTENSION_COMPILED_PATTERN.test(target) || (options.build && /\.m?js$/i.test(target));
   if (compiled) {
+    // A generated page (`?build=1`) loading a .svelte entry needs it mounted;
+    // a .svelte file imported any other way stays a plain component module.
+    const mode = options.build && /\.svelte$/i.test(target) ? "mount" : "module";
     return {
-      body: Buffer.from(await compileExtensionModule(extension.dir, target), "utf8"),
+      body: Buffer.from(await compileExtensionModule(extension.dir, target, mode), "utf8"),
       contentType: "text/javascript; charset=utf-8",
     };
   }

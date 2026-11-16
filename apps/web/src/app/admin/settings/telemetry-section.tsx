@@ -67,7 +67,7 @@ export function TelemetrySection({
         footer={
           locked ? (
             <span>
-              Turned off by <code className="font-mono text-xs text-foreground">TELEMETRY_DISABLED</code> on the
+              Turned off by <code className="font-mono text-[12.5px] text-foreground">TELEMETRY_DISABLED</code> on the
               panel host.
             </span>
           ) : (
@@ -107,7 +107,7 @@ export function TelemetrySection({
 function List({ title, items, icon }: { title: string; items: string[]; icon: ReactNode }) {
   return (
     <div>
-      <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</p>
+      <p className="mb-2 text-[13px] font-medium text-foreground">{title}</p>
       <ul className="space-y-2 text-sm">
         {items.map((line) => (
           <li key={line} className="flex gap-2.5">

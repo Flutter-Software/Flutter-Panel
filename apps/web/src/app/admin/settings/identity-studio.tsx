@@ -65,7 +65,7 @@ export function IdentityStudio({
             placeholder="Panel name"
             error={siteName.trim() ? undefined : "A panel name is required."}
             rightSection={
-              <span className="pr-2 text-[11px] tabular-nums text-muted-foreground">
+              <span className="pr-2 text-[12px] tabular-nums text-muted-foreground">
                 {siteName.length}/{SITE_NAME_MAX_LENGTH}
               </span>
             }
@@ -88,14 +88,14 @@ export function IdentityStudio({
               if (file) onFile(file);
             }}
             className={cn(
-              "flex items-center gap-4 rounded-lg border border-dashed p-3 transition-colors",
-              dragging ? "border-primary bg-primary/10" : "border-border",
+              "flex items-center gap-4 rounded-md border border-dashed p-3 transition-colors",
+              dragging ? "border-primary bg-primary/10" : "border-input",
             )}
           >
             <img
               src={previewSrc}
               alt="Current logo"
-              className="size-14 shrink-0 rounded-lg border border-border bg-background object-contain p-1.5"
+              className="size-14 shrink-0 rounded-md border border-border bg-well object-contain p-1.5"
             />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap gap-2">
@@ -121,13 +121,13 @@ export function IdentityStudio({
                   </Button>
                 ) : null}
               </div>
-              <p className="mt-1.5 truncate text-xs text-muted-foreground">
+              <p className="mt-1.5 truncate text-[13px] text-muted-foreground">
                 {pendingFileName ? (
                   <>
                     Selected <span className="text-foreground">{pendingFileName}</span>
                   </>
                 ) : (
-                  "or drop an image here"
+                  "Or drop an image here."
                 )}
               </p>
             </div>
@@ -163,7 +163,7 @@ export function IdentityStudio({
             leftSection={<span className="font-mono text-xs text-muted-foreground">[</span>}
             rightSection={<span className="font-mono text-xs text-muted-foreground">]</span>}
           />
-          <code className="block truncate rounded-md border border-border bg-background px-3 py-2 font-mono text-xs">
+          <code className="block truncate rounded-md border border-border bg-well px-3 py-2 font-mono text-xs" aria-label="Console preview">
             <span className="text-status-warn">[{shownTag}]</span>{" "}
             <span className="text-muted-foreground">Server marked as running.</span>
           </code>

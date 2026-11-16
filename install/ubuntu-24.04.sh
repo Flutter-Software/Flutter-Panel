@@ -579,8 +579,14 @@ log "Copying application files"
 if [[ "$(readlink -f "$SOURCE")" == "$(readlink -f "$PREFIX")" ]]; then
   log "Installing in place at ${PREFIX}"
 else
+  # Installed extensions live in extensions/<id>/ and aren't part of the
+  # source tree, so --delete would wipe them on a re-run. Excluded folders are
+  # protected from --delete; extensions/_sdk/ ships with the panel, so it is
+  # still copied (the include must come before the exclude).
   rsync -a \
     --delete \
+    --include '/extensions/_sdk/' \
+    --exclude '/extensions/*/' \
     --exclude 'node_modules/' \
     --exclude '.next/' \
     --exclude 'apps/web/.next/' \

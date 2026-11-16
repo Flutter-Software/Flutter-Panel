@@ -367,6 +367,90 @@ export async function importEgg(body: unknown) {
   return publicEgg(row);
 }
 
+/* -------------------------------------------------------------------------- */
+/*                                   Export                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Pterodactyl and Pelican refuse an egg without an email-shaped `author`, and
+ * Flutter eggs don't record one. `.invalid` is reserved (RFC 2606), so this is
+ * valid syntax that clearly isn't a real address.
+ */
+const EXPORT_AUTHOR = "unknown@flutter.invalid";
+
+/** `My Egg (Paper)` → `my-egg-paper`, for the download's file name. */
+function slugify(name: string) {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "egg"
+  );
+}
+
+/**
+ * The egg as a PTDL_v2 JSON document, the format Pterodactyl and Pelican export
+ * and that `importEgg` reads. Every field maps back through the importer
+ * unchanged, so downloading an egg and importing it into any Flutter panel
+ * gives the same egg; it also imports into Pterodactyl and Pelican.
+ *
+ *   name / description / startup       ↔ same keys
+ *   dockerImage                        ↔ docker_images (first value)
+ *   stopCommand                        ↔ config.stop
+ *   installScript / installImage       ↔ scripts.installation.script / .container
+ *   variables[].key/default/description↔ variables[].env_variable/default_value/description
+ *   requiresAllocation                 ↔ requiresAllocation (Flutter-only; other panels ignore it)
+ */
+export async function exportEgg(id: string) {
+  assertObjectId(id, "Egg");
+  const egg = await Egg.findById(id).lean();
+  if (!egg) throw FlutterError.notFound("Egg not found");
+  const view = publicEgg(egg as unknown as Parameters<typeof publicEgg>[0]);
+
+  const document = {
+    _comment: "Exported from a Flutter panel. Import it in Admin → Nests → Import egg, or into Pterodactyl or Pelican.",
+    meta: { version: "PTDL_v2", update_url: null },
+    exported_at: new Date().toISOString(),
+    name: view.name,
+    author: EXPORT_AUTHOR,
+    description: view.description,
+    features: null,
+    docker_images: { [view.dockerImage]: view.dockerImage },
+    file_denylist: [],
+    startup: view.startup,
+    config: {
+      files: "{}",
+      startup: "{}",
+      logs: "{}",
+      stop: view.stopCommand || "stop",
+    },
+    scripts: {
+      installation: {
+        script: view.installScript,
+        container: view.installImage,
+        entrypoint: "bash",
+      },
+    },
+    variables: view.variables.map((variable) => ({
+      name: variable.description || variable.key,
+      description: variable.description,
+      env_variable: variable.key,
+      default_value: variable.default,
+      user_viewable: true,
+      user_editable: true,
+      rules: "nullable|string",
+      field_type: "text",
+    })),
+    requiresAllocation: view.requiresAllocation,
+  };
+
+  return {
+    body: `${JSON.stringify(document, null, 2)}\n`,
+    fileName: `egg-${slugify(view.name)}.json`,
+  };
+}
+
 async function migrateServerAllocationIndex() {
   try {
     const indexes = await Server.collection.indexes();

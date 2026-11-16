@@ -1,16 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import {
-  Cpu,
-  Folder,
-  Globe,
-  HardDrive,
-  Lock,
-  MemoryStick,
-  ShieldAlert,
-  Upload,
-} from "lucide-react";
+import { Folder, Globe, Lock, ShieldAlert, Upload } from "lucide-react";
 import { AdminError } from "@/components/admin-table";
 import { AdminSection, Switch } from "@/components/admin-create";
 import { useAdminNode } from "@/components/node-frame";
@@ -105,7 +96,7 @@ export default function NodeSettingsPage() {
       });
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      setError(err instanceof Error ? err.message : "Couldn't save the node settings. Check the values below, then try again.");
     } finally {
       setPending(false);
     }
@@ -133,7 +124,7 @@ export default function NodeSettingsPage() {
               {locations.map((location) => (
                 <option key={location.id} value={location.id}>
                   {location.shortCode.toUpperCase()}
-                  {location.description ? ` — ${location.description}` : ""}
+                  {location.description ? ` (${location.description})` : ""}
                 </option>
               ))}
             </Select>
@@ -142,12 +133,13 @@ export default function NodeSettingsPage() {
             <Textarea value={description} onChange={(event) => setDescription(event.target.value)} />
           </Field>
           <Field label="Visibility">
-            <div className="grid grid-cols-2 rounded-lg border border-input bg-input/40 p-0.5">
+            <div role="group" className="grid grid-cols-2 rounded-md border border-input bg-well p-0.5">
               <button
                 type="button"
+                aria-pressed={isPublic}
                 onClick={() => setIsPublic(true)}
                 className={cn(
-                  "inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium",
+                  "inline-flex h-8 items-center justify-center gap-2 rounded-sm text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                   isPublic ? "bg-primary text-primary-foreground" : "text-muted-foreground",
                 )}
               >
@@ -156,9 +148,10 @@ export default function NodeSettingsPage() {
               </button>
               <button
                 type="button"
+                aria-pressed={!isPublic}
                 onClick={() => setIsPublic(false)}
                 className={cn(
-                  "inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium",
+                  "inline-flex h-8 items-center justify-center gap-2 rounded-sm text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                   !isPublic ? "bg-primary text-primary-foreground" : "text-muted-foreground",
                 )}
               >
@@ -171,18 +164,19 @@ export default function NodeSettingsPage() {
             <Input value={fqdn} onChange={(event) => setFqdn(event.target.value)} required />
           </Field>
           <Field label="Connection">
-            <div className="grid grid-cols-2 rounded-lg border border-input bg-input/40 p-0.5">
+            <div role="group" className="grid grid-cols-2 rounded-md border border-input bg-well p-0.5">
               {(["https", "http"] as const).map((value) => (
                 <button
                   key={value}
                   type="button"
+                  aria-pressed={scheme === value}
                   onClick={() => setScheme(value)}
                   className={cn(
-                    "inline-flex h-9 items-center justify-center rounded-md text-sm font-medium",
+                    "inline-flex h-8 items-center justify-center rounded-sm text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                     scheme === value ? "bg-primary text-primary-foreground" : "text-muted-foreground",
                   )}
                 >
-                  {value === "https" ? "SSL" : "HTTP"}
+                  {value === "https" ? "HTTPS" : "HTTP"}
                 </button>
               ))}
             </div>
@@ -190,8 +184,8 @@ export default function NodeSettingsPage() {
           <div className="flex items-start justify-between gap-4 pt-1">
             <div>
               <p className="text-sm">Behind proxy</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Enable when running behind Cloudflare or a reverse proxy.
+              <p className="mt-0.5 text-[13px] text-muted-foreground">
+                Turn on when the daemon sits behind Cloudflare or another reverse proxy.
               </p>
             </div>
             <Switch checked={behindProxy} onChange={setBehindProxy} />
@@ -232,11 +226,11 @@ export default function NodeSettingsPage() {
             </Field>
           </div>
           <Field
-            label="Maximum web upload filesize"
+            label="Largest file upload from the browser"
             hint="Applies to the Files tab for every server on this node."
           >
             <div className="flex items-center gap-2">
-              <Upload className="size-4 text-muted-foreground" />
+              <Upload className="size-4 text-muted-foreground" aria-hidden />
               <UnitInput
                 unit="MB"
                 type="number"
@@ -248,13 +242,13 @@ export default function NodeSettingsPage() {
               />
             </div>
           </Field>
-          <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
+          <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
             <div>
               <p className="inline-flex items-center gap-2 text-sm font-medium">
-                <ShieldAlert className="size-4 text-status-warn" />
+                <ShieldAlert className="size-4 text-status-warn" aria-hidden />
                 Maintenance mode
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-0.5 text-[13px] text-muted-foreground">
                 Users still see their servers, but opening one shows a maintenance screen. Admins can still manage them.
               </p>
             </div>
@@ -264,7 +258,7 @@ export default function NodeSettingsPage() {
       </div>
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : "Save settings"}
+          {pending ? "Saving…" : "Save changes"}
         </Button>
       </div>
     </form>

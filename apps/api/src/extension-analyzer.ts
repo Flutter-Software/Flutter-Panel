@@ -41,7 +41,7 @@ const MAX_FILES = 5_000;
 const MAX_FINDINGS_PER_RULE_FILE = 3;
 const MAX_FINDINGS = 200;
 
-const TEXT_EXT = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".mts", ".html", ".htm", ".rs", ".css"]);
+const TEXT_EXT = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".mts", ".svelte", ".html", ".htm", ".rs", ".css"]);
 const LANGUAGE: Record<string, string> = {
   ".ts": "TypeScript",
   ".tsx": "TypeScript",
@@ -50,6 +50,7 @@ const LANGUAGE: Record<string, string> = {
   ".mjs": "JavaScript",
   ".cjs": "JavaScript",
   ".jsx": "JavaScript",
+  ".svelte": "Svelte",
   ".html": "HTML",
   ".htm": "HTML",
   ".css": "CSS",
@@ -94,7 +95,7 @@ const LINE_RULES: LineRule[] = [
     detail:
       "eval / new Function / string timers execute text as code. What runs can differ from what you reviewed, and it's a common way to hide behaviour.",
     pattern: /\beval\s*\(|\bnew\s+Function\s*\(|\bset(?:Timeout|Interval)\s*\(\s*["'`]/,
-    only: [".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".mts", ".html", ".htm"],
+    only: [".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".mts", ".svelte", ".html", ".htm"],
   },
   {
     rule: "remote-script",

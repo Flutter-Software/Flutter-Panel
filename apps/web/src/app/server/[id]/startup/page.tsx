@@ -2,7 +2,7 @@
 
 import { use, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { Field, Input } from "@/components/ui";
+import { Card, EmptyState, Field, Input, Rack } from "@/components/ui";
 import { SaveButton } from "@/components/save-button";
 import { useServerRecord } from "@/components/server-frame";
 import { api } from "@/lib/api";
@@ -118,32 +118,33 @@ export default function StartupPage({ params }: { params: Promise<{ id: string }
     return <p className="text-sm text-destructive">{loadError}</p>;
   }
 
+  const canEdit = can(server, "startup.update");
+
   return (
-    <form onSubmit={onSave} className="space-y-4">
+    <form onSubmit={onSave} className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold">Startup</h2>
+        <h2 className="text-[20px] font-semibold">Startup</h2>
         <p className="text-sm text-muted-foreground">
-          Docker image and startup come from the egg. Environment changes apply the next time the server starts.
+          The Docker image and startup command come from the egg. Variable changes apply the next time the server
+          starts.
         </p>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Process</p>
+      <Card className="max-w-[72ch] space-y-3 p-4">
+        <h3 className="text-[16px] font-semibold">Process</h3>
         <Field label="Docker image">
-          <Input value={server?.dockerImage || "—"} disabled className="font-mono" />
+          <Input value={server?.dockerImage || "None"} disabled className="font-mono" />
         </Field>
         <div className="space-y-1.5">
           <p className="text-sm">Startup command</p>
           {startupTemplate ? (
             <>
-              <p className="rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs text-muted-foreground">
+              <p className="break-all rounded-md border border-border bg-well px-3 py-2 font-mono text-[12.5px] text-muted-foreground">
                 {startupTemplate}
               </p>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Preview
-              </p>
-              <p className="whitespace-pre-wrap break-all rounded-md border border-border bg-background px-3 py-2 font-mono text-sm">
+              <p className="pt-1 text-[13px] text-muted-foreground">With this server&apos;s values</p>
+              <p className="whitespace-pre-wrap break-all rounded-md border border-border bg-well px-3 py-2 font-mono text-[13px]">
                 {previewParts.map((part, index) =>
                   part.kind === "text" ? (
                     <span key={index}>{part.text}</span>
@@ -166,68 +167,77 @@ export default function StartupPage({ params }: { params: Promise<{ id: string }
         <Field label="Stop command">
           <Input value={server?.stopCommand || "stop"} disabled className="font-mono" />
         </Field>
-      </div>
+      </Card>
 
-      <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Environment
-        </p>
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-[16px] font-semibold">Variables</h3>
+          <p className="text-sm text-muted-foreground">Environment variables the egg passes to the server.</p>
+        </div>
         {variables.length === 0 ? (
-          <p className="text-sm text-muted-foreground">This egg has no variables.</p>
+          <EmptyState title="No variables" description="This egg doesn't define any startup variables." />
         ) : (
-          variables.map((variable) => {
-            const value = values[variable.key] ?? "";
-            const inStartup = startupUsesVariable(startupTemplate, variable.key);
-            const networkReady = !canReadNetwork || networkData !== undefined || Boolean(networkError);
-            const portWarn =
-              networkReady &&
-              isPortVariable(variable.key, variable.description) &&
-              unallocatedPorts(value, allocatedPorts).length > 0;
-            return (
-              <label key={variable.key} className="block space-y-1.5">
-                <span className="flex items-baseline justify-between gap-3">
-                  <span className="font-mono text-sm font-medium">{variable.key}</span>
-                  {inStartup ? (
-                    <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      In startup
-                    </span>
-                  ) : null}
-                </span>
-                {variable.description ? (
-                  <span className="block text-sm text-muted-foreground">{variable.description}</span>
-                ) : null}
-                <Input
-                  value={value}
-                  onChange={(event) => {
-                    setSaved(false);
-                    setValues((current) => ({ ...current, [variable.key]: event.target.value }));
-                  }}
-                  className="font-mono"
-                  disabled={!can(server, "startup.update")}
-                  placeholder={variable.default || undefined}
-                />
-                {portWarn ? (
-                  <span className="block text-xs font-medium text-status-warn">
-                    This port isn’t allocated.
-                    {canReadNetwork ? (
-                      <>
-                        {" "}
-                        <Link href={`/server/${id}/network`} className="underline underline-offset-2">
-                          Network
-                        </Link>
-                      </>
+          <Rack label="Variables">
+            {variables.map((variable) => {
+              const value = values[variable.key] ?? "";
+              const inStartup = startupUsesVariable(startupTemplate, variable.key);
+              const networkReady = !canReadNetwork || networkData !== undefined || Boolean(networkError);
+              const portWarn =
+                networkReady &&
+                isPortVariable(variable.key, variable.description) &&
+                unallocatedPorts(value, allocatedPorts).length > 0;
+              const inputId = `startup-var-${variable.key}`;
+              return (
+                <div
+                  key={variable.key}
+                  role="listitem"
+                  className="grid gap-2 px-4 py-3.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:gap-6"
+                >
+                  <div className="min-w-0">
+                    <label htmlFor={inputId} className="flex flex-wrap items-baseline gap-x-3">
+                      <span className="break-all font-mono text-[13px] font-medium">{variable.key}</span>
+                      {inStartup ? <span className="text-[12px] text-muted-foreground">Used in startup</span> : null}
+                    </label>
+                    {variable.description ? (
+                      <p className="mt-0.5 text-[13px] text-muted-foreground">{variable.description}</p>
                     ) : null}
-                  </span>
-                ) : null}
-              </label>
-            );
-          })
+                  </div>
+                  <div className="min-w-0 space-y-1 md:self-center">
+                    <Input
+                      id={inputId}
+                      value={value}
+                      onChange={(event) => {
+                        setSaved(false);
+                        setValues((current) => ({ ...current, [variable.key]: event.target.value }));
+                      }}
+                      className="font-mono"
+                      disabled={!canEdit}
+                      placeholder={variable.default || undefined}
+                    />
+                    {portWarn ? (
+                      <p className="text-[13px] font-medium text-status-warn">
+                        This port isn&apos;t allocated to the server.
+                        {canReadNetwork ? (
+                          <>
+                            {" "}
+                            <Link href={`/server/${id}/network`} className="underline underline-offset-2">
+                              Check Network
+                            </Link>
+                          </>
+                        ) : null}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </Rack>
         )}
-      </div>
+      </section>
 
       <div className="flex items-center gap-3">
-        <SaveButton pending={pending} saved={saved} disabled={variables.length === 0 || !can(server, "startup.update")}>
-          Save environment
+        <SaveButton pending={pending} saved={saved} disabled={variables.length === 0 || !canEdit}>
+          Save variables
         </SaveButton>
       </div>
     </form>

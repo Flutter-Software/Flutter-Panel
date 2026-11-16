@@ -2,15 +2,18 @@
 
 import { useCallback } from "react";
 import Link from "next/link";
-import { MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { AdminPage } from "@/components/admin-table";
 import { AdminLocationsPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { confirm } from "@/components/confirm-dialog";
-import { Button, ButtonLink, Card } from "@/components/ui";
+import { Button, ButtonLink, EmptyState, Rack } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import type { LocationRecord } from "../location-form";
+
+const COLUMNS = "md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)_minmax(0,0.5fr)_auto]";
 
 export default function AdminLocationsPage({ skeletonCount }: { skeletonCount?: number }) {
   const { data, error, errorStatus, reload } = useQuery<{ data: { locations: LocationRecord[] } }>(
@@ -23,7 +26,7 @@ export default function AdminLocationsPage({ skeletonCount }: { skeletonCount?: 
       if (
         !(await confirm({
           title: "Delete location",
-          description: `Delete ${location.shortCode}? This cannot be undone.`,
+          description: `Delete ${location.shortCode}? This can't be undone.`,
           confirmLabel: "Delete",
         }))
       ) {
@@ -66,53 +69,66 @@ export default function AdminLocationsPage({ skeletonCount }: { skeletonCount?: 
       }
     >
       {rows.length === 0 ? (
-        <Card className="px-6 py-16 text-center">
-          <p className="text-base font-semibold">No locations yet</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Create a location first, then add nodes to it.
-          </p>
-        </Card>
+        <EmptyState
+          title="No locations yet"
+          description="Create a location for each region or datacenter, then add nodes to it."
+        />
       ) : (
-        <div className="space-y-4">
-          {rows.map((location) => (
-            <Card key={location.id} className="p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <Link
-                  href={`/admin/locations/${location.id}`}
-                  onMouseEnter={() => prefetchQuery(`/api/v1/admin/locations/${location.id}`)}
-                  className="min-w-0"
+        <div>
+          {/* Column legend for wide screens; rows wrap into labelled lines below md. */}
+          <div aria-hidden className={cn("hidden px-4 py-2 text-[12px] text-muted-foreground md:grid md:gap-5", COLUMNS)}>
+            <span className="pl-1">Location</span>
+            <span>Description</span>
+            <span>Nodes</span>
+            <span className="w-[7.5rem]" />
+          </div>
+          <Rack label="Locations">
+            {rows.map((location) => {
+              const nodes = location.nodeCount ?? 0;
+              return (
+                <div
+                  key={location.id}
+                  role="listitem"
+                  className={cn("relative grid gap-2 px-4 py-3 md:items-center md:gap-5", COLUMNS)}
                 >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <MapPin className="size-4 text-muted-foreground" />
-                    <span className="font-mono text-base font-semibold">{location.shortCode}</span>
-                    <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                      {location.nodeCount ?? 0} node{(location.nodeCount ?? 0) === 1 ? "" : "s"}
-                    </span>
+                  <div className="min-w-0 pl-1">
+                    <Link
+                      href={`/admin/locations/${location.id}`}
+                      onMouseEnter={() => prefetchQuery(`/api/v1/admin/locations/${location.id}`)}
+                      className="truncate font-display text-[17px] font-semibold leading-tight hover:text-primary"
+                    >
+                      {location.shortCode}
+                    </Link>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  <p className="min-w-0 truncate pl-1 text-sm text-muted-foreground md:pl-0">
                     {location.description || "No description"}
                   </p>
-                </Link>
-                <div className="flex shrink-0 items-center gap-2">
-                  <ButtonLink href={`/admin/locations/${location.id}`} variant="secondary" size="sm">
-                    <Pencil className="size-3.5" />
-                    Edit
-                  </ButtonLink>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="size-8 px-0 text-muted-foreground hover:text-destructive"
-                    aria-label={`Delete ${location.shortCode}`}
-                    disabled={Boolean(location.nodeCount)}
-                    onClick={() => onDelete(location)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
+                  <p className="pl-1 text-sm text-muted-foreground md:pl-0">
+                    <span className="tabular-nums text-foreground">{nodes}</span>{" "}
+                    {nodes === 1 ? "node" : "nodes"}
+                  </p>
+                  <div className="flex items-center gap-1.5 pl-1 md:w-[7.5rem] md:justify-end md:pl-0">
+                    <ButtonLink href={`/admin/locations/${location.id}`} variant="secondary" size="sm">
+                      <Pencil className="size-3.5" />
+                      Edit
+                    </ButtonLink>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="size-8 px-0 text-muted-foreground hover:text-destructive"
+                      aria-label={`Delete ${location.shortCode}`}
+                      title={nodes ? "Move this location's nodes elsewhere before deleting it" : undefined}
+                      disabled={Boolean(location.nodeCount)}
+                      onClick={() => onDelete(location)}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </Card>
-          ))}
+              );
+            })}
+          </Rack>
         </div>
       )}
     </AdminPage>

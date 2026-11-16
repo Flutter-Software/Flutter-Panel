@@ -11,19 +11,21 @@
 
 import { FileCode, Globe, ScanSearch, ShieldAlert, ShieldCheck, ShieldQuestion, Terminal, FilePen } from "lucide-react";
 import type { ExtensionAnalysis, ExtensionFinding, ExtensionFindingSeverity } from "@flutter-software/shared";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
+// Risk and severity are status text: coloured words (and a rail on findings), no pill backgrounds.
 const RISK = {
-  low: { label: "Low risk", className: "bg-status-running/15 text-status-running", icon: ShieldCheck },
-  medium: { label: "Review advised", className: "bg-status-warn/15 text-status-warn", icon: ShieldQuestion },
-  high: { label: "High risk", className: "bg-status-error/15 text-status-error", icon: ShieldAlert },
+  low: { label: "Low risk", className: "text-status-running", icon: ShieldCheck },
+  medium: { label: "Review advised", className: "text-status-warn", icon: ShieldQuestion },
+  high: { label: "High risk", className: "text-status-error", icon: ShieldAlert },
 } as const;
 
-const SEVERITY: Record<ExtensionFindingSeverity, { label: string; className: string }> = {
-  high: { label: "High", className: "bg-status-error/15 text-status-error" },
-  medium: { label: "Medium", className: "bg-status-warn/15 text-status-warn" },
-  low: { label: "Low", className: "bg-muted text-muted-foreground" },
-  info: { label: "Info", className: "bg-status-info/15 text-status-info" },
+const SEVERITY: Record<ExtensionFindingSeverity, { label: string; className: string; rail: string }> = {
+  high: { label: "High", className: "text-status-error", rail: "bg-status-error" },
+  medium: { label: "Medium", className: "text-status-warn", rail: "bg-status-warn" },
+  low: { label: "Low", className: "text-muted-foreground", rail: "bg-status-offline/50" },
+  info: { label: "Info", className: "text-status-info", rail: "bg-status-info" },
 };
 
 function countIssues(analysis: ExtensionAnalysis) {
@@ -48,13 +50,13 @@ export function RiskBadge({ analysis, onClick }: { analysis: ExtensionAnalysis |
       onClick={onClick}
       title="View code scan report"
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-opacity hover:opacity-80",
+        "inline-flex items-center gap-1 rounded-md text-[13px] font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         risk.className,
       )}
     >
-      <Icon className="size-3" />
+      <Icon className="size-3.5" />
       {risk.label}
-      {issues ? ` · ${issues}` : ""}
+      {issues ? `, ${issues} issue${issues === 1 ? "" : "s"}` : ""}
     </button>
   );
 }
@@ -63,12 +65,12 @@ function Chips({ icon: Icon, label, values, mono = true }: { icon: typeof Globe;
   if (!values.length) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1 text-[13px] text-muted-foreground">
         <Icon className="size-3.5" />
         {label}
       </span>
       {values.map((value) => (
-        <span key={value} className={cn("rounded-md border border-border px-1.5 py-0.5 text-[11px]", mono && "font-mono")}>
+        <span key={value} className={cn("rounded-md border border-border px-1.5 py-0.5 text-[12px]", mono && "font-mono")}>
           {value}
         </span>
       ))}
@@ -79,21 +81,22 @@ function Chips({ icon: Icon, label, values, mono = true }: { icon: typeof Globe;
 function FindingRow({ finding }: { finding: ExtensionFinding }) {
   const severity = SEVERITY[finding.severity];
   return (
-    <li className="space-y-1 px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase", severity.className)}>{severity.label}</span>
+    <li className="relative space-y-1 px-4 py-3">
+      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", severity.rail)} />
+      <div className="flex flex-wrap items-baseline gap-x-3">
         <span className="text-sm font-medium">{finding.title}</span>
+        <span className={cn("text-[13px] font-medium", severity.className)}>{severity.label}</span>
       </div>
-      <p className="text-xs text-muted-foreground">{finding.detail}</p>
+      <p className="text-[13px] text-muted-foreground">{finding.detail}</p>
       {finding.file ? (
-        <p className="inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+        <p className="inline-flex items-center gap-1 font-mono text-[12px] text-muted-foreground">
           <FileCode className="size-3" />
           {finding.file}
           {finding.line ? `:${finding.line}` : ""}
         </p>
       ) : null}
       {finding.snippet ? (
-        <pre className="overflow-x-auto rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[11px]">
+        <pre className="overflow-x-auto rounded-md border border-border bg-well px-2 py-1.5 font-mono text-[12px]">
           {finding.snippet}
         </pre>
       ) : null}
@@ -108,7 +111,7 @@ function FindingRow({ finding }: { finding: ExtensionFinding }) {
 export function AnalysisSummary({ analysis, onOpenReport }: { analysis: ExtensionAnalysis | null; onOpenReport: () => void }) {
   if (!analysis) {
     return (
-      <p className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
+      <p className="border-l-2 border-status-warn pl-3 text-[13px] text-muted-foreground">
         The code scan didn&apos;t run for this extension. Review its files manually before enabling.
       </p>
     );
@@ -117,14 +120,15 @@ export function AnalysisSummary({ analysis, onOpenReport }: { analysis: Extensio
   const Icon = risk.icon;
   const issues = analysis.findings.filter((finding) => finding.severity !== "info");
   return (
-    <div className="space-y-2 rounded-lg border border-border p-3">
+    // A seam-topped section of the dialog rather than a box inside it.
+    <div className="space-y-2 border-t border-border pt-4">
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-sm font-medium">
           <ScanSearch className="size-4 text-muted-foreground" />
           Code scan
         </span>
-        <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium", risk.className)}>
-          <Icon className="size-3" />
+        <span className={cn("inline-flex items-center gap-1 text-[13px] font-medium", risk.className)}>
+          <Icon className="size-3.5" />
           {risk.label}
         </span>
       </div>
@@ -132,10 +136,10 @@ export function AnalysisSummary({ analysis, onOpenReport }: { analysis: Extensio
       <Chips icon={Terminal} label="Commands" values={analysis.commands} />
       <Chips icon={FilePen} label="Writes" values={analysis.writes} />
       {issues.length ? (
-        <ul className="space-y-1 text-xs">
+        <ul className="space-y-1 text-[13px]">
           {issues.slice(0, 4).map((finding, index) => (
-            <li key={`${finding.rule}-${index}`} className="flex gap-1.5">
-              <span className={cn("mt-0.5 shrink-0 rounded px-1 text-[9px] font-semibold uppercase", SEVERITY[finding.severity].className)}>
+            <li key={`${finding.rule}-${index}`} className="flex gap-2">
+              <span className={cn("w-14 shrink-0 font-medium", SEVERITY[finding.severity].className)}>
                 {SEVERITY[finding.severity].label}
               </span>
               <span>
@@ -152,9 +156,13 @@ export function AnalysisSummary({ analysis, onOpenReport }: { analysis: Extensio
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-muted-foreground">No issues found in {analysis.stats.files} files.</p>
+        <p className="text-[13px] text-muted-foreground">No issues found in {analysis.stats.files} files.</p>
       )}
-      <button type="button" className="text-xs font-medium text-primary hover:underline" onClick={onOpenReport}>
+      <button
+        type="button"
+        className="rounded-md text-[13px] font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        onClick={onOpenReport}
+      >
         View full report
       </button>
     </div>
@@ -167,18 +175,22 @@ export function AnalysisReport({ analysis }: { analysis: ExtensionAnalysis }) {
   const Icon = risk.icon;
   return (
     <div className="space-y-4 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium", risk.className)}>
-          <Icon className="size-3.5" />
-          {risk.label}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {analysis.stats.files} files · {formatBytes(analysis.stats.bytes)}
-          {analysis.stats.languages.length ? ` · ${analysis.stats.languages.join(", ")}` : ""}
-          {analysis.stats.skipped ? ` · ${analysis.stats.skipped} skipped` : ""} · scanned{" "}
-          {new Date(analysis.analyzedAt).toLocaleString()}
-        </span>
-      </div>
+      <p className={cn("inline-flex items-center gap-1.5 font-medium", risk.className)}>
+        <Icon className="size-4" />
+        {risk.label}
+      </p>
+      {/* Scan facts as labelled fields, not a dot-joined meta string. */}
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+        <ScanFact label="Files">
+          {analysis.stats.files}
+          {analysis.stats.skipped ? <span className="text-muted-foreground"> ({analysis.stats.skipped} skipped)</span> : null}
+        </ScanFact>
+        <ScanFact label="Size">{formatBytes(analysis.stats.bytes)}</ScanFact>
+        <ScanFact label="Languages">
+          {analysis.stats.languages.length ? analysis.stats.languages.join(", ") : "None found"}
+        </ScanFact>
+        <ScanFact label="Scanned">{new Date(analysis.analyzedAt).toLocaleString()}</ScanFact>
+      </dl>
 
       <div className="space-y-1.5">
         <Chips icon={Globe} label="Contacts" values={analysis.domains} />
@@ -187,20 +199,33 @@ export function AnalysisReport({ analysis }: { analysis: ExtensionAnalysis }) {
       </div>
 
       {analysis.findings.length ? (
-        <ul className="divide-y divide-border rounded-lg border border-border">
+        // Findings as a rack: one row per finding, a severity rail on its left edge.
+        <ul aria-label="Findings" className="divide-y divide-border overflow-hidden rounded-lg border border-border">
           {analysis.findings.map((finding, index) => (
             <FindingRow key={`${finding.rule}-${finding.file ?? ""}-${finding.line ?? index}`} finding={finding} />
           ))}
         </ul>
       ) : (
-        <p className="rounded-lg border border-border px-3 py-6 text-center text-muted-foreground">Nothing to report.</p>
+        <p className="rounded-lg border border-dashed border-input px-4 py-6 text-muted-foreground">
+          Nothing to report. The scan found no risky patterns in these files.
+        </p>
       )}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[13px] text-muted-foreground">
         This is an automated, pattern-based scan of the extension&apos;s source. It can miss things and flag harmless
         code. Dependencies in <code className="font-mono">node_modules</code> and build folders aren&apos;t scanned.
         Whatever the result, extensions stay sandboxed and limited to the permissions you approve.
       </p>
+    </div>
+  );
+}
+
+/** One labelled scan fact in the report header. */
+function ScanFact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[12px] text-muted-foreground">{label}</dt>
+      <dd className="truncate tabular-nums">{children}</dd>
     </div>
   );
 }

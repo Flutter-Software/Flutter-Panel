@@ -2,11 +2,11 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "@/components/auth-provider";
-import { Button, Card, Field, Input } from "@/components/ui";
+import { Badge, Button, Input } from "@/components/ui";
 import { UserAvatar } from "@/components/user-avatar";
 import { api } from "@/lib/api";
 import type { PublicUser } from "@flutter-software/shared";
-import { SettingsSection } from "./settings-nav";
+import { SettingsFooter, SettingsMessage, SettingsPanel, SettingsRow, SettingsSection } from "./settings-nav";
 
 function initialsFromEmail(email: string) {
   const local = (email.split("@")[0] ?? "").replace(/[^a-zA-Z]/g, "");
@@ -38,7 +38,7 @@ export default function AccountProfilePage() {
         body: JSON.stringify({ username, email }),
       });
       setUser(result.data.user);
-      setSuccess("Profile saved.");
+      setSuccess("Changes saved.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save profile");
     } finally {
@@ -49,65 +49,62 @@ export default function AccountProfilePage() {
   const initials = initialsFromEmail(user?.email ?? email);
 
   return (
-    <SettingsSection title="Profile" description="Manage the identity attached to your Flutter account.">
-      <Card className="p-5 sm:p-6">
-        <h3 className="text-sm font-semibold">Identity</h3>
-        <div className="mt-5 flex items-center gap-4">
-          <UserAvatar
-            user={user}
-            initials={initials}
-            size="lg"
-            editable
-            onChanged={(next) => {
-              setUser(next);
-              setError(null);
-            }}
-            onError={setError}
-          />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate font-medium text-primary">{(user?.username ?? username) || "—"}</p>
-              {user?.role === "admin" ? (
-                <span className="rounded-md bg-primary px-1.5 py-0.5 text-[11px] font-semibold text-primary-foreground">
-                  admin
-                </span>
-              ) : null}
+    <SettingsSection title="Profile" description="Your name, email and picture as other people on this panel see them.">
+      <form onSubmit={(event) => void onSave(event)}>
+        <SettingsPanel>
+          <SettingsRow title="Picture" description="Shown next to your name in the panel. Click it to change it.">
+            <div className="flex items-center gap-4">
+              <UserAvatar
+                user={user}
+                initials={initials}
+                size="lg"
+                editable
+                onChanged={(next) => {
+                  setUser(next);
+                  setError(null);
+                }}
+                onError={setError}
+              />
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-2">
+                  <span className="truncate font-display text-[20px] font-semibold leading-tight">
+                    {(user?.username ?? username) || "No name set"}
+                  </span>
+                  {user?.role === "admin" ? <Badge>Admin</Badge> : null}
+                </p>
+                <p className="mt-0.5 truncate text-sm text-muted-foreground">{(user?.email ?? email) || "No email set"}</p>
+              </div>
             </div>
-            <p className="mt-0.5 truncate text-sm text-muted-foreground">{(user?.email ?? email) || "—"}</p>
-          </div>
-        </div>
-        <form className="mt-6 space-y-5" onSubmit={(event) => void onSave(event)}>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Display name">
-              <Input
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="Your name"
-                autoComplete="username"
-                required
-                minLength={3}
-                maxLength={32}
-              />
-            </Field>
-            <Field label="Email">
-              <Input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                autoComplete="email"
-                required
-              />
-            </Field>
-          </div>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          {success ? <p className="text-sm text-status-running">{success}</p> : null}
-          <div className="flex justify-end">
+          </SettingsRow>
+          <SettingsRow title="Display name" description="3 to 32 characters. You can also sign in with it.">
+            <Input
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="Your name"
+              autoComplete="username"
+              aria-label="Display name"
+              required
+              minLength={3}
+              maxLength={32}
+            />
+          </SettingsRow>
+          <SettingsRow title="Email" description="Used to sign in and for panel emails.">
+            <Input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
+              aria-label="Email"
+              required
+            />
+          </SettingsRow>
+          <SettingsFooter message={<SettingsMessage error={error} success={success} />}>
             <Button type="submit" disabled={pending}>
               {pending ? "Saving…" : "Save changes"}
             </Button>
-          </div>
-        </form>
-      </Card>
+          </SettingsFooter>
+        </SettingsPanel>
+      </form>
     </SettingsSection>
   );
 }

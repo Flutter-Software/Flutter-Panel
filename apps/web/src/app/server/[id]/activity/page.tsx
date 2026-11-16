@@ -28,7 +28,7 @@ import {
   type ActivityActorKind,
   type ActivityCategory,
 } from "@flutter-software/shared";
-import { Card, EmptyState, Input, Modal, Select } from "@/components/ui";
+import { buttonClass, EmptyState, Input, Modal, Rack, Select } from "@/components/ui";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { useServerRecord } from "@/components/server-frame";
 import { api, HttpError } from "@/lib/api";
@@ -211,7 +211,7 @@ function stackFileWrites(events: ActivityEvent[]) {
 function DiffCounts({ added, removed }: { added: number; removed: number }) {
   if (!added && !removed) return null;
   return (
-    <span className="font-mono">
+    <span className="font-mono text-[12px] tabular-nums">
       {added ? <span className="text-status-running">+{added}</span> : null}
       {added && removed ? " " : null}
       {removed ? <span className="text-destructive">−{removed}</span> : null}
@@ -253,7 +253,7 @@ function FileActionGlyph({ event, snapshot }: { event: ActivityEvent; snapshot?:
 function Glyph({ event, snapshot }: { event: ActivityEvent; snapshot?: FileSnapshot }) {
   const fileEvent = event.event.startsWith("file.");
   return (
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground">
+    <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
       {fileEvent ? (
         <FileActionGlyph event={event} snapshot={snapshot} />
       ) : (
@@ -296,7 +296,7 @@ function DiffPreview({ snapshot }: { snapshot: FileSnapshot }) {
     return <p className="text-sm text-muted-foreground">Saved with no changes.</p>;
   }
   return (
-    <pre className="overflow-x-auto rounded-lg border border-border bg-background font-mono text-[12px] leading-5">
+    <pre className="overflow-x-auto rounded-lg border border-border bg-well font-mono text-[12px] leading-5">
       {rows.map((row) =>
         row.kind === "hunk" ? (
           <div key={row.key} className="border-y border-border/70 bg-muted/40 px-3 py-1 text-[10px] text-muted-foreground">
@@ -322,9 +322,8 @@ function DiffPreview({ snapshot }: { snapshot: FileSnapshot }) {
 
 function Meta({ event, extra }: { event: ActivityEvent; extra?: ReactNode }) {
   return (
-    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+    <span className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13px] text-muted-foreground">
       <span>{actorLabel(event)}</span>
-      <span aria-hidden="true">·</span>
       <time dateTime={event.createdAt} title={new Date(event.createdAt).toLocaleString()}>
         {timeLabel(event.createdAt)}
       </time>
@@ -346,7 +345,6 @@ function FileStack({
   const enterTimer = useRef(0);
   const leaveTimer = useRef(0);
   const items = orderedSnapshots(event);
-  const depth = Math.min(stackCount(event) - 1, 2);
   const path = fileNameOf(event);
   const top = items[0];
 
@@ -410,38 +408,25 @@ function FileStack({
           }
           if (top) onOpen({ event, snapshot: top });
         }}
-        className="no-press relative z-[1] flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-muted"
+        className="no-press relative z-[1] flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted"
       >
-        <span className="relative">
-          <Glyph event={event} snapshot={top} />
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold leading-none text-background">
-            {stackCount(event)}
-          </span>
-        </span>
+        <Glyph event={event} snapshot={top} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">{event.title}</span>
           <Meta
             event={event}
             extra={
               <>
-                <span aria-hidden="true">·</span>
-                <span>{stackCount(event)} saves</span>
+                <span className="tabular-nums">{stackCount(event)} saves</span>
                 <DiffCounts added={num(event.properties.added)} removed={num(event.properties.removed)} />
               </>
             }
           />
         </span>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        <ChevronRight
+          className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
+        />
       </button>
-
-      {depth > 0 && !expanded ? (
-        <div aria-hidden className="pointer-events-none relative z-0 -mt-px px-2.5">
-          <div className="h-1.5 rounded-b-xl border border-t-0 border-border bg-card" />
-          {depth > 1 ? (
-            <div className="mx-2.5 -mt-px h-1.5 rounded-b-xl border border-t-0 border-border/70 bg-muted" />
-          ) : null}
-        </div>
-      ) : null}
 
       <div
         className={cn(
@@ -455,7 +440,7 @@ function FileStack({
             role="list"
             inert={!expanded}
             aria-label={`${stackCount(event)} saves`}
-            className="mt-1 overflow-hidden rounded-xl border border-border bg-card"
+            className="border-t border-border bg-well"
           >
             {items.map((snapshot, index) => (
               <button
@@ -463,21 +448,16 @@ function FileStack({
                 type="button"
                 role="listitem"
                 onClick={() => onOpen({ event, snapshot })}
-                className="no-press flex w-full items-center gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-muted"
+                className="no-press flex w-full items-center gap-3 border-b border-border py-2.5 pl-12 pr-4 text-left last:border-b-0 hover:bg-muted"
               >
                 <Glyph event={event} snapshot={snapshot} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">
                     {snapshotLabel(snapshot)} {path ? baseName(path) : "file"}
                   </span>
-                  <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                  <span className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[13px] text-muted-foreground">
                     <span>{actorLabel(event)}</span>
-                    {snapshot.at ? (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <time dateTime={snapshot.at}>{timeLabel(snapshot.at)}</time>
-                      </>
-                    ) : null}
+                    {snapshot.at ? <time dateTime={snapshot.at}>{timeLabel(snapshot.at)}</time> : null}
                     <DiffCounts added={snapshot.added} removed={snapshot.removed} />
                   </span>
                 </span>
@@ -519,14 +499,14 @@ function ActivityRow({
       <button
         type="button"
         onClick={() => onOpen({ event, snapshot })}
-        className="no-press flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-muted"
+        className="no-press flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted"
       >
         {row}
       </button>
     );
   }
 
-  return <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">{row}</div>;
+  return <div className="flex items-center gap-3 px-4 py-3">{row}</div>;
 }
 
 export default function ActivityPage({ params }: { params: Promise<{ id: string }> }) {
@@ -604,7 +584,7 @@ export default function ActivityPage({ params }: { params: Promise<{ id: string 
   if (server && !canRead) {
     return (
       <div className="space-y-1">
-        <h2 className="text-lg font-semibold">Activity</h2>
+        <h2 className="text-[20px] font-semibold">Activity</h2>
         <p className="text-sm text-muted-foreground">You do not have permission to view activity on this server.</p>
       </div>
     );
@@ -617,7 +597,7 @@ export default function ActivityPage({ params }: { params: Promise<{ id: string 
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Activity</h2>
+          <h2 className="text-[20px] font-semibold">Activity</h2>
           <p className="text-sm text-muted-foreground">A log of who changed this server.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -626,7 +606,8 @@ export default function ActivityPage({ params }: { params: Promise<{ id: string 
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search"
+              placeholder="Search activity"
+              aria-label="Search activity"
               className="h-9 pl-9"
             />
           </div>
@@ -657,17 +638,17 @@ export default function ActivityPage({ params }: { params: Promise<{ id: string 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       {loading && events.length === 0 ? (
-        <div className="space-y-2">
+        <Rack label="Loading activity">
           {Array.from({ length: 6 }).map((_, index) => (
-            <Card key={index} className="flex items-center gap-3 px-4 py-3">
-              <div className="size-8 shrink-0 rounded-lg bg-muted" />
+            <div key={index} role="listitem" className="flex items-center gap-3 px-4 py-3">
+              <div className="size-5 shrink-0 rounded-md bg-muted" />
               <div className="min-w-0 flex-1 space-y-2">
                 <div className="h-3.5 w-1/2 rounded bg-muted" />
                 <div className="h-3 w-1/4 rounded bg-muted" />
               </div>
-            </Card>
+            </div>
           ))}
-        </div>
+        </Rack>
       ) : events.length === 0 ? (
         <EmptyState
           title={category || actor || search ? "No matching activity" : "Nothing yet"}
@@ -680,19 +661,19 @@ export default function ActivityPage({ params }: { params: Promise<{ id: string 
       ) : (
         <div className="space-y-6">
           {groups.map((group) => (
-            <section key={group.key} className="space-y-2">
-              <h3 className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {group.label}
-              </h3>
-              <div className="space-y-2">
-                {group.events.map((event) =>
-                  isWriteStack(event) ? (
-                    <FileStack key={event.id} event={event} onOpen={setOpen} />
-                  ) : (
-                    <ActivityRow key={event.id} event={event} onOpen={setOpen} />
-                  ),
-                )}
-              </div>
+            <section key={group.key} className="space-y-1.5">
+              <h3 className="text-[13px] font-medium text-muted-foreground">{group.label}</h3>
+              <Rack label={group.label}>
+                {group.events.map((event) => (
+                  <div key={event.id} role="listitem">
+                    {isWriteStack(event) ? (
+                      <FileStack event={event} onOpen={setOpen} />
+                    ) : (
+                      <ActivityRow event={event} onOpen={setOpen} />
+                    )}
+                  </div>
+                ))}
+              </Rack>
             </section>
           ))}
           {cursor ? (
@@ -708,7 +689,7 @@ export default function ActivityPage({ params }: { params: Promise<{ id: string 
                   })
                   .finally(() => setLoadingMore(false));
               }}
-              className="w-full rounded-xl border border-border py-2.5 text-sm text-muted-foreground hover:bg-muted/40 disabled:opacity-50"
+              className={buttonClass({ variant: "secondary", className: "w-full text-muted-foreground" })}
             >
               {loadingMore ? "Loading…" : "Older activity"}
             </button>
@@ -722,19 +703,19 @@ export default function ActivityPage({ params }: { params: Promise<{ id: string 
         title={path ? baseName(path) : open?.event.title || "File change"}
         description={
           open && snapshot
-            ? `${actorLabel(open.event)} · ${snapshotLabel(snapshot)} · ${new Date(snapshot.at || open.event.createdAt).toLocaleString()}${
+            ? `${snapshotLabel(snapshot)} by ${actorLabel(open.event)}, ${new Date(snapshot.at || open.event.createdAt).toLocaleString()}${
                 snapshot.added || snapshot.removed
-                  ? ` · ${snapshot.added ? `+${snapshot.added}` : ""}${snapshot.added && snapshot.removed ? " " : ""}${snapshot.removed ? `−${snapshot.removed}` : ""}`
+                  ? `  ${snapshot.added ? `+${snapshot.added}` : ""}${snapshot.added && snapshot.removed ? " " : ""}${snapshot.removed ? `−${snapshot.removed}` : ""}`
                   : ""
               }`
             : undefined
         }
         className="max-w-4xl"
       >
-        {snapshot?.created ? <p className="mb-3 text-xs font-medium text-muted-foreground">New file</p> : null}
+        {snapshot?.created ? <p className="mb-3 text-[13px] font-medium text-muted-foreground">New file</p> : null}
         {snapshot ? <DiffPreview snapshot={snapshot} /> : null}
         {snapshot?.truncated ? (
-          <p className="mt-3 text-xs text-muted-foreground">Showing a shortened preview of a larger change.</p>
+          <p className="mt-3 text-[13px] text-muted-foreground">Showing a shortened preview of a larger change.</p>
         ) : null}
       </Modal>
     </div>

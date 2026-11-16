@@ -237,7 +237,7 @@ export function UpdatesSection({ onStatus }: { onStatus?: (status: UpdateStatus)
           }
         >
           If the panel didn&apos;t come back on its own, run{" "}
-          <code className="font-mono text-xs">sudo /usr/local/sbin/flutter-restart</code> on the host.
+          <code className="font-mono text-[12.5px]">sudo /usr/local/sbin/flutter-restart</code> on the host.
         </Banner>
       ) : null}
       {finished && job.state === "failed" ? (
@@ -247,11 +247,13 @@ export function UpdatesSection({ onStatus }: { onStatus?: (status: UpdateStatus)
       ) : null}
 
       {/* ---- Status ---------------------------------------------------------- */}
-      <Card className="overflow-hidden">
+      {/* The panel install is a unit with a status, so it carries the LED rail (DESIGN.md). */}
+      <Card className="relative overflow-hidden">
+        <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", statusTone(status, running, checking).rail)} />
         <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:px-6">
           <StatusIcon status={status} running={running} checking={checking} />
           <div className="min-w-0 flex-1">
-            <h3 className="font-semibold">{headline(status, running, checking)}</h3>
+            <h3 className="text-[16px] font-semibold">{headline(status, running, checking)}</h3>
             <p className="mt-0.5 text-sm text-muted-foreground">{subline(status, running)}</p>
           </div>
           {!running ? (
@@ -280,8 +282,8 @@ export function UpdatesSection({ onStatus }: { onStatus?: (status: UpdateStatus)
             <Fact label="Installed" value={`v${status.version}`} detail={status.currentShortSha || "unknown revision"} />
             <Fact
               label="Latest"
-              value={status.latest.shortSha || "—"}
-              detail={status.latest.date ? timeAgo(status.latest.date) : status.latest.message || "—"}
+              value={status.latest.shortSha || "Unknown"}
+              detail={status.latest.date ? timeAgo(status.latest.date) : status.latest.message || "No details"}
               link={status.latest.url || undefined}
             />
             <Fact label="Branch" value={status.ref} detail={status.repo} />
@@ -289,7 +291,7 @@ export function UpdatesSection({ onStatus }: { onStatus?: (status: UpdateStatus)
         ) : null}
 
         {status?.blockedReason ? (
-          <div className="flex items-start gap-2 border-t border-border bg-status-warn/10 px-5 py-3 text-sm text-status-warn sm:px-6">
+          <div className="flex items-start gap-2 border-t border-border bg-status-warn/10 px-5 py-3 text-sm text-status-warn sm:px-6" role="note">
             <CircleAlert className="mt-0.5 size-4 shrink-0" />
             <span>{status.blockedReason}</span>
           </div>
@@ -356,6 +358,14 @@ function subline(status: UpdateStatus | null, running: boolean) {
   return `v${status.version} is the latest build on ${status.ref}.`;
 }
 
+/** Colour of the install's state: `text` for the icon, `rail` for the left-edge LED rail. */
+function statusTone(status: UpdateStatus | null, running: boolean, checking: boolean) {
+  if (running || (checking && !status)) return { text: "text-status-info", rail: "bg-status-info" };
+  if (status?.updateAvailable) return { text: "text-primary", rail: "bg-primary" };
+  if (status?.checkError || !status) return { text: "text-status-warn", rail: "bg-status-warn" };
+  return { text: "text-status-running", rail: "bg-status-running" };
+}
+
 function StatusIcon({
   status,
   running,
@@ -365,19 +375,16 @@ function StatusIcon({
   running: boolean;
   checking: boolean;
 }) {
-  const [Icon, tone, spin] =
+  const [Icon, spin] =
     running || (checking && !status)
-      ? [Loader2, "bg-status-info/12 text-status-info", true]
+      ? [Loader2, true]
       : status?.updateAvailable
-        ? [ArrowUpCircle, "bg-primary/12 text-primary", false]
+        ? [ArrowUpCircle, false]
         : status?.checkError || !status
-          ? [CircleAlert, "bg-status-warn/12 text-status-warn", false]
-          : [CheckCircle2, "bg-status-running/12 text-status-running", false];
-  return (
-    <span className={cn("flex size-11 shrink-0 items-center justify-center rounded-full", tone)}>
-      <Icon className={cn("size-5", spin && "animate-spin")} />
-    </span>
-  );
+          ? [CircleAlert, false]
+          : [CheckCircle2, false];
+  // A plain coloured glyph: no tinted circle behind it.
+  return <Icon aria-hidden className={cn("size-6 shrink-0", statusTone(status, running, checking).text, spin && "animate-spin")} />;
 }
 
 /* ---- Pieces ---------------------------------------------------------------------- */
@@ -385,7 +392,7 @@ function StatusIcon({
 function Fact({ label, value, detail, link }: { label: string; value: string; detail: string; link?: string }) {
   return (
     <div className="min-w-0 px-5 py-3.5 sm:px-6">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dt className="text-[13px] text-muted-foreground">{label}</dt>
       <dd className="mt-1 flex items-center gap-1.5 font-mono text-sm font-medium">
         <span className="truncate">{value}</span>
         {link ? (
@@ -400,7 +407,7 @@ function Fact({ label, value, detail, link }: { label: string; value: string; de
           </a>
         ) : null}
       </dd>
-      <dd className="mt-0.5 truncate text-xs text-muted-foreground" title={detail}>
+      <dd className="mt-0.5 truncate text-[13px] text-muted-foreground" title={detail}>
         {detail}
       </dd>
     </div>
@@ -424,16 +431,16 @@ function Progress({ job, applySchema }: { job: UpdateJob; applySchema: boolean }
         <span className="tabular-nums text-muted-foreground">{percent}%</span>
       </div>
       <div
-        className="h-1.5 overflow-hidden rounded-full bg-muted"
+        className="h-[3px] overflow-hidden bg-border"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percent}
         aria-label="Update progress"
       >
-        <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${percent}%` }} />
+        <div className="h-full bg-primary transition-[width] duration-500" style={{ width: `${percent}%` }} />
       </div>
-      {job.activity ? <p className="truncate text-xs text-muted-foreground">{job.activity}</p> : null}
+      {job.activity ? <p className="truncate text-[13px] text-muted-foreground">{job.activity}</p> : null}
       <ol className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
         {phases.map((phase, index) => {
           const state = states[index];
@@ -441,7 +448,7 @@ function Progress({ job, applySchema }: { job: UpdateJob; applySchema: boolean }
             <li
               key={phase.id}
               className={cn(
-                "flex items-center gap-1.5 text-xs",
+                "flex items-center gap-1.5 text-[13px]",
                 state === "pending" && "text-muted-foreground/70",
                 state === "done" && "text-muted-foreground",
                 state === "current" && "font-medium text-foreground",
@@ -492,11 +499,11 @@ function UpdateLog({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left text-sm outline-none transition-colors hover:bg-muted/30 focus-visible:bg-muted/30 sm:px-6"
+        className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left text-sm outline-none transition-colors hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 sm:px-6"
       >
         <span className="font-medium">
           {open ? "Hide log" : "Show log"}
-          <span className="ml-2 font-normal text-muted-foreground">{lines.length} lines</span>
+          <span className="ml-2 font-normal tabular-nums text-muted-foreground">{lines.length} line{lines.length === 1 ? "" : "s"}</span>
         </span>
         <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
@@ -507,12 +514,12 @@ function UpdateLog({
             const el = event.currentTarget;
             stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
           }}
-          className="h-80 overflow-y-auto border-t border-border bg-black px-4 py-3 font-mono text-[12px] leading-5 text-zinc-300"
+          className="h-80 overflow-y-auto border-t border-border bg-black px-4 py-3 font-mono text-[12px] leading-5 text-neutral-300"
         >
           {lines.length ? (
             lines.map((line, index) => <LogLine key={index} line={line} />)
           ) : (
-            <p className="text-zinc-500">Waiting for output…</p>
+            <p className="text-neutral-500">Waiting for output…</p>
           )}
           {running ? <span className="inline-block animate-pulse text-primary">▋</span> : null}
         </div>
@@ -557,10 +564,9 @@ function Banner({
     <div
       role={tone === "error" ? "alert" : "status"}
       className={cn(
-        "flex items-start gap-3 rounded-xl border px-4 py-3 text-sm",
-        tone === "ok"
-          ? "border-status-running/30 bg-status-running/10"
-          : "border-status-error/30 bg-status-error/10",
+        // An inset note (2px rule on the left), not a rounded box.
+        "flex items-start gap-3 border-l-2 px-4 py-3 text-sm",
+        tone === "ok" ? "border-status-running bg-status-running/10" : "border-status-error bg-status-error/10",
       )}
     >
       <Icon className={cn("mt-0.5 size-4 shrink-0", tone === "ok" ? "text-status-running" : "text-status-error")} />
@@ -574,7 +580,7 @@ function Banner({
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss"
-          className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+          className="rounded-md p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           <X className="size-4" />
         </button>

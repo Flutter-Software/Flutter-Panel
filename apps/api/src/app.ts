@@ -957,6 +957,16 @@ export function createApp() {
     await requireAdmin(c);
     return c.json({ data: { egg: await eggs.getEgg(c.req.param("id")) } });
   });
+  // Download an egg as PTDL_v2 JSON (re-importable here, or into Pterodactyl / Pelican).
+  app.get("/admin/eggs/:id/export", async (c) => {
+    await requireAdmin(c);
+    const file = await eggs.exportEgg(c.req.param("id"));
+    return c.body(file.body, 200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${file.fileName}"`,
+      "Cache-Control": "no-store",
+    });
+  });
   app.patch("/admin/eggs/:id", async (c) => {
     await requireAdmin(c);
     return c.json({ data: { egg: await eggs.updateEgg(c.req.param("id"), await c.req.json()) } });

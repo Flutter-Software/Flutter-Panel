@@ -3,9 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AuthBrand } from "@/components/brand";
-import { AuthFooter } from "@/components/auth-footer";
-import { Button, Input } from "@/components/ui";
+import { AuthError, AuthHeading, AuthShell } from "@/components/brand";
+import { Button, Field, Input } from "@/components/ui";
 import { api, type AuthResponse, type SetupResponse } from "@/lib/api";
 
 export default function RegisterPage() {
@@ -27,86 +26,67 @@ export default function RegisterPage() {
   }, [router]);
 
   return (
-    <div className="relative flex min-h-full flex-col items-center justify-center bg-background px-4 py-16">
-      <div className="w-full max-w-[400px]">
-        <AuthBrand className="mb-8" />
+    <AuthShell>
+      <AuthHeading title="Create an account">
+        After you submit, we email you a 6-digit code to confirm the address is yours.
+      </AuthHeading>
 
-        <div className="rounded-xl border border-border bg-card p-8">
-          <h1 className="text-2xl font-semibold tracking-tight">Create an account</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            We&apos;ll email you a 6-digit code to verify it.
-          </p>
+      <form
+        className="mt-8 space-y-5"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setError(null);
+          setPending(true);
+          const form = new FormData(event.currentTarget);
+          try {
+            const result = await api<AuthResponse>("/api/v1/auth/register", {
+              method: "POST",
+              body: JSON.stringify({
+                username: String(form.get("username")),
+                email: String(form.get("email")),
+                password: String(form.get("password")),
+              }),
+            });
+            if (result.data.needsVerification && result.data.email) {
+              router.push(`/verify?email=${encodeURIComponent(result.data.email)}`);
+              return;
+            }
+            router.push("/");
+            router.refresh();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "The account wasn't created. Check the details and try again.");
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        <Field label="Username">
+          <Input name="username" autoComplete="username" required minLength={3} maxLength={32} />
+        </Field>
+        <Field label="Email">
+          <Input name="email" type="email" autoComplete="email" required />
+        </Field>
+        <Field label="Password" hint="At least 10 characters.">
+          <Input
+            name="password"
+            type="password"
+            autoComplete="new-password"
+            required
+            minLength={10}
+          />
+        </Field>
+        {error ? <AuthError>{error}</AuthError> : null}
+        <Button type="submit" className="h-10 w-full" disabled={pending || initialized === null}>
+          {pending ? "Creating account…" : "Create account"}
+        </Button>
+      </form>
 
-          <form
-            className="mt-6 space-y-4"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              setError(null);
-              setPending(true);
-              const form = new FormData(event.currentTarget);
-              try {
-                const result = await api<AuthResponse>("/api/v1/auth/register", {
-                  method: "POST",
-                  body: JSON.stringify({
-                    username: String(form.get("username")),
-                    email: String(form.get("email")),
-                    password: String(form.get("password")),
-                  }),
-                });
-                if (result.data.needsVerification && result.data.email) {
-                  router.push(`/verify?email=${encodeURIComponent(result.data.email)}`);
-                  return;
-                }
-                router.push("/");
-                router.refresh();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Could not create account");
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            <label className="block space-y-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Username
-              </span>
-              <Input name="username" autoComplete="username" required minLength={3} maxLength={32} />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Email
-              </span>
-              <Input name="email" type="email" autoComplete="email" required />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Password
-              </span>
-              <Input
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                required
-                minLength={10}
-                placeholder="At least 10 characters"
-              />
-            </label>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-            <Button type="submit" className="h-11 w-full" disabled={pending || initialized === null}>
-              {pending ? "Creating account…" : "Create account"}
-            </Button>
-          </form>
-
-          <p className="mt-5 text-center text-sm text-muted-foreground">
-            Already have an account?{" "}
-            <Link href="/login" className="font-medium text-primary">
-              Sign in
-            </Link>
-          </p>
-        </div>
-      </div>
-
-      <AuthFooter />
-    </div>
+      <p className="mt-8 border-t border-border pt-5 text-sm text-muted-foreground">
+        Already have an account?{" "}
+        <Link href="/login" className="font-medium text-primary hover:underline">
+          Sign in
+        </Link>
+      </p>
+    </AuthShell>
   );
 }

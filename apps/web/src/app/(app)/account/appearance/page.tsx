@@ -1,26 +1,70 @@
 "use client";
 
-import { LayoutList, Monitor, Moon, PanelTop, Sun } from "lucide-react";
+import type { ComponentType } from "react";
+import { LayoutList, Moon, PanelTop, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Switch } from "@/components/admin-create";
 import { useMotion } from "@/components/motion-provider";
 import { useSmoothTheme } from "@/components/theme-provider";
-import { Card } from "@/components/ui";
 import { setPowerLayout, usePowerLayout } from "@/components/use-power-layout";
 import { cn } from "@/lib/cn";
-import { SettingsSection } from "../settings-nav";
+import { SettingsPanel, SettingsRow, SettingsSection } from "../settings-nav";
 
 const THEMES = [
-  { id: "dark", label: "Dark", icon: Moon, hint: "Default for the panel." },
-  { id: "light", label: "Light", icon: Sun, hint: "Brighter surfaces and text." },
+  { id: "dark", label: "Dark", icon: Moon, hint: "Graphite surfaces. The default." },
+  { id: "light", label: "Light", icon: Sun, hint: "Pale surfaces, dark text." },
 ] as const;
 
 // No "system" option — ThemeProvider has enableSystem={false}.
 
 const POWER_LAYOUTS = [
-  { id: "standard", label: "Standard Power Actions", icon: LayoutList, hint: "Labeled buttons above the console." },
-  { id: "header", label: "Header Power Actions", icon: PanelTop, hint: "Icon buttons in the server header, on every server page." },
+  { id: "standard", label: "Above the console", icon: LayoutList, hint: "Labelled Start, Restart and Stop buttons." },
+  { id: "header", label: "In the server header", icon: PanelTop, hint: "Icon buttons, on every server page." },
 ] as const;
+
+/**
+ * A pick-one group drawn as a row of options. Each option is a radio-style
+ * button: a seam outline, and a cyan outline plus filled dot when chosen.
+ */
+function ChoiceGroup<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string | undefined;
+  options: readonly { id: T; label: string; hint: string; icon: ComponentType<{ className?: string }> }[];
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="grid gap-2 sm:grid-cols-2">
+      {options.map((option) => {
+        const Icon = option.icon;
+        const active = value === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(option.id)}
+            className={cn(
+              "flex items-start gap-3 rounded-md border px-3 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              active ? "border-primary bg-primary/[0.06]" : "border-input hover:border-muted-foreground/50",
+            )}
+          >
+            <Icon className={cn("mt-0.5 size-4 shrink-0", active ? "text-primary" : "text-muted-foreground")} />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">{option.label}</span>
+              <span className="mt-0.5 block text-[13px] text-muted-foreground">{option.hint}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function AccountAppearancePage() {
   const { theme } = useTheme();
@@ -29,83 +73,33 @@ export default function AccountAppearancePage() {
   const powerLayout = usePowerLayout();
 
   return (
-    <SettingsSection title="Appearance" description="Choose how Flutter looks on this device.">
-      <Card className="p-5 sm:p-6">
-        <h3 className="text-sm font-semibold">Theme</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Saved in this browser only.</p>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          {THEMES.map((option) => {
-            const Icon = option.icon;
-            const active = theme === option.id;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => switchTheme(option.id)}
-                className={cn(
-                  "flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors",
-                  active
-                    ? "border-primary bg-primary/10"
-                    : "border-border hover:border-primary/40 hover:bg-muted/40",
-                )}
-              >
-                <Icon className={cn("mt-0.5 size-4", active ? "text-primary" : "text-muted-foreground")} />
-                <span>
-                  <span className="block text-sm font-medium">{option.label}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">{option.hint}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <p className="mt-4 inline-flex items-center gap-2 text-xs text-muted-foreground">
-          <Monitor className="size-3.5" />
-          The top bar sun/moon control switches the same setting.
-        </p>
-      </Card>
-
-      <Card className="p-5 sm:p-6">
-        <h3 className="text-sm font-semibold">Power actions</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Saved in this browser only.</p>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          {POWER_LAYOUTS.map((option) => {
-            const Icon = option.icon;
-            const active = powerLayout === option.id;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setPowerLayout(option.id)}
-                className={cn(
-                  "flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors",
-                  active
-                    ? "border-primary bg-primary/10"
-                    : "border-border hover:border-primary/40 hover:bg-muted/40",
-                )}
-              >
-                <Icon className={cn("mt-0.5 size-4", active ? "text-primary" : "text-muted-foreground")} />
-                <span>
-                  <span className="block text-sm font-medium">{option.label}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">{option.hint}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </Card>
-
-      <Card className="p-5 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold">Smooth transitions</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Animate colors, hovers, and theme changes. Turn off for a snappier UI.
-            </p>
-          </div>
-          <Switch checked={motionEnabled} onChange={setMotionEnabled} />
-        </div>
-      </Card>
+    <SettingsSection
+      title="Appearance"
+      description="How the panel looks in this browser. These settings aren't synced to your other devices."
+    >
+      <SettingsPanel>
+        <SettingsRow title="Theme" description="The sun and moon button in the top bar switches this too.">
+          <ChoiceGroup label="Theme" value={theme} options={THEMES} onChange={(id) => switchTheme(id)} />
+        </SettingsRow>
+        <SettingsRow title="Power buttons" description="Where Start, Restart and Stop sit on a server page.">
+          <ChoiceGroup
+            label="Power buttons"
+            value={powerLayout}
+            options={POWER_LAYOUTS}
+            onChange={(id) => setPowerLayout(id)}
+          />
+        </SettingsRow>
+        <SettingsRow
+          title="Smooth transitions"
+          description="Fade colours and theme changes. Turn off for instant changes and no pulsing status lights."
+        >
+          {/* Switch has no label prop; a wrapping <label> names it for screen readers. */}
+          <label className="flex md:justify-end">
+            <span className="sr-only">Smooth transitions</span>
+            <Switch checked={motionEnabled} onChange={setMotionEnabled} />
+          </label>
+        </SettingsRow>
+      </SettingsPanel>
     </SettingsSection>
   );
 }

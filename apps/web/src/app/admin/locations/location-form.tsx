@@ -64,7 +64,7 @@ export function LocationForm({
       router.push("/admin/locations");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : creating ? "Create failed" : "Save failed");
+      setError(err instanceof Error ? err.message : creating ? "Couldn't create the location. Check the short code, then try again." : "Couldn't save the location. Check the short code, then try again.");
       setPending(false);
     }
   }
@@ -74,7 +74,7 @@ export function LocationForm({
     if (
       !(await confirm({
         title: "Delete location",
-        description: `Delete ${initial.shortCode}? This cannot be undone.`,
+        description: `Delete ${initial.shortCode}? This can't be undone.`,
         confirmLabel: "Delete",
       }))
     ) {
@@ -87,13 +87,13 @@ export function LocationForm({
       router.push("/admin/locations");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
+      setError(err instanceof Error ? err.message : "Couldn't delete the location. Move its nodes to another location first.");
       setDeleting(false);
     }
   }
 
   return (
-    <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-6">
+    <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-3xl flex-col gap-6 pb-6">
       <AdminCreateHeader
         backHref="/admin/locations"
         backLabel="Back to locations"
@@ -111,12 +111,12 @@ export function LocationForm({
       <AdminSection
         icon={<MapPin className="size-4" />}
         title="Location details"
-        description="A short code is shown on nodes and server cards."
+        description="The short code appears next to nodes and servers."
       >
         <Field
           label="Short code"
           required
-          hint="1–16 characters. Letters, numbers, and dashes. Saved lowercase."
+          hint="Up to 16 letters, numbers and dashes. Saved in lowercase."
         >
           <Input
             value={shortCode}
@@ -141,8 +141,8 @@ export function LocationForm({
       {creating ? null : (
         <AdminSection
           icon={<Trash2 className="size-4" />}
-          title="Danger zone"
-          description="Locations that still have nodes cannot be deleted."
+          title="Delete location"
+          description="A location that still has nodes can't be deleted."
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">
@@ -171,7 +171,7 @@ export function LocationForm({
         disabled={!shortCode.trim()}
         summary={
           <span className="inline-flex items-center gap-2">
-            <MapPin className="size-4 text-primary" />
+            <MapPin className="size-4 text-primary" aria-hidden />
             {creating ? "Creating" : "Saving"}{" "}
             <span className="font-mono font-medium text-foreground">
               {shortCode.trim().toLowerCase() || "location"}
@@ -179,7 +179,7 @@ export function LocationForm({
             {description.trim() ? (
               <>
                 {" "}
-                — <span className="text-foreground">{description.trim()}</span>
+                (<span className="text-foreground">{description.trim()}</span>)
               </>
             ) : null}
           </span>

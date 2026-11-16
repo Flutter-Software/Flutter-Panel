@@ -1,17 +1,20 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Shield, UserRound } from "lucide-react";
+import { Plus, Shield } from "lucide-react";
 import { AdminPage } from "@/components/admin-table";
 import { AdminUsersPageSkeleton } from "@/components/skeletons";
 import { QueryErrorPage } from "@/components/error-page";
 import { useAuth } from "@/components/auth-provider";
-import { ButtonLink, Card } from "@/components/ui";
+import { ButtonLink, EmptyState, Rack, RowField } from "@/components/ui";
 import { UserAvatar } from "@/components/user-avatar";
 import { cn } from "@/lib/cn";
 import { prefetchQuery, useQuery } from "@/lib/query";
 import type { ServerRecord } from "@/lib/types";
 import type { PublicUser } from "@flutter-software/shared";
+
+const COLUMNS = "lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1.4fr)_minmax(0,0.6fr)_minmax(0,0.5fr)_minmax(0,0.6fr)_minmax(0,0.8fr)]";
 
 export default function AdminUsersPage({ skeletonCount }: { skeletonCount?: number }) {
   const router = useRouter();
@@ -41,7 +44,7 @@ export default function AdminUsersPage({ skeletonCount }: { skeletonCount?: numb
   return (
     <AdminPage
       title="Users"
-      description="Panel accounts that can sign in and own servers. Click a row to edit."
+      description="Accounts that can sign in and own servers. Select a user to edit them."
       actions={
         <ButtonLink href="/admin/users/new">
           <Plus className="size-4" />
@@ -49,92 +52,89 @@ export default function AdminUsersPage({ skeletonCount }: { skeletonCount?: numb
         </ButtonLink>
       }
     >
-      <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2.5 font-medium">User</th>
-                  <th className="px-4 py-2.5 font-medium">Email</th>
-                  <th className="px-4 py-2.5 font-medium">Role</th>
-                  <th className="px-4 py-2.5 font-medium">Servers</th>
-                  <th className="px-4 py-2.5 font-medium">2FA</th>
-                  <th className="px-4 py-2.5 font-medium">Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => {
-                  const admin = user.role === "admin";
-                  const you = viewer?.id === user.id;
-                  const owned = ownedBy(user.id);
-                  return (
-                    <tr
-                      key={user.id}
-                      className="cursor-pointer border-t border-border hover:bg-muted/40"
-                      onClick={() => router.push(`/admin/users/${user.id}`)}
-                      onMouseEnter={() => prefetchQuery(`/api/v1/admin/users/${user.id}`)}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <UserAvatar user={user} size="sm" />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{user.username}</span>
-                              {you ? (
-                                <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-                                  You
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{user.email}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-                            admin ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
-                          )}
-                        >
-                          {admin ? <Shield className="size-3" /> : <UserRound className="size-3" />}
-                          {admin ? "Admin" : "User"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 tabular-nums text-muted-foreground">{owned}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={cn(
-                            "text-xs font-medium",
-                            user.totpEnabled ? "text-status-running" : "text-muted-foreground",
-                          )}
-                        >
-                          {user.totpEnabled ? "On" : "Off"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatCreated(user.createdAt)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      {users.length === 0 ? (
+        <EmptyState
+          title="No users yet"
+          description="Create an account for each person who should sign in or own servers."
+        />
+      ) : (
+        <div>
+          {/* Column legend for wide screens; rows wrap into labelled lines below lg. */}
+          <div aria-hidden className={cn("hidden px-4 py-2 text-[12px] text-muted-foreground lg:grid lg:gap-5", COLUMNS)}>
+            <span className="pl-1">User</span>
+            <span>Email</span>
+            <span>Role</span>
+            <span>Servers</span>
+            <span>Two-factor</span>
+            <span>Created</span>
           </div>
-          {users.length === 0 ? (
-            <p className="border-t border-border px-4 py-10 text-center text-sm text-muted-foreground">
-              No users yet.
-            </p>
-          ) : null}
-        </Card>
+          <Rack label="Users">
+            {users.map((user) => {
+              const admin = user.role === "admin";
+              const you = viewer?.id === user.id;
+              const owned = ownedBy(user.id);
+              return (
+                <div
+                  key={user.id}
+                  role="listitem"
+                  className={cn(
+                    "relative grid cursor-pointer grid-cols-2 gap-x-4 gap-y-2 px-4 py-3 hover:bg-muted/45 sm:grid-cols-4 lg:items-center lg:gap-5",
+                    COLUMNS,
+                  )}
+                  onClick={() => router.push(`/admin/users/${user.id}`)}
+                  onMouseEnter={() => prefetchQuery(`/api/v1/admin/users/${user.id}`)}
+                >
+                  <div className="col-span-full flex min-w-0 items-center gap-3 pl-1 lg:col-span-1">
+                    <UserAvatar user={user} size="sm" />
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-baseline gap-2">
+                        <Link
+                          href={`/admin/users/${user.id}`}
+                          onClick={(event) => event.stopPropagation()}
+                          className="truncate font-display text-[17px] font-semibold leading-tight hover:text-primary"
+                        >
+                          {user.username}
+                        </Link>
+                        {you ? <span className="shrink-0 text-[12px] text-muted-foreground">(you)</span> : null}
+                      </div>
+                      <p className="truncate text-[13px] text-muted-foreground lg:hidden">{user.email}</p>
+                    </div>
+                  </div>
+                  <p className="hidden min-w-0 truncate text-sm text-muted-foreground lg:block">{user.email}</p>
+                  <RowField breakpoint="lg" label="Role">
+                    <span className={cn("inline-flex items-center gap-1.5", admin ? "text-primary" : "text-foreground")}>
+                      {admin ? <Shield className="size-3.5" aria-hidden /> : null}
+                      {admin ? "Admin" : "User"}
+                    </span>
+                  </RowField>
+                  <RowField breakpoint="lg" label="Servers">
+                    <span className="tabular-nums">{owned}</span>
+                  </RowField>
+                  <RowField breakpoint="lg" label="Two-factor">
+                    <span className={user.totpEnabled ? "text-status-running" : "text-muted-foreground"}>
+                      {user.totpEnabled ? "On" : "Off"}
+                    </span>
+                  </RowField>
+                  <RowField breakpoint="lg" label="Created">
+                    <span className="tabular-nums text-muted-foreground">{formatCreated(user.createdAt)}</span>
+                  </RowField>
+                </div>
+              );
+            })}
+          </Rack>
+        </div>
+      )}
     </AdminPage>
   );
 }
 
 function formatCreated(value: string) {
   const time = Date.parse(value);
-  if (Number.isNaN(time)) return "—";
+  if (Number.isNaN(time)) return "Unknown";
   return new Date(time).toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
   });
 }
+

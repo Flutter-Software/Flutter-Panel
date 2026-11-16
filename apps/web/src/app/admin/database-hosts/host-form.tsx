@@ -113,7 +113,7 @@ export function DatabaseHostForm({
       router.push("/admin/database-hosts");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : creating ? "Create failed" : "Save failed");
+      setError(err instanceof Error ? err.message : creating ? "Couldn't create the host. Check the values below, then try again." : "Couldn't save the host. Check the values below, then try again.");
       setPending(false);
     }
   }
@@ -136,9 +136,9 @@ export function DatabaseHostForm({
           }),
         },
       );
-      setTestOk(result.data.version ? `Connected · MySQL ${result.data.version}` : "Connected");
+      setTestOk(result.data.version ? `Connected to MySQL ${result.data.version}` : "Connected");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Connection failed");
+      setError(err instanceof Error ? err.message : "Couldn't connect. Check the address, port, username and password, and that the host accepts connections from the panel.");
     } finally {
       setTesting(false);
     }
@@ -162,13 +162,13 @@ export function DatabaseHostForm({
       router.push("/admin/database-hosts");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
+      setError(err instanceof Error ? err.message : "Couldn't delete the host. Delete its databases first, then try again.");
       setDeleting(false);
     }
   }
 
   return (
-    <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-6">
+    <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-3xl flex-col gap-6 pb-6">
       <AdminCreateHeader
         backHref="/admin/database-hosts"
         backLabel="Back to database hosts"
@@ -290,8 +290,8 @@ export function DatabaseHostForm({
       {creating ? null : (
         <AdminSection
           icon={<Trash2 className="size-4" />}
-          title="Danger zone"
-          description="Hosts that still have databases cannot be deleted."
+          title="Delete host"
+          description="A host that still has databases can't be deleted."
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">
@@ -322,7 +322,7 @@ export function DatabaseHostForm({
         disabled={!name.trim() || !host.trim() || !username.trim() || (creating && !password)}
         summary={
           <span className="inline-flex items-center gap-2">
-            <Database className="size-4 text-primary" />
+            <Database className="size-4 text-primary" aria-hidden />
             {creating ? "Creating" : "Saving"}{" "}
             <span className="font-medium text-foreground">{name.trim() || "host"}</span>
           </span>

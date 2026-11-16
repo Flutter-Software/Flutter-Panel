@@ -71,19 +71,20 @@ export default function NodeConfigurationPage() {
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div>
-          <h2 className="text-sm font-semibold">Daemon config</h2>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{path}</p>
+          <h2 className="text-[20px] font-semibold">Daemon config</h2>
+          <p className="mt-0.5 font-mono text-[12.5px] text-muted-foreground">{path}</p>
         </div>
         <Button type="button" size="sm" disabled={pending || loading || !node.online} onClick={() => void onSave()}>
           <Save className="size-3.5" />
-          {pending ? "Saving…" : "Save"}
+          {pending ? "Saving…" : "Save config"}
         </Button>
       </div>
-      <div className="px-4 py-3">
+      <div className="space-y-2 px-4 py-3">
         <AdminError message={error} />
-        <p className="mb-3 text-xs text-muted-foreground">
-          Edits write the daemon&apos;s config.json on this machine. Restart the daemon after changing listen
-          port, SFTP port, host, or token.
+        <p className="text-[13px] text-muted-foreground">
+          {node.online
+            ? "Saving writes config.json on this machine. Restart the daemon after changing the listen port, SFTP port, host or token."
+            : "The node is offline, so the config is read-only. Start the daemon on this machine to edit it here."}
         </p>
       </div>
       <div className="h-[min(70vh,40rem)] border-t border-border bg-background">

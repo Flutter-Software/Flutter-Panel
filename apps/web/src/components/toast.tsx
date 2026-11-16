@@ -124,25 +124,25 @@ export function dismissToast(id: number) {
 const VARIANTS: Record<ToastVariant, { icon: LucideIcon; tint: string; bar: string; label: string }> = {
   error: {
     icon: CircleAlert,
-    tint: "bg-status-error/15 text-status-error",
+    tint: "text-status-error",
     bar: "bg-status-error",
     label: "Error",
   },
   success: {
     icon: CircleCheck,
-    tint: "bg-status-running/15 text-status-running",
+    tint: "text-status-running",
     bar: "bg-status-running",
     label: "Success",
   },
   info: {
     icon: Info,
-    tint: "bg-status-info/15 text-status-info",
+    tint: "text-status-info",
     bar: "bg-status-info",
     label: "Notice",
   },
   warning: {
     icon: TriangleAlert,
-    tint: "bg-status-warn/15 text-status-warn",
+    tint: "text-status-warn",
     bar: "bg-status-warn",
     label: "Warning",
   },
@@ -290,7 +290,8 @@ function Toast({
     <div
       role={item.variant === "error" ? "alert" : "status"}
       className={cn(
-        "flutter-toast pointer-events-auto relative flex origin-right touch-pan-y items-start gap-3 overflow-hidden rounded-xl border border-border bg-card/95 py-3 pr-2.5 pl-3 text-sm text-card-foreground shadow-xl shadow-black/20 backdrop-blur-md select-none",
+        // A floating layer: rounded-xl and the one float shadow (DESIGN.md → Shape and depth).
+        "flutter-toast pointer-events-auto relative flex origin-right touch-pan-y items-start gap-3 overflow-hidden rounded-xl border border-border bg-card py-3 pr-2.5 pl-4 text-sm text-card-foreground shadow-[var(--shadow-float)] select-none",
         item.leaving ? "flutter-toast-out" : "flutter-toast-in",
       )}
       style={swipe.style}
@@ -301,15 +302,15 @@ function Toast({
         if (item.leaving) onGone();
       }}
     >
-      <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-full", meta.tint)}>
-        <Icon className="size-4" aria-hidden />
-      </span>
+      {/* Status rail on the left edge, like a rack unit, instead of a tinted icon disc. */}
+      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", meta.bar)} />
+      <Icon className={cn("mt-0.5 size-4 shrink-0", meta.tint)} aria-hidden />
 
-      <p className="min-w-0 flex-1 self-center leading-snug break-words">
+      <p className="min-w-0 flex-1 leading-snug break-words">
         <span className="sr-only">{meta.label}: </span>
         {item.message}
         {item.count > 1 ? (
-          <span className="ml-1.5 inline-flex rounded-full bg-muted px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground align-[1px]">
+          <span className="ml-1.5 inline-flex rounded-sm bg-muted px-1.5 text-[12px] font-medium tabular-nums text-muted-foreground align-[1px]">
             ×{item.count}
           </span>
         ) : null}
@@ -318,7 +319,7 @@ function Toast({
       {item.action ? (
         <button
           type="button"
-          className="no-press hit-slop shrink-0 self-center rounded-md px-2 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
+          className="no-press hit-slop shrink-0 self-center rounded-md px-2 py-1 text-[13px] font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
           onClick={onAction}
           // Keep the click from being read as the start of a swipe.
           onPointerDown={(event) => event.stopPropagation()}

@@ -16,6 +16,8 @@
 #   --panel-url URL      Default https://panel.flutter.software
 #   --listen-url URL     Skip the tunnel and use this URL (public IP / Tailscale)
 #   --port PORT          Daemon port (default 8080)
+#   --host HOST          Daemon bind address. Default 127.0.0.1 with the tunnel
+#                        (only cloudflared talks to it), 0.0.0.0 without it
 #   --no-tunnel          Do not start Cloudflare; you must pass --listen-url
 set -euo pipefail
 
@@ -24,6 +26,8 @@ NODE_TOKEN="${FLUTTER_NODE_TOKEN:-}"
 NODE_ID="${FLUTTER_NODE_ID:-}"
 LISTEN_URL="${FLUTTER_LISTEN_URL:-}"
 DAEMON_PORT="${FLUTTER_DAEMON_PORT:-8080}"
+# Empty = pick from the mode below (loopback behind the tunnel, all interfaces otherwise).
+DAEMON_HOST="${FLUTTER_DAEMON_HOST:-}"
 USE_TUNNEL=1
 PREFIX="${FLUTTER_NODE_PREFIX:-/opt/flutter-node}"
 TUNNEL_LOG="/var/log/flutter-cloudflared.log"
@@ -34,7 +38,7 @@ warn() { printf '[flutter-connect] warning: %s\n' "$*" >&2; }
 die() { printf '[flutter-connect] error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,22p' "$0"
+  sed -n '2,21p' "$0"
   exit 0
 }
 
@@ -45,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --panel-url) PANEL_URL="${2:?}"; shift ;;
     --listen-url) LISTEN_URL="${2:?}"; USE_TUNNEL=0; shift ;;
     --port) DAEMON_PORT="${2:?}"; shift ;;
+    --host) DAEMON_HOST="${2:?}"; shift ;;
     --no-tunnel) USE_TUNNEL=0 ;;
     --help|-h) usage ;;
     *) die "Unknown option: $1" ;;
@@ -60,6 +65,16 @@ PANEL_URL="${PANEL_URL%/}"
 
 if [[ "$USE_TUNNEL" -eq 0 && -z "$LISTEN_URL" ]]; then
   die "Without a tunnel you must pass --listen-url (a URL the panel can reach)."
+fi
+if [[ "$USE_TUNNEL" -eq 0 && ( "$LISTEN_URL" == *127.0.0.1* || "$LISTEN_URL" == *localhost* ) ]]; then
+  die "--listen-url is a loopback address; a hosted panel can't reach it. Use this machine's public or Tailscale address."
+fi
+
+# Behind the tunnel only cloudflared (on this machine) connects, so keep the
+# daemon off the network. Without it, the panel connects directly to the
+# listen URL, so the daemon must accept connections on every interface.
+if [[ -z "$DAEMON_HOST" ]]; then
+  if [[ "$USE_TUNNEL" -eq 1 ]]; then DAEMON_HOST="127.0.0.1"; else DAEMON_HOST="0.0.0.0"; fi
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -136,14 +151,27 @@ EOF
   done
   [[ -n "$LISTEN_URL" ]] || die "Cloudflare tunnel did not print a URL. Check: journalctl -u ${TUNNEL_UNIT} -e"
   log "Tunnel URL ${LISTEN_URL}"
+else
+  # Switching an existing tunnel node to a direct URL: the old tunnel would
+  # keep running (and restarting) for nothing.
+  if [[ -f "/etc/systemd/system/${TUNNEL_UNIT}" ]]; then
+    log "Stopping the Cloudflare tunnel (not needed with --listen-url)"
+    systemctl disable --now "${TUNNEL_UNIT}" >/dev/null 2>&1 || true
+  fi
+  # The panel connects straight to this port now. ubuntu-node.sh opens it on a
+  # fresh install; do it again in case the daemon was installed earlier.
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
+    log "Opening daemon ${DAEMON_PORT}/tcp in ufw"
+    ufw allow "${DAEMON_PORT}/tcp" >/dev/null
+  fi
 fi
 
-log "Configuring daemon → ${PANEL_URL}  listen ${LISTEN_URL}"
+log "Configuring daemon → ${PANEL_URL}  listen ${LISTEN_URL}  bind ${DAEMON_HOST}:${DAEMON_PORT}"
 "$CONFIGURE_BIN" \
   --panel-url "$PANEL_URL" \
   --token "$NODE_TOKEN" \
   --node "$NODE_ID" \
-  --host 127.0.0.1 \
+  --host "$DAEMON_HOST" \
   --port "$DAEMON_PORT" \
   --listen-url "$LISTEN_URL" \
   --data-dir /var/lib/flutter \
@@ -158,13 +186,25 @@ This machine is attached to ${PANEL_URL}
 
   Node id      ${NODE_ID}
   Listen URL   ${LISTEN_URL}
+  Bind         ${DAEMON_HOST}:${DAEMON_PORT}
   Daemon       systemctl status flutter-daemon
 
 Admin → Nodes should go Online after a heartbeat (about 15s).
 
 Notes:
+EOF
+if [[ "$USE_TUNNEL" -eq 1 ]]; then
+  cat <<EOF
   - A Cloudflare quick tunnel URL changes when ${TUNNEL_UNIT} restarts.
     Re-run this script if the node goes offline after a reboot.
+EOF
+else
+  cat <<EOF
+  - The panel connects directly to ${LISTEN_URL}. Make sure your router or
+    cloud firewall forwards that address to this machine's port ${DAEMON_PORT}.
+EOF
+fi
+cat <<EOF
   - Windows npm run dev:daemon is a different process; leave it stopped on
     this Ubuntu host so port ${DAEMON_PORT} is free.
 EOF

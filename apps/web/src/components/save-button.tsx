@@ -38,7 +38,7 @@ export function SaveButton({
       type="submit"
       disabled={pending || saved || disabled}
       aria-label={saved ? "Saved" : pending ? "Saving" : label}
-      className={cn("relative", saved && "no-press disabled:opacity-100 disabled:shadow-sm", className)}
+      className={cn("relative", saved && "no-press disabled:opacity-100", className)}
       {...props}
     >
       <span className={cn("whitespace-nowrap", (pending || saved) && "invisible")}>{children}</span>
