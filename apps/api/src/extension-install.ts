@@ -1,39 +1,61 @@
 /**
  * Installing, exporting and uninstalling extensions as .zip archives.
  *
- * Install flow:
- *  1. Decode and size-check the upload, then list entries with declared sizes
- *     before inflating anything (zip-bomb guard: file count and total size).
- *  2. Find the extension root: `extension.json` at the top level, or inside a
+ * Install flow (nothing here holds the archive or its files in memory, so the
+ * 2 GiB upload limit costs disk space, not API memory):
+ *  1. Stream the raw request body into a hidden `.upload-<uuid>.zip` next to
+ *     the extensions, counting bytes and stopping at the size limit.
+ *  2. Read the zip's central directory (zip-reader.ts) and enforce the file
+ *     count and total unpacked size on the declared sizes before inflating
+ *     anything (zip-bomb guard; the reader verifies the declarations later).
+ *  3. Find the extension root: `extension.json` at the top level, or inside a
  *     single top-level folder (what "Compress folder" produces).
- *  3. Validate every path (no `..`, no absolute paths) and the manifest.
- *  4. Extract into a hidden staging folder, validate it like any installed
- *     extension, then swap it into place. A failed install never leaves a
- *     half-written extension behind, and an update replaces files atomically
- *     enough that a running page doesn't see a mix of versions.
+ *  4. Validate every path (no `..`, no absolute paths) and the manifest, and
+ *     answer 409 for an existing extension before unpacking anything.
+ *  5. Extract entry by entry into a hidden staging folder, then swap it into
+ *     place. A failed install never leaves a half-written extension behind,
+ *     and an update replaces files atomically enough that a running page
+ *     doesn't see a mix of versions.
  *
  * Admin approval state lives in Mongo and is untouched by an update: if the
  * new manifest asks for more permissions the extension parks itself in
  * `needs-approval` (see extensions.ts).
  */
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createWriteStream, existsSync } from "node:fs";
+import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { unzipSync, zipSync, type Unzipped } from "fflate";
+import { Readable, Transform, type TransformCallback } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
+import { zipSync } from "fflate";
 import {
   EXTENSION_MANIFEST_FILE,
   EXTENSION_ZIP_LIMITS,
   FlutterError,
   extensionManifestSchema,
   extensionWasmGlue,
+  formatExtensionLimit,
 } from "@flutter-software/shared";
 import { ExtensionState } from "./db/models";
 import { log } from "./log";
 import { clearExtensionBuildCache } from "./extension-build";
+import { ZipReader, isZipDataError, type ZipEntry } from "./zip-reader";
 
 /** Junk that archivers add; skipped silently. */
 const IGNORED = [/^__MACOSX\//, /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/i, /(^|\/)desktop\.ini$/i];
+
+/** The manifest is the only entry read into memory; anything bigger than this isn't a manifest. */
+const MAX_MANIFEST_BYTES = 1024 * 1024;
+
+/**
+ * Hidden work files this module creates in the extensions folder. Dot-prefixed
+ * so the scanner ignores them. They are removed when an install ends; a crash
+ * mid-install can strand one, so each install sweeps old ones first.
+ */
+const LEFTOVER_PATTERN = /^\.(upload|staging|trash)-/;
+/** Far longer than any install takes, so a sweep never touches one in progress. */
+const LEFTOVER_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 function normalizeEntry(name: string) {
   return name.replace(/\\/g, "/").replace(/^\.\/+/, "");
@@ -50,43 +72,109 @@ function assertSafePath(path: string) {
   }
 }
 
-/** Reads the archive with size/count limits enforced from the central directory. */
-function readArchive(bytes: Uint8Array): Unzipped {
-  let files = 0;
-  let total = 0;
-  try {
-    return unzipSync(bytes, {
-      filter(file) {
-        files += 1;
-        total += file.originalSize;
-        if (files > EXTENSION_ZIP_LIMITS.maxFiles) {
-          throw FlutterError.validation(`Archive has more than ${EXTENSION_ZIP_LIMITS.maxFiles} files`);
-        }
-        if (total > EXTENSION_ZIP_LIMITS.maxExtractedBytes) {
-          throw FlutterError.validation(
-            `Archive expands to more than ${Math.round(EXTENSION_ZIP_LIMITS.maxExtractedBytes / 1024 / 1024)} MB`,
-          );
-        }
-        return true;
-      },
-    });
-  } catch (err) {
-    if (err instanceof FlutterError) throw err;
-    throw FlutterError.validation(`Not a valid .zip file: ${(err as Error).message}`);
+/* -------------------------------------------------------------------------- */
+/*                             Receiving the upload                           */
+/* -------------------------------------------------------------------------- */
+
+/** Pass-through that fails the pipeline once more than `max` bytes went by. */
+class ByteLimit extends Transform {
+  private seen = 0;
+
+  constructor(
+    private readonly max: number,
+    private readonly message: string,
+  ) {
+    super();
+  }
+
+  override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
+    this.seen += chunk.length;
+    if (this.seen > this.max) {
+      callback(FlutterError.validation(this.message));
+      return;
+    }
+    callback(null, chunk);
   }
 }
 
 /**
- * Returns the archive's files relative to the extension root.
+ * Turns low-level failures into messages an admin can act on. Anything that
+ * isn't the archive's fault or a full disk is passed through unchanged (500).
+ */
+function asInstallError(err: unknown) {
+  if (err instanceof FlutterError) return err;
+  if (isZipDataError(err)) return FlutterError.validation(`Not a valid .zip file: ${err.message}`);
+  if ((err as NodeJS.ErrnoException | null)?.code === "ENOSPC") {
+    return FlutterError.validation("The panel host ran out of disk space while installing this extension.");
+  }
+  return err;
+}
+
+/** Best-effort removal of work files stranded by a crashed install. */
+async function sweepLeftovers(root: string) {
+  const cutoff = Date.now() - LEFTOVER_MAX_AGE_MS;
+  for (const name of await readdir(root).catch(() => [] as string[])) {
+    if (!LEFTOVER_PATTERN.test(name)) continue;
+    const path = join(root, name);
+    const info = await stat(path).catch(() => null);
+    if (info && info.mtimeMs < cutoff) await rm(path, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * Streams the request body to a hidden file in `root` and returns its path.
+ * The size limit is enforced twice: up front from Content-Length (cheap, but
+ * only a claim) and on the bytes actually received. The caller deletes the file.
+ */
+async function receiveArchive(root: string, request: Request) {
+  const max = EXTENSION_ZIP_LIMITS.maxArchiveBytes;
+  const tooLarge = `Archive is larger than ${formatExtensionLimit(max)}`;
+  if (Number(request.headers.get("content-length")) > max) throw FlutterError.validation(tooLarge);
+  if (!request.body) throw FlutterError.validation("Upload is empty. Send the .zip file as the request body.");
+
+  const path = join(root, `.upload-${randomUUID()}.zip`);
+  try {
+    await pipeline(
+      Readable.fromWeb(request.body as unknown as WebReadableStream),
+      new ByteLimit(max, tooLarge),
+      createWriteStream(path),
+    );
+  } catch (err) {
+    await rm(path, { force: true }).catch(() => undefined);
+    throw asInstallError(err);
+  }
+  return path;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                             Reading the archive                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Returns the archive's files keyed by their path relative to the extension
+ * root, after enforcing the count and size limits on the declared sizes.
  * Accepts `extension.json` at the top level or inside exactly one folder.
  */
-function extensionFiles(archive: Unzipped) {
-  const files = new Map<string, Uint8Array>();
-  for (const [rawName, data] of Object.entries(archive)) {
-    const name = normalizeEntry(rawName);
-    if (!name || name.endsWith("/") || IGNORED.some((pattern) => pattern.test(name))) continue;
+function extensionFiles(entries: readonly ZipEntry[]) {
+  const files = new Map<string, ZipEntry>();
+  let count = 0;
+  let total = 0;
+  for (const entry of entries) {
+    if (entry.isDirectory) continue;
+    count += 1;
+    total += entry.uncompressedSize;
+    if (count > EXTENSION_ZIP_LIMITS.maxFiles) {
+      throw FlutterError.validation(`Archive has more than ${EXTENSION_ZIP_LIMITS.maxFiles} files`);
+    }
+    if (total > EXTENSION_ZIP_LIMITS.maxExtractedBytes) {
+      throw FlutterError.validation(
+        `Archive expands to more than ${formatExtensionLimit(EXTENSION_ZIP_LIMITS.maxExtractedBytes)}`,
+      );
+    }
+    const name = normalizeEntry(entry.name);
+    if (!name || IGNORED.some((pattern) => pattern.test(name))) continue;
     assertSafePath(name);
-    files.set(name, data);
+    files.set(name, entry);
   }
   if (files.has(EXTENSION_MANIFEST_FILE)) return files;
 
@@ -94,7 +182,7 @@ function extensionFiles(archive: Unzipped) {
   const [top] = [...tops];
   if (tops.size === 1 && files.has(`${top}/${EXTENSION_MANIFEST_FILE}`)) {
     const prefix = `${top}/`;
-    return new Map([...files].map(([name, data]) => [name.slice(prefix.length), data] as const));
+    return new Map([...files].map(([name, entry]) => [name.slice(prefix.length), entry] as const));
   }
   throw FlutterError.validation(
     `No ${EXTENSION_MANIFEST_FILE} found. Put it at the top of the zip or inside a single folder.`,
@@ -119,24 +207,16 @@ function parseManifest(data: Uint8Array) {
   return parsed.data;
 }
 
+/* -------------------------------------------------------------------------- */
+/*                                   Install                                  */
+/* -------------------------------------------------------------------------- */
+
 export type ZipInstallResult = { id: string; version: string; replaced: boolean; previousVersion: string | null };
 
-/**
- * Installs (or, with `replace`, updates) an extension from a base64 zip.
- * Throws a 409 CONFLICT when it already exists and `replace` is false, so the
- * UI can ask before overwriting.
- */
-export async function installExtensionZip(root: string, contentBase64: string, replace: boolean, actorId: string) {
-  if (typeof contentBase64 !== "string" || !contentBase64) throw FlutterError.validation("contentBase64 is required");
-  const bytes = Buffer.from(contentBase64.replace(/^data:[^,]*,/, ""), "base64");
-  if (bytes.length > EXTENSION_ZIP_LIMITS.maxArchiveBytes) {
-    throw FlutterError.validation(
-      `Archive is larger than ${Math.round(EXTENSION_ZIP_LIMITS.maxArchiveBytes / 1024 / 1024)} MB`,
-    );
-  }
-
-  const files = extensionFiles(readArchive(new Uint8Array(bytes)));
-  const manifest = parseManifest(files.get(EXTENSION_MANIFEST_FILE)!);
+/** Validates the opened archive, extracts it into staging and swaps it into `root`. */
+async function installFromArchive(root: string, reader: ZipReader, replace: boolean, actorId: string) {
+  const files = extensionFiles(reader.entries);
+  const manifest = parseManifest(await reader.readBuffer(files.get(EXTENSION_MANIFEST_FILE)!, MAX_MANIFEST_BYTES));
   for (const page of manifest.contributes.serverPages) {
     if (!files.has(page.entry)) throw FlutterError.validation(`Server page "${page.id}": ${page.entry} is missing from the zip`);
     const glue = extensionWasmGlue(page.entry);
@@ -147,7 +227,6 @@ export async function installExtensionZip(root: string, contentBase64: string, r
     }
   }
 
-  await mkdir(root, { recursive: true });
   const target = join(root, manifest.id);
   const exists = existsSync(target);
   let previousVersion: string | null = null;
@@ -167,11 +246,12 @@ export async function installExtensionZip(root: string, contentBase64: string, r
   const trash = join(root, `.trash-${randomUUID()}`);
   try {
     const stagingRoot = resolve(staging);
-    for (const [name, data] of files) {
+    for (const [name, entry] of files) {
       const dest = resolve(stagingRoot, ...name.split("/"));
       if (!dest.startsWith(stagingRoot + sep)) throw FlutterError.validation(`Unsafe path in archive: ${name}`);
       await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, data);
+      // One entry at a time: inflated, size- and CRC-checked, straight to disk.
+      await pipeline(await reader.openStream(entry), createWriteStream(dest));
     }
     if (exists) await rename(target, trash);
     await rename(staging, target);
@@ -194,6 +274,31 @@ export async function installExtensionZip(root: string, contentBase64: string, r
   return { id: manifest.id, version: manifest.version, replaced: exists, previousVersion } satisfies ZipInstallResult;
 }
 
+/**
+ * Installs (or, with `replace`, updates) an extension from an upload whose
+ * request body is the raw .zip file.
+ * Throws a 409 CONFLICT when it already exists and `replace` is false, so the
+ * UI can ask before overwriting.
+ */
+export async function installExtensionUpload(root: string, request: Request, replace: boolean, actorId: string) {
+  await mkdir(root, { recursive: true });
+  await sweepLeftovers(root);
+  const archive = await receiveArchive(root, request);
+  try {
+    const reader = await ZipReader.open(archive);
+    try {
+      return await installFromArchive(root, reader, replace, actorId);
+    } finally {
+      // Closed before the archive is deleted: Windows can't remove an open file.
+      await reader.close().catch(() => undefined);
+    }
+  } catch (err) {
+    throw asInstallError(err);
+  } finally {
+    await rm(archive, { force: true }).catch(() => undefined);
+  }
+}
+
 /** Deletes the extension's folder and its admin state. */
 export async function uninstallExtensionFolder(id: string, dir: string, actorId: string) {
   await rm(dir, { recursive: true, force: true });
@@ -202,10 +307,18 @@ export async function uninstallExtensionFolder(id: string, dir: string, actorId:
   log("info", "extension uninstalled", { id, actorId });
 }
 
+/* -------------------------------------------------------------------------- */
+/*                                   Export                                   */
+/* -------------------------------------------------------------------------- */
+
 /** Folders never included in an exported zip (dependencies and build caches). */
 const EXPORT_SKIP = new Set(["node_modules", ".git", "target"]);
 
-/** Zips an installed extension so it can be shared or backed up. */
+/**
+ * Zips an installed extension so it can be shared or backed up.
+ * Unlike install this builds the zip in memory, so it has its own, smaller
+ * limit (`maxExportBytes`); larger extensions are copied from the folder.
+ */
 export async function exportExtensionZip(dir: string) {
   const root = resolve(dir);
   const out: Record<string, Uint8Array> = {};
@@ -220,8 +333,10 @@ export async function exportExtensionZip(dir: string) {
       } else if (entry.isFile()) {
         const info = await stat(full);
         total += info.size;
-        if (total > EXTENSION_ZIP_LIMITS.maxExtractedBytes) {
-          throw FlutterError.validation("Extension is too large to export");
+        if (total > EXTENSION_ZIP_LIMITS.maxExportBytes) {
+          throw FlutterError.validation(
+            `Extension is larger than ${formatExtensionLimit(EXTENSION_ZIP_LIMITS.maxExportBytes)}, too large to download as a .zip. Copy its folder from the panel host instead.`,
+          );
         }
         out[relative(root, full).split(sep).join("/")] = new Uint8Array(await readFile(full));
       }

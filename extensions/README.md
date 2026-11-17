@@ -39,7 +39,7 @@ extensions/
 **From a .zip (easiest):** open **Admin → Extensions**, press **Upload .zip** and pick the archive. Then review the permissions and enable it.
 
 - `extension.json` can sit at the top of the zip or inside one top-level folder, which is what "Compress folder" produces.
-- Limits: 50 MB zip, 200 MB unpacked, 5,000 files. `__MACOSX/`, `.DS_Store` and `Thumbs.db` are skipped. Paths that escape the folder are rejected.
+- Limits: 2 GB zip, 3 GB unpacked, 5,000 files. Standard zips only (Deflate or stored; no password-protected or split archives). `__MACOSX/`, `.DS_Store` and `Thumbs.db` are skipped. Paths that escape the folder are rejected.
 - The upload is unpacked into a hidden staging folder, checked, then swapped in. A broken zip never leaves a half-installed extension.
 
 **From a folder:** copy the folder into this directory and press **Rescan**. The folder name must equal the manifest `id`. Set `EXTENSIONS_DIR` to use a different location.
@@ -47,7 +47,7 @@ extensions/
 Once enabled, the extension's pages show up in the sidebar of every server it targets.
 
 - **Update:** upload a zip of the new version (you'll be asked to confirm the replace), or replace the files and press **Rescan**. If the new version asks for permissions you haven't granted, it switches to **Needs approval** and stops being served until you approve it.
-- **Share or back up:** the download button on each row exports the extension as a `.zip` (without `node_modules`).
+- **Share or back up:** the download button on each row exports the extension as a `.zip` (without `node_modules`). Extensions over 200 MB are too large to export; copy the folder instead.
 - **Uninstall:** the bin button deletes the folder and its approval. Download it first if you want a copy.
 
 Folders starting with `.` or `_` are ignored, so `_drafts/` is a handy place to work on something that isn't ready. Extensions you add yourself are git-ignored and survive panel updates.

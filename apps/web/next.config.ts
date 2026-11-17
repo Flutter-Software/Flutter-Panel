@@ -14,8 +14,9 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true,
   },
   experimental: {
-    // File uploads POST JSON through this Next process (rewritten to the API).
-    middlewareClientMaxBodySize: "400mb",
+    // Uploads POST through this Next process (rewritten to the API) when nginx
+    // isn't in front. Sized for the largest one: a 2 GiB extension .zip.
+    middlewareClientMaxBodySize: "2gb",
     optimizePackageImports: ["@mantine/core"],
   },
   turbopack: {

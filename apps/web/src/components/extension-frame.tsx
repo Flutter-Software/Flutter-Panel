@@ -16,7 +16,7 @@
  * The SDK half of the protocol lives in apps/api/src/extension-sdk.ts.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Loader2 } from "lucide-react";
@@ -142,6 +142,18 @@ export function ExtensionFrame({
   serverRef.current = server;
   const modeRef = useRef(mode);
   modeRef.current = mode;
+
+  /**
+   * Frame URL with the theme the page should first paint in. Generated pages
+   * bake it into <html color-scheme>, which stops the white flash a dark panel
+   * otherwise shows while a fresh frame loads. Only the mode at mount is used:
+   * later switches arrive as "theme" events, and changing the URL would reload
+   * the frame. (Static .html entries ignore the parameter.)
+   */
+  const frameSrc = useMemo(() => {
+    const separator = page.src.includes("?") ? "&" : "?";
+    return `${page.src}${separator}theme=${modeRef.current}`;
+  }, [page.src]);
 
   const post = useCallback((message: Record<string, unknown>) => {
     // Opaque-origin frames can only be addressed with "*". Identity is
@@ -371,7 +383,7 @@ export function ExtensionFrame({
       <iframe
         ref={frameRef}
         key={page.src}
-        src={page.src}
+        src={frameSrc}
         title={`${extension.name}: ${page.label}`}
         // No allow-same-origin: the frame gets an opaque origin and can't touch the panel session.
         sandbox="allow-scripts allow-forms allow-popups allow-downloads"

@@ -1,6 +1,6 @@
 {
   "name": "@flutter-software/web",
-  "version": "0.2.73",
+  "version": "0.2.74",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --port 3010",

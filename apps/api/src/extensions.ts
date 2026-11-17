@@ -38,7 +38,7 @@ import { requireAccess } from "./servers";
 import { log } from "./log";
 import { EXTENSION_SDK_SOURCE } from "./extension-sdk";
 import { clearExtensionBuildCache, compileExtensionModule } from "./extension-build";
-import { exportExtensionZip, installExtensionZip, uninstallExtensionFolder } from "./extension-install";
+import { exportExtensionZip, installExtensionUpload, uninstallExtensionFolder } from "./extension-install";
 import { analyzeExtension, clearExtensionAnalysisCache } from "./extension-analyzer";
 
 /* -------------------------------------------------------------------------- */
@@ -250,15 +250,13 @@ export async function disableExtension(id: string, actorId: string) {
   return listAdminExtensions();
 }
 
-/** Installs or updates from an uploaded .zip; body: { contentBase64, replace? }. */
-export async function installExtensionFromZip(body: unknown, actorId: string) {
-  const input = (body ?? {}) as { contentBase64?: unknown; replace?: unknown };
-  const result = await installExtensionZip(
-    extensionsDir(),
-    typeof input.contentBase64 === "string" ? input.contentBase64 : "",
-    input.replace === true,
-    actorId,
-  );
+/**
+ * Installs or updates from an uploaded .zip. The request body is the raw file
+ * (not JSON), streamed to disk, so the upload can be as large as
+ * EXTENSION_ZIP_LIMITS.maxArchiveBytes without being held in memory.
+ */
+export async function installExtensionFromUpload(request: Request, replace: boolean, actorId: string) {
+  const result = await installExtensionUpload(extensionsDir(), request, replace, actorId);
   invalidateExtensionCache();
   return { result, ...(await listAdminExtensions()) };
 }
@@ -408,8 +406,14 @@ function wasmBootstrap(glueUrl: string, wasmUrl: string) {
  *  - `.svelte` entries are requested with `?build=1` too, which bundles a
  *    wrapper that mounts the component into `#root`.
  *  - `.wasm` entries are started through their wasm-bindgen glue module.
+ *
+ * `theme` is the panel's current mode, passed by the frame as `?theme=`. It is
+ * baked into `<html>` so the first paint already has the right `color-scheme`.
+ * Without it the document starts as "light" inside a dark panel, and browsers
+ * paint an opaque white canvas behind a frame whose color-scheme differs from
+ * its embedder's: a white flash on every page switch until the SDK's `init`.
  */
-export async function renderExtensionPage(id: string, pageId: string) {
+export async function renderExtensionPage(id: string, pageId: string, theme?: string) {
   const extension = (await activeExtensions()).find((row) => row.manifest.id === id);
   const page = extension?.manifest.contributes.serverPages.find((row) => row.id === pageId);
   if (!extension || !page) throw FlutterError.notFound("Extension page not found or disabled");
@@ -419,11 +423,16 @@ export async function renderExtensionPage(id: string, pageId: string) {
   const boot = glue
     ? `<script type="module">${wasmBootstrap(asset(glue), asset(page.entry))}</script>`
     : `<script type="module" src="${escapeHtml(asset(page.entry, "build=1&"))}"></script>`;
+  // Whitelisted, so it's safe to interpolate. Missing or unknown: leave the
+  // scheme unset and let the SDK apply it on init, as before.
+  const mode = theme === "light" || theme === "dark" ? theme : null;
+  const htmlAttrs = mode ? ` data-theme="${mode}" style="color-scheme: ${mode}"` : "";
+  const schemeMeta = mode ? `\n    <meta name="color-scheme" content="${mode}" />` : "";
   return `<!doctype html>
-<html lang="en">
+<html lang="en"${htmlAttrs}>
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />${schemeMeta}
     <title>${escapeHtml(`${extension.manifest.name}: ${page.label}`)}</title>
     <style>
       html, body { margin: 0; min-height: 100%; }

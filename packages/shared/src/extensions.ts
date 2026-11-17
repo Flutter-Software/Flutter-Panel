@@ -144,14 +144,32 @@ export function extensionWasmGlue(entry: string): string | null {
 /** Source files the panel compiles on the fly when requested (TypeScript / JSX / Svelte). */
 export const EXTENSION_COMPILED_PATTERN = /\.(tsx|ts|jsx|mts|svelte)$/i;
 
-/** Limits for installing an extension from a .zip upload. */
+/**
+ * Limits for installing an extension from a .zip upload.
+ *
+ * The archive is streamed to disk and extracted entry by entry (see
+ * apps/api/src/extension-install.ts), so none of these sizes is ever held in
+ * memory at once.
+ */
 export const EXTENSION_ZIP_LIMITS = {
-  /** Size of the uploaded archive. */
-  maxArchiveBytes: 50 * 1024 * 1024,
-  /** Total size once extracted (zip-bomb guard). */
-  maxExtractedBytes: 200 * 1024 * 1024,
+  /** Size of the uploaded archive: 2 GiB. Matches nginx `client_max_body_size 2G`. */
+  maxArchiveBytes: 2 * 1024 * 1024 * 1024,
+  /**
+   * Total size once extracted (zip-bomb guard): 3 GiB. Above the archive limit
+   * so a zip of already-compressed assets (models, images) still fits.
+   */
+  maxExtractedBytes: 3 * 1024 * 1024 * 1024,
+  /** Largest extension "Download as .zip" exports: 200 MiB. That path still builds the zip in memory. */
+  maxExportBytes: 200 * 1024 * 1024,
   maxFiles: 5_000,
 } as const;
+
+/** Human-readable size for limit messages: `2 GB`, `200 MB`. Binary units. */
+export function formatExtensionLimit(bytes: number) {
+  const gib = bytes / 1024 ** 3;
+  if (gib >= 1) return `${Number.isInteger(gib) ? gib : gib.toFixed(1)} GB`;
+  return `${Math.round(bytes / 1024 ** 2)} MB`;
+}
 
 /**
  * Path to a file inside the extension folder. Relative, forward slashes, no

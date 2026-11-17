@@ -30,6 +30,7 @@ import {
 import {
   EXTENSION_PERMISSIONS,
   EXTENSION_ZIP_LIMITS,
+  formatExtensionLimit,
   type AdminExtension,
   type ExtensionManifest,
   type ExtensionPermission,
@@ -57,15 +58,6 @@ type UploadPayload = {
 };
 
 /** Reads a File as base64 (without the data: URL prefix). */
-function fileToBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read the file"));
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
-    reader.readAsDataURL(file);
-  });
-}
-
 /**
  * Extension status in Rack terms: `text` colours the status word, `rail` the
  * 3px strip on the row's left edge and the LED dot (DESIGN.md -> LED rail).
@@ -175,14 +167,17 @@ export default function AdminExtensionsPage() {
       return;
     }
     if (file.size > EXTENSION_ZIP_LIMITS.maxArchiveBytes) {
-      setActionError(`That zip is larger than ${Math.round(EXTENSION_ZIP_LIMITS.maxArchiveBytes / 1024 / 1024)} MB.`);
+      setActionError(`That zip is larger than ${formatExtensionLimit(EXTENSION_ZIP_LIMITS.maxArchiveBytes)}.`);
       return;
     }
     setUploadProgress(0);
     try {
-      const contentBase64 = await fileToBase64(file);
+      // The file itself is the request body: the browser streams it from disk,
+      // so a 2 GB zip never has to fit in memory. `replace` rides in the query.
       const send = (replace: boolean) =>
-        apiUpload<UploadPayload>(`${PATH}/upload`, { contentBase64, replace }, (ratio) => setUploadProgress(ratio));
+        apiUpload<UploadPayload>(`${PATH}/upload${replace ? "?replace=1" : ""}`, file, (ratio) =>
+          setUploadProgress(ratio),
+        );
       let result: UploadPayload;
       try {
         result = await send(false);

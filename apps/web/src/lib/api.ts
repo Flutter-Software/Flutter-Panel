@@ -169,16 +169,22 @@ function invalidateMutating(path: string) {
   if (clean.includes("/admin/eggs")) invalidateQuery("/api/v1/admin/nests");
 }
 
+/**
+ * POST with upload progress. A `Blob`/`File` body is sent as-is (the browser
+ * streams it from disk, so its size isn't limited by memory or string length);
+ * anything else is sent as JSON.
+ */
 export function apiUpload<T>(
   path: string,
   body: unknown,
   onProgress?: (ratio: number) => void,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    const raw = body instanceof Blob ? body : null;
     const xhr = new XMLHttpRequest();
     xhr.open("POST", path);
     xhr.withCredentials = true;
-    xhr.setRequestHeader("content-type", "application/json");
+    xhr.setRequestHeader("content-type", raw ? raw.type || "application/octet-stream" : "application/json");
     const csrf = csrfToken();
     if (csrf) xhr.setRequestHeader(CSRF_HEADER, csrf);
     xhr.setRequestHeader(IDEMPOTENCY_HEADER, newIdempotencyKey());
@@ -202,7 +208,7 @@ export function apiUpload<T>(
     };
     xhr.onerror = () => reject(new HttpError("Upload failed", 503, "UNAVAILABLE"));
     xhr.onabort = () => reject(new Error("Upload cancelled"));
-    xhr.send(JSON.stringify(body));
+    xhr.send(raw ?? JSON.stringify(body));
   });
 }
 

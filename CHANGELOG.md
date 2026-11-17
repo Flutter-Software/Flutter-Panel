@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.74
 
 ### Extensions
+
+Extension zips can be up to 2 GB (was 50 MB) and unpack to up to 3 GB (was 200 MB). The upload is now sent as the file itself and unpacked from disk one file at a time, so a large extension no longer has to fit in the panel's memory, and each file's size and checksum are verified as it is written. `POST /api/v1/admin/extensions/upload` takes the raw `.zip` as the request body, with `?replace=1` to confirm an update; the old JSON body with `contentBase64` is no longer accepted. Password-protected and split zips are rejected with a clear message. Download as .zip stays limited to extensions of 200 MB or less.
 
 Extension pages can render inline with `Flutter.ui.fit()`: no border or fixed-height box, the frame grows with the page and scrolls with the panel like a built-in page. The panel tells the page which part of it is on screen (`--flutter-viewport-top` / `--flutter-viewport-height`) so dialogs open where you are looking. Pages that don't call it keep the boxed frame.
 

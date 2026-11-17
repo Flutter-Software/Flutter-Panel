@@ -755,7 +755,9 @@ export function createApp() {
   });
   app.post("/admin/extensions/upload", async (c) => {
     const session = await requireAdminSession(c);
-    return c.json({ data: await extensions.installExtensionFromZip(await c.req.json(), session.user.id) }, 201);
+    // Body is the raw .zip (streamed, never buffered); `?replace=1` confirms an update.
+    const replace = c.req.query("replace") === "1";
+    return c.json({ data: await extensions.installExtensionFromUpload(c.req.raw, replace, session.user.id) }, 201);
   });
   app.delete("/admin/extensions/:id", async (c) => {
     const session = await requireAdminSession(c);
@@ -784,7 +786,8 @@ export function createApp() {
     });
   });
   app.get("/extensions/:id/pages/:pageId", async (c) => {
-    const html = await extensions.renderExtensionPage(c.req.param("id"), c.req.param("pageId"));
+    // ?theme= lets the page paint with the panel's color-scheme from the first frame (no white flash).
+    const html = await extensions.renderExtensionPage(c.req.param("id"), c.req.param("pageId"), c.req.query("theme"));
     return c.body(html, 200, { ...extensions.EXTENSION_ASSET_HEADERS, "Content-Type": "text/html; charset=utf-8" });
   });
   app.get("/extensions/:id/assets/*", async (c) => {
