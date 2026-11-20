@@ -41,7 +41,9 @@ export function isLoopbackHost(value: string) {
   } else if (/^\d{1,3}(\.\d{1,3}){3}(?::\d+)?$/.test(host) || host.startsWith("localhost:")) {
     host = host.split(":")[0] ?? host;
   }
-  return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" || host === "";
+  // The whole 127.0.0.0/8 block is loopback, not just 127.0.0.1.
+  if (/^127(\.\d{1,3}){3}$/.test(host)) return true;
+  return host === "localhost" || host === "0.0.0.0" || host === "::1" || host === "";
 }
 
 export function isLoopbackUrl(value: string) {

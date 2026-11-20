@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import {
   FlutterError,
   allocationUpdateSchema,
+  bareHost,
   hasServerPermission,
+  isLoopbackHost,
+  isPublicHost,
   lastExitSchema,
   powerActionSchema,
   serverCreateSchema,
@@ -110,6 +113,52 @@ function allocationBrowserUrl(row: { ip: string; alias?: string | null; port: nu
     return `${scheme}://${wrapped}`;
   }
   return `${scheme}://${wrapped}:${row.port}`;
+}
+
+/**
+ * Pick the address SFTP clients should connect to for a server.
+ *
+ * The daemon's SFTP listener lives on the node, so the answer must be an
+ * address of that node that is reachable from the public internet. The node
+ * FQDN is the natural choice, but it is often `127.0.0.1` (daemon on the panel
+ * machine) or a LAN / Tailscale address (the panel reaches the node privately).
+ * Advertising those gives users an address they cannot connect to, so each
+ * candidate is checked with `isPublicHost` and the first one that passes wins:
+ *
+ *   1. The node FQDN.
+ *   2. The daemon's listen URL, only when it is a public IP literal. Hostnames
+ *      are skipped here because they are usually HTTP tunnels (Cloudflare),
+ *      which do not carry SFTP.
+ *   3. The server's primary allocation alias, then its IP. Both are addresses
+ *      the admin assigned on this node for players to connect to.
+ *   4. The panel's own public hostname (`APP_URL`), only when the node FQDN is
+ *      loopback. A loopback FQDN means the daemon shares a machine with the
+ *      panel, so the panel's hostname points at the right host. This is not
+ *      used for LAN / Tailscale nodes, which are a different machine.
+ *
+ * Returns a bare host (no port, no IPv6 brackets), or "" when the node has no
+ * publicly reachable address. Callers must treat "" as "SFTP address not
+ * available" rather than falling back to a private one.
+ */
+function publicSftpHost(
+  node: { fqdn?: string | null; daemonListenUrl?: string | null } | null,
+  allocation: { ip: string; alias?: string | null } | null,
+): string {
+  if (!node) return "";
+
+  const fqdn = bareHost(node.fqdn);
+  const listenHost = bareHost(node.daemonListenUrl);
+  // An IP literal is all digits/dots (IPv4) or contains a colon (IPv6).
+  const listenIsIp = /^[\d.]+$/.test(listenHost) || listenHost.includes(":");
+
+  const candidates = [
+    fqdn,
+    listenIsIp ? listenHost : "",
+    bareHost(allocation?.alias),
+    bareHost(allocation?.ip),
+    fqdn && isLoopbackHost(fqdn) ? bareHost(env().APP_URL) : "",
+  ];
+  return candidates.find((host) => isPublicHost(host)) ?? "";
 }
 
 function allocationIsHttp(eggName: string, eggDescription: string, port: number) {
@@ -236,7 +285,8 @@ export function toClientServer(
     nodeOnline: isNodeOnline(node?.lastHeartbeatAt),
     nodeMaintenance: Boolean(node?.maintenanceMode),
     uploadLimitBytes: uploadLimitBytes(node?.uploadLimitMb),
-    sftpHost: node?.fqdn ?? "",
+    // Always a publicly reachable host, or "" when the node has none.
+    sftpHost: publicSftpHost(node, allocation),
     sftpPort: node?.sftpPort ?? 2022,
   };
 }

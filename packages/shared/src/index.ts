@@ -172,6 +172,7 @@ export {
   type TelemetryBatch,
 } from "./telemetry";
 export { parsePortSpec } from "./ports";
+export { bareHost, isPublicHost, hostForAuthority } from "./network";
 export {
   clientHintsFrom,
   describeDevice,

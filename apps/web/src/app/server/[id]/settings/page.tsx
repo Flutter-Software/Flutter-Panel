@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { useQuery } from "@/lib/query";
 import type { ServerRecord } from "@/lib/types";
 import { can } from "@/lib/access";
+import { hostForAuthority } from "@flutter-software/shared";
 
 export default function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -86,9 +87,14 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
     }
   }
 
-  const sftpHost = server?.sftpHost ?? "";
+  // The API only ever returns a publicly reachable host here, never loopback
+  // or a LAN address. It is "" when the node has no public address configured.
+  // IPv6 literals need brackets before a port can be appended.
+  const sftpHost = server?.sftpHost ? hostForAuthority(server.sftpHost) : "";
   const sftpPort = server?.sftpPort ?? 2022;
   const sftpAddress = sftpHost ? `${sftpHost}:${sftpPort}` : "";
+  // Distinguish "still loading" from "loaded, but nothing public to show".
+  const sftpUnavailable = Boolean(server) && !sftpHost;
   const sftpUsername = user?.username && server?.uuid ? `${user.username}.${server.uuid}` : "";
   const sftpUrl =
     sftpHost && sftpUsername
@@ -166,9 +172,18 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
               onCopy={() => void copyValue("address", sftpAddress)}
             />
           }
-          hint="Connect with FileZilla, WinSCP, or Cyberduck. The password is your panel account password."
+          hint={
+            sftpUnavailable
+              ? "This node has no public address, so SFTP can't be reached from outside its network. An admin needs to set the node's FQDN to a public domain or IP in Admin → Nodes."
+              : "Connect with FileZilla, WinSCP, or Cyberduck. The password is your panel account password."
+          }
         >
-          <Input value={sftpAddress} readOnly className="font-mono" />
+          <Input
+            value={sftpAddress}
+            placeholder={sftpUnavailable ? "Not available" : undefined}
+            readOnly
+            className="font-mono"
+          />
         </Field>
         <Field
           label="SFTP username"
