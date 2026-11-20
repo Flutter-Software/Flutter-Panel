@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useAuth } from "@/components/auth-provider";
-import { Kbd, isModKey, useModKeyLabel } from "@/components/kbd";
+import { Kbd, isModKey, pressedKey, useModKeyLabel } from "@/components/kbd";
 import { ADMIN_NAV, serverNavItems } from "@/components/sidebar";
 import { useSmoothTheme } from "@/components/theme-provider";
 import { serverHomeHref } from "@/lib/access";
@@ -104,7 +104,7 @@ export function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChang
   // Global shortcut lives here so it works even while the menu is closed.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "k" || event.shiftKey || event.altKey) return;
+      if (pressedKey(event) !== "k" || event.shiftKey || event.altKey) return;
       if (!isModKey(event)) return;
       event.preventDefault();
       onOpenChange(!open);

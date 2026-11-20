@@ -32,6 +32,7 @@ import { Button } from "@mantine/core";
 import { cn } from "@/lib/cn";
 import { AdminError } from "@/components/admin-table";
 import { Card } from "@/components/ui";
+import { pressedKey } from "@/components/kbd";
 
 export const SETTINGS_SECTIONS = ["branding", "sso", "mail", "updates", "telemetry"] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
@@ -340,7 +341,7 @@ export function UnsavedChangesBar({
   useEffect(() => {
     if (!visible) return;
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      if ((event.ctrlKey || event.metaKey) && pressedKey(event) === "s") {
         event.preventDefault();
         const form = document.getElementById(formId);
         if (form instanceof HTMLFormElement) form.requestSubmit();

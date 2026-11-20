@@ -61,6 +61,7 @@ import { can } from "@/lib/access";
 import { FILE_UPLOAD_LIMIT_BYTES, formatUploadLimit } from "@flutter-software/shared";
 import { formatBytes } from "@/lib/types";
 import { undoable, type CommitInit } from "@/lib/undoable";
+import { pressedKey } from "@/components/kbd";
 
 type Entry = {
   name: string;
@@ -1694,7 +1695,7 @@ function FilesBrowser({ params }: { params: Promise<{ id: string }> }) {
           tabIndex={0}
           aria-busy={listing}
           onKeyDown={(event: KeyboardEvent<HTMLTableElement>) => {
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+            if ((event.ctrlKey || event.metaKey) && pressedKey(event) === "a") {
               event.preventDefault();
               selectAll(true);
             }

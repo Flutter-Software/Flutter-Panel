@@ -31,6 +31,7 @@ import { Gauge, Save, X } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Rail, type RailTone } from "@/components/status";
 import { cn } from "@/lib/cn";
+import { pressedKey } from "@/components/kbd";
 
 const LANGUAGES: Record<string, string> = {
   ts: "typescript",
@@ -575,7 +576,7 @@ export function FileIdeModal({ path, content, pending, readOnly = false, onSave,
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      if ((event.ctrlKey || event.metaKey) && pressedKey(event) === "s") {
         event.preventDefault();
         void saveRef.current();
       }

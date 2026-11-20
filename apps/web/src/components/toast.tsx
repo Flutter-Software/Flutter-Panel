@@ -44,7 +44,7 @@ import {
   type ReactNode,
 } from "react";
 import { CircleAlert, CircleCheck, Info, TriangleAlert, X, type LucideIcon } from "lucide-react";
-import { Kbd, modKeyLabel } from "@/components/kbd";
+import { Kbd, modKeyLabel, pressedKey } from "@/components/kbd";
 import { cn } from "@/lib/cn";
 
 export type ToastVariant = "error" | "success" | "info" | "warning";
@@ -233,7 +233,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // field (where the user expects the field's own undo).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "z" || event.shiftKey || event.altKey) return;
+      if (pressedKey(event) !== "z" || event.shiftKey || event.altKey) return;
       if (!(event.metaKey || event.ctrlKey)) return;
       if (isEditableTarget(event.target)) return;
       const latest = [...itemsRef.current].reverse().find((item) => !item.leaving && item.action?.undo);

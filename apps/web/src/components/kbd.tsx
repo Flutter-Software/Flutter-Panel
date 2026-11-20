@@ -39,6 +39,19 @@ export function useModKeyLabel() {
 }
 
 /** True when the event carries the platform's primary modifier (⌘ or Ctrl). */
+/**
+ * The pressed key in lowercase, or "" when the event carries none.
+ *
+ * `event.key` is typed as always present, but browsers and password managers
+ * dispatch synthetic `keydown` events without it when they autofill a field
+ * (most visibly when a login form is refilled after a wrong password). Calling
+ * `event.key.toLowerCase()` on those throws, so every shortcut handler must
+ * read the key through this instead.
+ */
+export function pressedKey(event: { key?: string | null }): string {
+  return typeof event.key === "string" ? event.key.toLowerCase() : "";
+}
+
 export function isModKey(event: KeyboardEvent | { metaKey: boolean; ctrlKey: boolean }) {
   return detectApple() ? event.metaKey : event.ctrlKey;
 }
