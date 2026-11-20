@@ -44,7 +44,8 @@ export const TELEMETRY_DETAILS_MAX = 4_000;
 export const TELEMETRY_CONTEXT_MAX = 4_000;
 
 export const telemetryErrorPropsSchema = z.object({
-  source: z.enum(["api", "web", "process", "log"]),
+  // "daemon" errors happen on a node (SFTP, ...) and are relayed by the panel.
+  source: z.enum(["api", "web", "process", "log", "daemon"]),
   kind: z.string().max(32).optional(),
   code: z.string().max(32).optional(),
   name: z.string().max(80).optional(),
@@ -88,6 +89,49 @@ export const telemetryClientErrorSchema = z.object({
   kind: z.enum(["boundary", "window", "rejection"]).optional(),
   userAgent: z.string().trim().max(200).optional(),
 });
+
+/** Most error reports a daemon may send to the panel in one request. */
+export const DAEMON_ERROR_BATCH_MAX = 20;
+export const DAEMON_ERROR_MESSAGE_MAX = 1_000;
+
+/**
+ * One error a daemon observed on its node.
+ *
+ * The daemon has no telemetry connection of its own: it posts these to the
+ * panel (`POST /api/v1/daemon/errors`), which forwards them as telemetry
+ * `error` events with `source: "daemon"` if the admin has telemetry on.
+ *
+ * Reports must already be free of file paths, usernames and server ids; the
+ * daemon scrubs them before sending and the panel redacts again.
+ */
+export const daemonErrorReportSchema = z.object({
+  /** Subsystem the error came from, e.g. "sftp". */
+  kind: z.string().trim().min(1).max(32),
+  /** Operation that failed, e.g. "WRITE" or "RENAME". */
+  op: z.string().trim().min(1).max(32),
+  /** Errno-style code, e.g. "ENOSPC", or "UNKNOWN". */
+  code: z.string().trim().min(1).max(32),
+  name: z.string().trim().max(80).optional(),
+  message: z.string().trim().max(DAEMON_ERROR_MESSAGE_MAX),
+  /** Only sent for unexpected (non-filesystem) errors. */
+  stack: z.string().max(TELEMETRY_STACK_MAX).optional(),
+  /** How many times this happened since the previous report of the same error. */
+  count: z.number().int().min(1).max(1_000_000).optional(),
+  /** `process.platform` of the node. */
+  platform: z.string().trim().max(32).optional(),
+  /** Daemon version. */
+  version: z.string().trim().max(32).optional(),
+  /** ISO time of the most recent occurrence. */
+  ts: z.string().min(1).max(40).optional(),
+});
+
+export const daemonErrorBatchSchema = z.object({
+  nodeId: z.string().min(1).max(64),
+  errors: z.array(daemonErrorReportSchema).min(1).max(DAEMON_ERROR_BATCH_MAX),
+});
+
+export type DaemonErrorReport = z.infer<typeof daemonErrorReportSchema>;
+export type DaemonErrorBatch = z.infer<typeof daemonErrorBatchSchema>;
 
 export type TelemetryHeartbeatProps = z.infer<typeof telemetryHeartbeatPropsSchema>;
 export type TelemetryDownloadProps = z.infer<typeof telemetryDownloadPropsSchema>;

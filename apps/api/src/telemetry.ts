@@ -21,6 +21,7 @@ import {
   telemetryBatchSchema,
   telemetryClientErrorSchema,
   telemetryErrorText,
+  type DaemonErrorReport,
   type TelemetryDownloadProps,
   type TelemetryErrorProps,
   type TelemetryEvent,
@@ -319,6 +320,38 @@ export function trackProcessError(label: string, error: unknown) {
     message: redactTelemetryText(`${label}: ${telemetryErrorText(error)}`, TELEMETRY_MESSAGE_MAX),
     stack: sanitizeStack(error instanceof Error ? error.stack : undefined),
     cause: formatErrorCause(error),
+    version: PANEL_VERSION,
+    runtime: runtimeLabel(),
+  };
+  track("error", props);
+}
+
+/**
+ * Forward one error a node's daemon reported (SFTP failures and the like).
+ *
+ * The daemon scrubs paths and ids before sending; the text is redacted again
+ * here so the same rules apply to everything that leaves the panel. Nothing
+ * identifying the node is attached: only the operation, the errno-style code
+ * and the node's platform.
+ */
+export function trackDaemonError(report: DaemonErrorReport) {
+  const kind = report.kind.slice(0, 32);
+  const props: TelemetryErrorProps = {
+    source: "daemon",
+    kind,
+    code: report.code.slice(0, 32),
+    // Name the group after the subsystem and operation ("sftp WRITE") so the
+    // list reads well and each operation gets its own group.
+    name: `${kind} ${report.op}`.slice(0, 80),
+    message: redactTelemetryText(report.message, TELEMETRY_MESSAGE_MAX),
+    stack: sanitizeStack(report.stack),
+    context: contextText({
+      op: report.op,
+      errorName: report.name,
+      count: report.count ?? 1,
+      platform: report.platform,
+      daemonVersion: report.version,
+    }),
     version: PANEL_VERSION,
     runtime: runtimeLabel(),
   };

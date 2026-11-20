@@ -3,6 +3,7 @@ import {
   heartbeatSchema,
   daemonServerStateSchema,
   daemonConfigSaveSchema,
+  daemonErrorBatchSchema,
   hasServerPermission,
   lastExitSchema,
   PANEL_VERSION,
@@ -22,6 +23,8 @@ import {
   rememberNodeOnline,
 } from "./panel-hub";
 import { getConsoleTag } from "./settings";
+import { log } from "./log";
+import { trackDaemonError } from "./telemetry";
 
 export type InstallSpec = {
   uuid: string;
@@ -748,7 +751,64 @@ export async function probeNodeHealth(nodeId: string) {
   };
 }
 
-const SFTP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Error reports accepted from one node per minute. Extra reports are dropped. */
+const DAEMON_ERRORS_PER_MIN = 120;
+const daemonErrorWindows = new Map<string, { started: number; count: number }>();
+
+/** Fixed one-minute window per node. Returns how many more reports it may send. */
+function daemonErrorBudget(nodeId: string) {
+  const now = Date.now();
+  let window = daemonErrorWindows.get(nodeId);
+  if (!window || now - window.started > 60_000) {
+    window = { started: now, count: 0 };
+    daemonErrorWindows.set(nodeId, window);
+  }
+  return { window, remaining: Math.max(0, DAEMON_ERRORS_PER_MIN - window.count) };
+}
+
+/**
+ * `POST /daemon/errors`: a node's daemon reporting errors it hit (SFTP today).
+ *
+ * Each report is written to the API log, so an admin can see why a user's
+ * transfer failed, and forwarded to telemetry as a `source: "daemon"` error.
+ * Telemetry applies its own opt-out, so nothing leaves the panel when the
+ * admin has turned it off.
+ */
+export async function reportErrors(c: Context) {
+  const parsed = daemonErrorBatchSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw FlutterError.validation("Invalid error report", parsed.error.flatten());
+  }
+  const token = readBearerToken(c.req.header("authorization"));
+  const node = await authenticateNodeToken(token, parsed.data.nodeId);
+  const nodeId = node._id.toString();
+
+  const { window, remaining } = daemonErrorBudget(nodeId);
+  const accepted = parsed.data.errors.slice(0, remaining);
+  window.count += accepted.length;
+
+  for (const report of accepted) {
+    // telemetry: false, because trackDaemonError below sends the richer event;
+    // letting the logger forward it too would report every error twice.
+    log(
+      "warn",
+      "daemon error",
+      {
+        node: node.name,
+        kind: report.kind,
+        op: report.op,
+        code: report.code,
+        error: report.message,
+        count: report.count ?? 1,
+      },
+      { telemetry: false },
+    );
+    trackDaemonError(report);
+  }
+  return { ok: true, accepted: accepted.length, dropped: parsed.data.errors.length - accepted.length };
+}
+
+const SFTP_UUID =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseSftpUsername(raw: string) {
   const trimmed = raw.trim();
